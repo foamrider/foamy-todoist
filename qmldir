@@ -1,0 +1,6 @@
+singleton TodoStore 1.0 TodoStore.qml
+Panel 1.0 Panel.qml
+TodoView 1.0 TodoView.qml
+TaskRow 1.0 TaskRow.qml
+TodoSettings 1.0 TodoSettings.qml
+PlainText 1.0 PlainText.qml

@@ -1,0 +1,1170 @@
+"""Run the real plugin, store and UI in foamy-kit's isolated offscreen shell.
+
+The helper is a stand-in (TodoStore.helperCommand): a shell script that logs
+each call with its standard input to $FOAMY_OUT/calls.log and answers with
+$FOAMY_OUT/reply-<command>.json (after $FOAMY_OUT/slow-<command> seconds;
+with $FOAMY_OUT/exit-<command> as its exit status instead, when that file
+is not empty). Nothing reaches Todoist or a keyring.
+
+  python3 tests/runtime.py
+
+The host is Omarchy 4.5, the installed /usr/share/omarchy/shell
+(FOAMY_HOST_45 picks another 4.5 tree).
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+plugin = Path(__file__).resolve().parents[1]
+# FOAMY_KIT, else the sibling checkout, else the usual one.
+kit = Path(
+    os.environ.get("FOAMY_KIT")
+    or next(
+        (p for p in (plugin.parent / "foamy-kit", Path.home() / "GitHub/Personal/foamy-kit") if p.is_dir()),
+        plugin.parent / "foamy-kit",
+    )
+)
+os.environ.setdefault("FOAMY_HOST_45", "/usr/share/omarchy/shell")
+sys.path.insert(0, str(kit / "preview"))
+import harness  # noqa: E402
+
+FAKE_HELPER = r"""
+cmd=$1
+out=$FOAMY_OUT
+input=$(cat)
+printf '%s %s\n' "$cmd" "$input" >>"$out/calls.log"
+if [ -s "$out/slow-$cmd" ]; then sleep "$(cat "$out/slow-$cmd")"; fi
+if [ -s "$out/exit-$cmd" ]; then exit "$(cat "$out/exit-$cmd")"; fi
+cat "$out/reply-$cmd.json"
+"""
+
+SHELL = r"""
+import QtQuick
+import QtTest
+import Quickshell
+import Quickshell.Io
+import "harness"
+import "plugin" as Plugin
+import "plugin/kit" as Kit
+import "plugin/preview/Fixtures.js" as Fixtures
+import "plugin/Model.js" as Model
+ShellRoot {
+  id: shell
+  property int step: 0
+  property bool finished: false
+  property int frames: 0
+  property int drawTarget: 0
+  property var entry: ({})
+  property int callsBefore: 0
+  property int queuedAdds: 0
+  property real rowY: 0
+  property var ipcPanel: null
+  property string expectedUrl: ""
+  property string ringTask: ""
+  property real oneLineX: 0
+  property bool othersChecked: false
+  // The store's wall clock: moved by setting `clock.at`, which (like a real
+  // clock) notifies nothing, so only the store's own checks see it.
+  property var clock: ({ at: new Date(2026, 10, 18, 12, 0, 0) })
+  readonly property string unknownText: "Todoist didn't answer. The task may have been added: check the list before adding it again."
+  // A task row's vertical layout: "" when the text block has the same space
+  // above and below (±1px) and the ring and the time are centred on it;
+  // else what is off.
+  function rowGeometry(row) {
+    var surface = shell.find(row, "taskSurface");
+    var text = shell.find(row, "taskText");
+    var detail = shell.find(row, "taskDetail");
+    var y = function(item, at) { return item.mapToItem(surface, 0, at).y; };
+    var top = y(text, 0);
+    var bottom = detail.visible ? y(detail, detail.height) : y(text, text.height);
+    var middle = (top + bottom) / 2;
+    var ring = shell.find(row, "ringMark");
+    var time = shell.find(row, "taskTime");
+    var off = [];
+    if (Math.abs(top - (surface.height - bottom)) > 1) off.push("padding " + top + " above, " + (surface.height - bottom) + " below");
+    if (Math.abs(y(ring, ring.height / 2) - middle) > 1) off.push("ring at " + y(ring, ring.height / 2) + ", text block at " + middle);
+    if (time.visible && Math.abs(y(time, time.height / 2) - middle) > 1) off.push("time at " + y(time, time.height / 2) + ", text block at " + middle);
+    return off.join("; ");
+  }
+  // switchPanel calls from the popup's view.
+  property int switches: 0
+  Connections {
+    target: one ? one.popup.bodyItem : null
+    ignoreUnknownSignals: true
+    function onSwitchPanel() { shell.switches++; }
+  }
+  // Every launch the stand-in openers saw: their argv, the program by its name.
+  FileView { id: openLog; path: shell.out + "/opened.log"; blockAllReads: true; printErrors: false }
+  function opened() {
+    openLog.reload();
+    var text = openLog.text();
+    return text ? text.split("\n").filter(function(line) { return line !== ""; }).map(function(line) { return line.split("\t"); }) : [];
+  }
+  property int lateAdd: -1
+  property int afterAdd: -1
+  // The bar instances; tests unload them to check nothing polls without one.
+  property bool panelsAlive: true
+  readonly property var one: oneLoader.item
+  readonly property var two: twoLoader.item
+  // Every add that settled: {request, ok, message}.
+  property var settled: []
+  readonly property string capText: "Too many changes are waiting. Try again in a moment."
+  readonly property string truncatedText: "Showing part of your tasks: the account has more than this panel keeps"
+  readonly property string out: Quickshell.env("FOAMY_OUT")
+  // A fixed Wednesday: Upcoming's groups depend on the weekday.
+  readonly property string today: "2026-11-18"
+  TestEvent { id: ev }
+  FoamyWait { id: wait }
+  FileView { id: writer; blockWrites: true; printErrors: false }
+  function put(name, text) { writer.path = shell.out + "/" + name; writer.setText(text); }
+  // The Omarchy language picker's file (the kit's translations follow it).
+  FileView { id: languageFile; path: Quickshell.env("OMARCHY_LANGUAGE_FILE"); blockWrites: true; printErrors: false }
+  function pickLanguage(code) { languageFile.setText(code + "\n"); }
+  // The add error under the field: "" when it shows whole (wrapped, not
+  // elided, the width of the field's row) and the key hint is out of its
+  // way; else what is wrong.
+  function addErrorLayout(view, text) {
+    var line = shell.find(view, "addErrorLine");
+    var hint = shell.find(view, "fieldHint");
+    var off = [];
+    if (!line.visible || line.text !== text) off.push("the line reads " + JSON.stringify(line.text) + " (visible " + line.visible + ")");
+    if (line.truncated) off.push("elided");
+    if (line.width + 1 < view.field.width - Kit.FoamyStyle.rowPadding * 2) off.push("width " + line.width + " of " + view.field.width);
+    if (line.contentWidth > line.width + 1) off.push("text " + line.contentWidth + " wider than " + line.width);
+    if (hint.visible) off.push("the key hint shows beside it");
+    return off.join("; ");
+  }
+  FileView { id: callLog; path: shell.out + "/calls.log"; blockAllReads: true; printErrors: false }
+  function calls(command) {
+    callLog.reload();
+    var text = callLog.text();
+    var all = text ? text.split("\n").filter(function(line) { return line !== ""; }) : [];
+    return command ? all.filter(function(line) { return line.split(" ")[0] === command; }) : all;
+  }
+  function snapshot(drop) {
+    var reply = Fixtures.snapshot(shell.today);
+    reply.tasks = reply.tasks.concat(Fixtures.upcomingExtras(shell.today));
+    // Nobody else's tasks unless a step assigns one (they'd be hidden).
+    reply.tasks = reply.tasks.map(function(task) { return Object.assign({}, task, { responsible_uid: null }); });
+    reply.ok = true;
+    reply.synced_at = new Date().toISOString();
+    reply.tasks = reply.tasks.filter(function(task) { return (drop || []).indexOf(task.id) < 0; });
+    return reply;
+  }
+  function check(ok, message) {
+    if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
+    return ok;
+  }
+  function find(item, name) {
+    if (!item) return null;
+    if (item.objectName === name) return item;
+    for (var child of item.children) { var hit = find(child, name); if (hit) return hit; }
+    return null;
+  }
+  // The task rows the list has built, and those with the cursor.
+  function builtRows(view) {
+    return view.list.contentItem.children.filter(function(item) { return item.hasOwnProperty("entry") && item.visible && item.isTask; });
+  }
+  function highlighted(view) {
+    return shell.builtRows(view).filter(function(row) { return row.hasCursor; });
+  }
+  FloatingWindow {
+    implicitWidth: 1920; implicitHeight: 1080
+    ScreenSim { }
+    Item {
+      id: frameProbe
+      Connections {
+        target: frameProbe.Window.window
+        function onFrameSwapped() {
+          shell.frames++;
+          if (shell.frames < shell.drawTarget) frameProbe.Window.window.update();
+        }
+      }
+    }
+    Loader {
+      id: oneLoader
+      active: shell.panelsAlive
+      x: 1400; y: 4; width: 60; height: 26
+      sourceComponent: Plugin.Panel { settings: shell.entry }
+      onLoaded: { item.bar = bar; item.moduleName = "foamy.todoist"; }
+    }
+    Loader {
+      id: twoLoader
+      active: shell.panelsAlive
+      x: 1470; y: 4; width: 60; height: 26
+      sourceComponent: Plugin.Panel { settings: shell.entry }
+      onLoaded: { item.bar = bar; item.moduleName = "foamy.todoist"; }
+    }
+  }
+  // A row on its own, to give it one entry after another (as a reused
+  // delegate gets them).
+  Plugin.TaskRow {
+    id: probeRow
+    width: 400
+    height: 42
+    entry: shell.probeEntry({})
+  }
+  function probeEntry(extra) {
+    return Object.assign({ kind: "task", key: "task:p", id: "p", text: "Gjøre ting", priority: 1, priorityRole: "muted", depth: 0,
+      dueDay: "", dueTime: "", dateKind: "", overdue: false, recurring: false, showProject: false, projectName: "", projectRole: "muted",
+      labels: [], struck: false, unconfirmed: false, assignee: "", detail: false }, extra);
+  }
+  MockBar {
+    id: bar
+    onSavedChanged: if (saved.length) shell.entry = saved[saved.length - 1].settings
+  }
+  Component.onCompleted: {
+    var store = Plugin.TodoStore;
+    store.helperCommand = function(args) {
+      return ["sh", "-c", Quickshell.env("FAKE_HELPER"), "fake-helper"].concat(args);
+    };
+    store.now = function() { return new Date(shell.clock.at.getTime()); };
+    store.updateToday();
+    shell.advance();
+  }
+  Connections {
+    target: Plugin.TodoStore
+    function onAddFinished(request, ok, message) { shell.settled = shell.settled.concat([{ request: request, ok: ok, message: message }]); }
+  }
+  function gate(n) {
+    var store = Plugin.TodoStore;
+    var view = one ? one.popup.bodyItem : null;
+    switch (n) {
+    case 0: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "the first status"];
+    case 1: return [function() { return one.popup.bodyItem !== null; }, 10000, "the popup opened"];
+    case 2: return [function() { return store.signedIn && store.syncing; }, 15000, "signed in, syncing"];
+    case 3: return [function() { return store.loaded && !store.busy; }, 15000, "the first sync"];
+    case 4: return [function() { return view && view.active; }, 10000, "the reopened popup"];
+    case 5: return [function() { return view.fieldFocused; }, 10000, "the field has the keys"];
+    case 6: return [function() { return view.fieldFocused; }, 10000, "a opened the field"];
+    case 9: return [function() { return shell.calls("apply").length === 1 && !store.busy && Object.keys(store.sending).length === 0; }, 15000, "the completion was sent when the undo window ended"];
+    case 10: return [function() { return shell.calls("apply").length >= 2 && !store.busy; }, 15000, "the move to tomorrow was sent"];
+    case 12: return [function() { return view.view === "upcoming" && view.list.count > 0; }, 10000, "Upcoming shown"];
+    case 13: return [function() { return view.fieldFocused; }, 10000, "the field opened in Upcoming"];
+    case 15: return [function() { return shell.calls("add").length === shell.callsBefore + 1 && !view.addBusy && !store.busy; }, 15000, "the add from the field"];
+    case 17: return [function() { var opened = shell.ipcPanel && shell.ipcPanel.popup.bodyItem; return opened && opened.active && opened.fieldFocused; }, 10000, "the popup opened by IPC add"];
+    case 18: return [function() { return store.error !== "" && !store.busy; }, 15000, "the failed sync"];
+    case 19: return [function() { return one.wide && view.wide; }, 10000, "the wide setting"];
+    case 20: return [function() { return store.model.truncated && !store.busy; }, 15000, "a truncated snapshot"];
+    case 21: return [function() { return !!store.unconfirmed && store.unconfirmed.t2 === true && store.syncing; }, 15000, "a failed completion is unconfirmed while the sync runs"];
+    case 22: return [function() { return !store.busy && !store.unconfirmed.t2; }, 15000, "the sync after the failed completion"];
+    case 23: return [function() { return view && !view.addBusy && store.retryUntil > Date.now(); }, 15000, "the rate-limited add"];
+    case 24: return [function() { return !store.busy && !view.addBusy && Object.keys(store.sending).length === 0; }, 5000, "the jobs refused while rate limited settled"];
+    case 25: return [function() { return store.account === "signed_out" && !store.busy && !view.addBusy; }, 20000, "signed out with a full queue"];
+    case 26: return [function() { return !store.tokenBusy && store.tokenError !== ""; }, 15000, "the refused token"];
+    case 27: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again"];
+    case 28: return [function() { return shell.calls("add").length >= 1 && !view.addBusy && !store.busy; }, 15000, "an add after signing in again"];
+    case 29: return [function() { return one === null && !store.busy; }, 15000, "the sync that ends after the bar is gone"];
+    case 30: return [function() { return one !== null && two !== null && Kit.FoamyShared.memberCount("todoist") === 2; }, 10000, "the bar is back"];
+    case 31: return [function() { return view && view.active; }, 10000, "the popup for autocomplete"];
+    case 32: return [function() { return view.fieldFocused; }, 10000, "the add field for autocomplete"];
+    case 33: return [function() { return shell.calls("add").length === shell.callsBefore + 1 && !view.addBusy && !store.busy; }, 15000, "the add after autocomplete"];
+    case 34: return [function() { return view.fieldFocused; }, 10000, "the add field for sections and people"];
+    case 35: return [function() { return shell.opened().length === 1 && !store.launchRunning; }, 15000, "the footer opened Todoist"];
+    case 36: return [function() { return shell.opened().length === 2 && !store.launchRunning; }, 15000, "Enter opened a task with the open command"];
+    case 37: return [function() { return shell.opened().length === 3 && !store.launchRunning; }, 15000, "Open in Todoist with the command, the link appended"];
+    case 38: return [function() { return store.launchError !== "" && !store.launchRunning; }, 15000, "a launch that failed"];
+    case 39: return [function() { return store.launchError === "" && shell.opened().length === 5 && !store.launchRunning; }, 15000, "the next launch worked"];
+    case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide; }, 10000, "the standard popup again"];
+    case 41: return [function() { return view.fieldFocused; }, 10000, "the empty field, to click away from"];
+    case 42: return [function() { return view.fieldFocused; }, 10000, "the empty field again"];
+    case 43: return [function() { return view.fieldFocused; }, 10000, "the field for search and drafts"];
+    case 44: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.fieldFocused; }, 10000, "the reopened popup with the draft"];
+    case 45: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the reopened popup after Esc"];
+    case 46: return [function() { return view.fieldFocused; }, 10000, "the field for a draft before search"];
+    case 48: return [function() { return view.view === "today" && shell.builtRows(view).length >= 4; }, 10000, "Today again, on reused rows"];
+    case 49: return [function() { return view.fieldFocused; }, 10000, "the field for an add that ends after closing"];
+    case 50: return [function() { return !view.addBusy && !one.opened; }, 15000, "the add's reply, the popup closed"];
+    case 51: return [function() { return one.opened && view.active; }, 10000, "the reopened popup"];
+    case 52: return [function() { return view.fieldFocused; }, 10000, "the field for an add edited after submitting"];
+    case 53: return [function() { return !view.addBusy && !one.opened; }, 15000, "the second add's reply"];
+    case 54: return [function() { return one.opened && view.active && view.fieldFocused; }, 10000, "the reopened popup with the edit"];
+    case 55: return [function() { return !view.addBusy && !store.busy && shell.calls("sync").length > shell.callsBefore; }, 15000, "an add with an unknown outcome, then a sync"];
+    case 56: return [function() { return Kit.FoamyI18n.language === "no" && view.fieldFocused; }, 10000, "Norwegian"];
+    case 57: return [function() { return !view.addBusy && !store.busy && shell.calls("add").length > shell.callsBefore; }, 15000, "the add with an unknown outcome in Norwegian"];
+    case 58: return [function() { return shell.othersChecked && store.othersTasks === "hide" && Kit.FoamyI18n.language === "en"; }, 10000, "the setting shown, then back to hide"];
+    case 59: return [function() { return view.fieldFocused; }, 10000, "the field for an add across two monitors"];
+    case 60: return [function() { var v = two.popup.bodyItem; return two.opened && v && v.active && v.fieldFocused; }, 10000, "the other monitor's popup with the draft"];
+    case 61: return [function() { var v = two.popup.bodyItem; return !store.busy && !v.addBusy && shell.calls("add").length > shell.callsBefore; }, 15000, "the add from the first monitor answered"];
+    case 62: return [function() { return !store.busy; }, 15000, "the sync of the poll after midnight"];
+    case 63: return [function() { return !store.busy && shell.calls("sync").length > shell.callsBefore; }, 15000, "a sync reply after another midnight"];
+    case 64: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    }
+    return null;
+  }
+  // Two frames, so layouts and deferred calls of the last step are done,
+  // then the next step's gate, then the step.
+  function advance() {
+    if (shell.finished) return;
+    if (!frameProbe.Window.window) {
+      wait.waitFor(function() { return frameProbe.Window.window; }, 10000, function(ok) { if (check(ok, "the window exists")) shell.advance(); });
+      return;
+    }
+    shell.drawTarget = shell.frames + 2;
+    // Keys go to the active window (the panel's focus needs it).
+    frameProbe.Window.window.requestActivate();
+    frameProbe.Window.window.update();
+    wait.waitFor(function() { return shell.frames >= shell.drawTarget; }, 10000, function(ok) {
+      if (!check(ok, "step " + shell.step + ": frames were drawn")) return;
+      var gate = shell.gate(shell.step) || [function() { return true; }, 0, ""];
+      wait.waitFor(gate[0], gate[1], function(ready) {
+        var store = Plugin.TodoStore;
+        if (!check(ready, "step " + shell.step + ": " + gate[2] + ": not true after " + gate[1] + " ms (account " + store.account + ": " + store.accountError + "; error " + store.error + "; calls " + JSON.stringify(shell.calls()) + ")")) return;
+        shell.run();
+        shell.advance();
+      });
+    });
+  }
+  function run() {
+    var store = Plugin.TodoStore;
+    var view = one ? one.popup.bodyItem : null;
+    var button = one ? one.children.find(function(item) { return item.objectName === "todoistButton"; }) : null;
+    switch (shell.step++) {
+    case 0:
+      // Signed out: the bar is the icon alone.
+      if (!check(Kit.FoamyShared.memberCount("todoist") === 2, "two monitor instances share the store")) return;
+      if (!check(!one.barContent.countLabel.visible && button.tooltipText === "Todoist: not signed in", "no count while signed out (" + button.tooltipText + ")")) return;
+      if (!check(!store.polling, "nothing polls while signed out")) return;
+      one.open();
+      break;
+    case 1:
+      if (!check(shell.find(view, "stateText").text === "Add your Todoist API token in Settings", "signed out: the line (" + shell.find(view, "stateText").text + ")")) return;
+      var open = shell.find(view, "stateButton");
+      if (!check(open.visible && open.text === "Open settings", "signed out: Open settings")) return;
+      if (!check(!view.field.visible && !view.footer.visible, "no field or footer while signed out")) return;
+      one.close();
+      shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+      shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+      shell.put("slow-sync", "1.5");
+      store.check();
+      break;
+    case 2:
+      one.open();
+      break;
+    case 3:
+      // The first sync was still running when the popup opened.
+      if (!check(shell.calls("sync").length === 1, "one sync after signing in (" + JSON.stringify(shell.calls()) + ")")) return;
+      one.close();
+      shell.put("slow-sync", "");
+      wait.after(100, function() { one.open(); });
+      break;
+    case 4:
+      // Reopened: no field, no cursor; the list starts with the add row.
+      if (!check(!view.fieldFocused && !view.fieldOpen && view.cursor.index === -1 && !view.blocked, "nothing has the cursor on open (" + view.cursor.index + ")")) return;
+      if (!check(shell.builtRows(view).length >= 6, "the today rows are built (" + shell.builtRows(view).length + ")")) return;
+      if (!check(shell.highlighted(view).length === 0, "no row highlight on open")) return;
+      var addRow = shell.find(view, "addRow");
+      if (!check(addRow && addRow.visible && shell.find(addRow, "addRowText").text === "Add task" && shell.find(addRow, "addKeyHint").text === "a", "the add row: Add task, key a")) return;
+      if (!check(!shell.find(view, "fieldBox").visible, "the field is closed")) return;
+      if (!check(view.band.meta === "Today · 6 left · 2 overdue", "the band's meta (" + view.band.meta + ")")) return;
+      if (!check(view.band.iconName === "todoist", "the band shows the Todoist mark")) return;
+      // One number, as in foamy-zendesk: left today, in the bar's urgent colour.
+      var count = one.barContent.countLabel;
+      if (!check(count.visible && count.text === "6" && Qt.colorEqual(count.color, bar.urgent) && count.font.family === button.fontFamily, "the bar: 6 in the urgent colour (" + count.text + ", " + count.color + ", " + count.font.family + ")")) return;
+      var texts = one.barContent.children.filter(function(item) { return item.visible && item.hasOwnProperty("text"); });
+      if (!check(texts.length === 1 && one.barContent.overdueLabel === undefined, "no separate overdue number in the bar (" + texts.length + ")")) return;
+      if (!check(button.tooltipText === "Todoist: 6 left today, 2 overdue", "the tooltip (" + button.tooltipText + ")")) return;
+      // Section counts sit at the end of the heading line, where times end.
+      var overdueHead = view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry && item.entry.key === "header:overdue"; });
+      var overdueCount = shell.find(overdueHead, "headerCount");
+      var at = function(item) { return item.mapToItem(view, 0, 0).x; };
+      var timed = shell.builtRows(view).find(function(r) { return r.entry.id === "t3"; });
+      var timeLabel = shell.find(timed, "taskTime");
+      if (!check(overdueCount && timed && timeLabel, "found the count and a timed row (" + !!overdueCount + " " + !!timed + " " + !!timeLabel + " " + (overdueHead && overdueHead.entry.key) + ")")) return;
+      if (!check(overdueCount.text === "2" && Math.abs(at(overdueCount) + overdueCount.width - at(timeLabel) - timeLabel.width) < 1, "the Overdue count ends where the times do (" + (at(overdueCount) + overdueCount.width) + " vs " + (at(timeLabel) + timeLabel.width) + ")")) return;
+      // Nothing left today: the bar shows the mark alone, no "0".
+      var full = store.snapshot;
+      store.snapshot = Object.assign({}, full, { tasks: [] });
+      if (!check(store.counts.today === 0 && one.barContent.countLabel.visible === false, "no count in the bar when nothing is left")) return;
+      var emptyTabs = shell.find(view, "viewSwitch").model;
+      if (!check(emptyTabs[0].count === -1 && emptyTabs[1].count === -1, "no 0 in the tabs either (" + emptyTabs[0].count + ", " + emptyTabs[1].count + ")")) return;
+      store.snapshot = full;
+      if (!check(one.barContent.countLabel.visible && one.barContent.countLabel.text === "6", "the count is back")) return;
+      // The tab row: in the body, right under the band, full width.
+      var tabs = shell.find(view, "viewSwitch");
+      if (!check(tabs && tabs.visible && shell.find(view.band, "viewSwitch") === null, "the tabs are not in the band")) return;
+      var top = function(item) { return item.mapToItem(view, 0, 0).y; };
+      var at = function(item) { return item.mapToItem(view, 0, 0).x; };
+      if (!check(Math.abs(top(tabs) - view.band.height) < 1 && Math.abs(at(tabs)) < 1 && Math.abs(tabs.width - view.width) < 1, "the tabs sit under the band, full width (" + top(tabs) + " vs " + view.band.height + ", " + at(tabs) + "+" + tabs.width + ")")) return;
+      if (!check(tabs.model[0].count === 4 && tabs.model[1].count === 6 && tabs.model[1].countUrgent === true, "the tabs' counts")) return;
+      // Section headers start where the rows' rings do; the add row's
+      // edges are the rows' edges, its icon where the rings are.
+      var header = view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.kind === "header"; });
+      var firstRow = shell.builtRows(view)[0];
+      var ringX = at(shell.find(firstRow, "ringMark"));
+      if (!check(Math.abs(at(shell.find(header, "header")) - ringX) < 1, "a header lines up with the rings (" + at(shell.find(header, "header")) + " vs " + ringX + ")")) return;
+      var surface = shell.find(firstRow, "taskSurface");
+      if (!check(Math.abs(at(addRow) - at(surface)) < 1 && Math.abs(at(addRow) + addRow.width - at(surface) - surface.width) < 1, "the add row's edges are the rows' edges (" + at(addRow) + "+" + addRow.width + " vs " + at(surface) + "+" + surface.width + ")")) return;
+      if (!check(Math.abs(at(shell.find(addRow, "addRowIcon")) - ringX) < 2, "the add row's icon is where the rings are")) return;
+      // ↓ from nothing: the add row; ↑: the tabs; ←, Enter: Inbox.
+      view.moveRequested(0, 1);
+      if (!check(view.cursor.index === view.addStop && addRow.hasCursor, "↓ lands on the add row (" + view.cursor.index + ")")) return;
+      view.moveRequested(0, -1);
+      if (!check(view.cursor.index === view.switchStop && tabs.hasCursor, "↑ from the add row reaches the tabs (" + view.cursor.index + ")")) return;
+      view.moveRequested(-1, 0);
+      view.returnRequested();
+      view.activateRequested();
+      if (!check(view.view === "inbox", "← and Enter on the tabs show Inbox (" + view.view + ")")) return;
+      view.moveRequested(1, 0);
+      view.activateRequested();
+      if (!check(view.view === "today", "→ and Space show Today again (" + view.view + ")")) return;
+      // Enter on the add row: the field opens in its place.
+      view.moveRequested(0, 1);
+      shell.rowY = top(addRow);
+      view.returnRequested();
+      view.activateRequested();
+      break;
+    case 5:
+      var box = shell.find(view, "fieldBox");
+      if (!check(view.fieldOpen && view.cursor.index === view.addStop && view.blocked && !shell.find(view, "addRow").visible, "Enter opened the field, with the keys")) return;
+      if (!check(Math.abs(box.mapToItem(view, 0, 0).y - shell.rowY) < 1, "the field is where the row was (" + box.mapToItem(view, 0, 0).y + " vs " + shell.rowY + ")")) return;
+      if (!check(shell.find(view, "dateChipText").text === "Today", "the add chip says Today")) return;
+      var hint = shell.find(view, "fieldHint");
+      if (!check(hint.visible && hint.text === "Enter adds · Esc closes" && Math.abs(hint.mapToItem(view, 0, 0).x + hint.width - box.mapToItem(view, 0, 0).x - box.width) < 1, "the hint line, trailing (" + hint.text + ")")) return;
+      for (var ch of "Milk") ev.keyClickChar(ch, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(view.field.text === "" && view.fieldOpen && view.fieldFocused, "Esc with text clears it, the field stays")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!view.fieldOpen && view.cursor.index === view.addStop && shell.find(view, "addRow").visible && shell.find(view, "addRow").hasCursor && !view.blocked && one.opened, "Esc when empty closes the field, the cursor on the row")) return;
+      // a: the field again, from anywhere.
+      view.cursor.index = view.firstRowStop + 1;
+      view.cursor.emitTextKey(view, "a");
+      break;
+    case 6:
+      if (!check(view.fieldOpen && view.fieldFocused, "a opened the field")) return;
+      // ↓ from an empty field: it closes (blur), the first row has the cursor.
+      ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+      if (!check(!view.fieldFocused && !view.fieldOpen && view.cursor.index === view.firstRowStop, "↓ closed the empty field and moved to the first row (" + view.cursor.index + ")")) return;
+      var lit = shell.highlighted(view);
+      if (!check(lit.length === 1 && lit[0].entry.id === "t1", "the first row has the cursor")) return;
+      if (!check(!view.blocked, "the catcher has the keys again")) return;
+      // Space: complete, the row stays struck with Undo.
+      view.activateRequested();
+      break;
+    case 7:
+      if (!check(store.struck.t1 === true && shell.highlighted(view)[0].struck && shell.find(shell.highlighted(view)[0], "undo").visible, "t1 is struck, with Undo")) return;
+      // Space again: undone, nothing was sent.
+      view.activateRequested();
+      break;
+    case 8:
+      if (!check(!store.struck.t1 && shell.calls("apply").length === 0, "undo cancelled the completion; nothing sent")) return;
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(["t1"]), { results: { t1: "ok" } })));
+      view.activateRequested();
+      break;
+    case 9:
+      // One apply call with the close, after the undo window.
+      var sent = shell.calls("apply")[0];
+      var input = JSON.parse(sent.slice("apply ".length));
+      if (!check(JSON.stringify(input) === JSON.stringify({ commands: [{ op: "close", id: "t1" }] }), "the apply call closes t1 (" + sent + ")")) return;
+      if (!check(!view.rows.some(function(row) { return row.id === "t1"; }) && store.counts.today === 5, "t1 left the list and the count")) return;
+      if (!check(view.cursor.index === view.firstRowStop && shell.highlighted(view)[0].entry.id === "t2", "the cursor moved to the next row")) return;
+      // t: a recurring task stays; another one moves to tomorrow.
+      view.cursor.index = view.firstRowStop + 1;
+      if (!check(shell.highlighted(view)[0].entry.recurring, "the second row is recurring")) return;
+      view.cursor.emitTextKey(view, "t");
+      view.cursor.index = view.firstRowStop;
+      view.cursor.emitTextKey(view, "t");
+      break;
+    case 10:
+      var moves = shell.calls("apply");
+      var due = JSON.parse(moves[1].slice("apply ".length));
+      if (!check(moves.length === 2 && JSON.stringify(due) === JSON.stringify({ commands: [{ op: "due", id: "t2", date: Model.addDays(shell.today, 1) }] }), "t moved only t2, to tomorrow (" + JSON.stringify(moves) + ")")) return;
+      // Alt+2 from the list and from the field: Today.
+      view.setView("inbox");
+      view.cursor.emitTextKey(view, "2", Qt.AltModifier);
+      break;
+    case 11:
+      if (!check(view.view === "today", "Alt+2 in the list shows Today (" + view.view + ")")) return;
+      view.setView("upcoming");
+      break;
+    case 12:
+      // Upcoming, Wednesday 18 November: days to the end of the week, then
+      // next week, later in November, December, January 2027.
+      if (!check(view.band.meta === "Upcoming · 3 tasks in the next 7 days", "the band's meta (" + view.band.meta + ")")) return;
+      var heads = view.rows.filter(function(row) { return row.kind === "header"; });
+      if (!check(JSON.stringify(heads.map(function(h) { return h.group; })) === JSON.stringify(["day", "day", "week", "later", "month", "month"]), "the groups (" + JSON.stringify(heads.map(function(h) { return h.group; })) + ")")) return;
+      var built = function(key) { return view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry && item.entry.key === key; }); };
+      var text = function(item, name) { var found = shell.find(item, name); return found && found.visible ? found.text : ""; };
+      var shown = function(head) { var item = built(head.key); return item ? [text(item, "headerTitle"), text(item, "headerSub"), text(item, "headerCount"), shell.find(item, "headerDivider").visible] : null; };
+      var sunday = view.weekStart === 0;
+      var expected = [
+        ["Tomorrow", "Thursday 19 November", "", false],
+        ["Saturday", "21 November", "", false],
+        ["Next week", sunday ? "22–28 Nov" : "23–29 Nov", "1", true],
+        ["Later in November", "", "1", true],
+        ["December", "", "1", true],
+        ["January 2027", "", "1", true],
+      ];
+      for (var k = 0; k < heads.length; k++) {
+        view.list.positionViewAtIndex(view.rows.indexOf(heads[k]), ListView.Contain);
+        view.list.forceLayout();
+        if (!check(JSON.stringify(shown(heads[k])) === JSON.stringify(expected[k]), "heading " + k + " (" + JSON.stringify(shown(heads[k])) + ")")) return;
+      }
+      // Trailing: weekday next week; weekday and date later; the time in mono.
+      var trailOf = function(id) {
+        view.list.positionViewAtIndex(view.rows.findIndex(function(row) { return row.id === id; }), ListView.Contain);
+        view.list.forceLayout();
+        var item = built("task:" + id);
+        return [text(item, "taskTrailDay"), text(item, "taskTime")];
+      };
+      if (!check(JSON.stringify(trailOf("t13")) === JSON.stringify(["Fri", ""]) && JSON.stringify(trailOf("u2")) === JSON.stringify(["Mon 7", "10:30"]) && JSON.stringify(trailOf("t10")) === JSON.stringify(["", "10:00"]), "trailing day and time (" + JSON.stringify([trailOf("t13"), trailOf("u2"), trailOf("t10")]) + ")")) return;
+      // The add date: the day group the cursor was last in, else tomorrow.
+      var stopOf = function(id) { return view.stopOfRow[view.rows.findIndex(function(row) { return row.id === id; })]; };
+      view.cursor.index = stopOf("t12");
+      if (!check(view.addDay === "2026-11-21", "a Saturday task: add for Saturday (" + view.addDay + ")")) return;
+      view.goTo(view.addStop);
+      if (!check(view.addDay === "2026-11-21", "the add row keeps that day")) return;
+      view.cursor.index = stopOf("t13");
+      if (!check(view.addDay === "2026-11-19", "a next-week task: add for tomorrow (" + view.addDay + ")")) return;
+      view.cursor.index = stopOf("t12");
+      view.cursor.index = -1;
+      if (!check(view.addDay === "2026-11-19", "no cursor: tomorrow (" + view.addDay + ")")) return;
+      view.list.positionViewAtBeginning();
+      view.openField();
+      break;
+    case 13:
+      if (!check(view.fieldFocused && shell.find(view, "dateChipText").text === "Tomorrow", "Upcoming adds for tomorrow")) return;
+      ev.keyClick(Qt.Key_2, Qt.AltModifier, -1);
+      break;
+    case 14:
+      if (!check(view.view === "today" && view.fieldFocused, "Alt+2 while typing shows Today and keeps the caret (" + view.view + ")")) return;
+      // Enter adds and keeps the field open for the next task.
+      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+      shell.callsBefore = shell.calls("add").length;
+      for (var m of "Milk") ev.keyClickChar(m, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      break;
+    case 15:
+      if (!check(view.fieldOpen && view.fieldFocused && view.field.text === "" && view.addError === "", "after an add the field stays open, focused and empty (" + view.addError + ")")) return;
+      // With text, leaving the field keeps it open.
+      ev.keyClickChar("x", Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+      break;
+    case 16:
+      if (!check(view.fieldOpen && !view.fieldFocused && view.field.text === "x", "a field with text stays open when it loses the keys")) return;
+      view.field.text = "";
+      view.closeField();
+      // Search: "/" from the list opens the slot as a search field.
+      view.cursor.index = view.firstRowStop;
+      view.forceActiveFocus();
+      view.cursor.emitTextKey(view, "/");
+      for (var c of "parcel") ev.keyClickChar(c, Qt.NoModifier, -1);
+      if (!check(view.searching && view.fieldOpen && view.query === "parcel", "typing searches in the slot (" + view.query + ")")) return;
+      var found = view.rows.map(function(row) { return row.kind === "task" ? row.id : row.title; });
+      if (!check(JSON.stringify(found) === JSON.stringify(["Inbox", "t9"]), "search finds the parcel, grouped by project (" + JSON.stringify(found) + ")")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(view.searching && view.field.text === "", "Esc with text clears it")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!view.searching && !view.fieldOpen && view.cursor.index === view.addStop && one.opened, "Esc when empty leaves search, back to the add row")) return;
+      // IPC add: the popup opens with the field open and focused.
+      one.close();
+      wait.after(100, function() {
+        // One handler per shell: the leading monitor's instance.
+        var handler = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.add === "function"; });
+        shell.ipcPanel = one.data.indexOf(handler) >= 0 ? one : two;
+        handler.add();
+      });
+      break;
+    case 17:
+      var ipcView = shell.ipcPanel.popup.bodyItem;
+      if (!check(shell.ipcPanel.opened && ipcView.fieldOpen && ipcView.fieldFocused && ipcView.cursor.index === ipcView.addStop, "IPC add opened the field, focused")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!ipcView.fieldOpen, "Esc closed it")) return;
+      shell.ipcPanel.close();
+      one.open();
+      // A sync that fails keeps the data and says why.
+      shell.put("reply-sync.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
+      shell.callsBefore = shell.calls("sync").length;
+      store.sync();
+      break;
+    case 18:
+      var line = shell.find(view, "errorLine");
+      if (!check(line.visible && line.text === "Can't reach Todoist. Check your connection.", "the error line says what failed (" + line.text + ")")) return;
+      if (!check(store.loaded && view.rows.length > 0 && view.footer.status.indexOf("Updated") === 0, "the cached tasks stay, with the old Updated time (" + view.footer.status + ")")) return;
+      if (!check(store.failures === 1, "one failure counted")) return;
+      one.prefs.save("panelWidth", "wide");
+      break;
+    case 19:
+      if (!check(view.width > 540 && shell.find(view, "rail").visible, "wide: the rail shows (" + view.width + ")")) return;
+      var wideRow = shell.find(view, "addRow");
+      if (!check(shell.find(view.band, "fieldBox") === null && shell.find(view.band, "addRow") === null && !shell.find(view, "viewSwitch").visible, "wide: nothing but the title row in the band, no tabs")) return;
+      if (!check(wideRow.visible && wideRow.mapToItem(view, 0, 0).x >= shell.find(view, "rail").width, "wide: the add row tops the list pane")) return;
+      if (!check(shell.find(view, "rail-work") !== null && shell.find(view, "rail-launch") !== null, "wide: the projects are in the rail")) return;
+      // A snapshot the helper had to cut: a muted line says so.
+      shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));
+      store.sync();
+      break;
+    case 20:
+      var cut = shell.find(view, "truncatedLine");
+      if (!check(cut.visible && cut.text === shell.truncatedText, "the truncated line shows (" + cut.text + ")")) return;
+      if (!check(!shell.find(view, "errorLine").visible, "it is not an error")) return;
+      view.startSearch();
+      view.field.text = "zzzz";
+      view.query = "zzzz";
+      if (!check(shell.find(view, "stateText").text === shell.truncatedText, "an empty search doesn't claim nothing matches (" + shell.find(view, "stateText").text + ")")) return;
+      view.leaveSearch();
+      // A completion whose apply call fails as a whole: unknown, so unconfirmed until a snapshot.
+      shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+      shell.put("slow-sync", "2");
+      shell.put("reply-apply.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
+      shell.callsBefore = shell.calls("sync").length;
+      view.setView("today");
+      store.complete("t2");
+      store.flushCompletions();
+      break;
+    case 21:
+      var row = view.rows.find(function(r) { return r.id === "t2"; });
+      if (!check(row && row.unconfirmed, "t2 is shown, marked unconfirmed")) return;
+      store.complete("t2");
+      store.moveToTomorrow("t2");
+      if (!check(!store.struck.t2 && store.queue.length === 0, "an unconfirmed task can't be completed or moved again")) return;
+      break;
+    case 22:
+      if (!check(shell.calls("sync").length === shell.callsBefore + 1, "a sync followed the failed completion")) return;
+      shell.put("slow-sync", "");
+      // Rate limited: an add records Todoist's retry time.
+      shell.put("reply-add.json", JSON.stringify({ ok: false, code: "RATE_LIMITED", error: "Todoist is limiting requests. Try again in %1 seconds.\u001f60", retry_after: 60 }));
+      view.field.text = "Rate me";
+      view.submit();
+      break;
+    case 23:
+      if (!check(view.addError === "Todoist is limiting requests. Try again in 60 seconds.", "the add says so (" + view.addError + ")")) return;
+      // Until then no sync, add or change starts a helper.
+      shell.callsBefore = shell.calls().length;
+      store.sync();
+      view.submit();
+      store.complete("t4");
+      store.flushCompletions();
+      break;
+    case 24:
+      if (!check(shell.calls().length === shell.callsBefore, "nothing ran while rate limited (" + JSON.stringify(shell.calls().slice(shell.callsBefore)) + ")")) return;
+      if (!check(view.addError.indexOf("Todoist is limiting requests.") === 0 && view.field.text === "Rate me", "the second add failed at once, text kept (" + view.addError + ")")) return;
+      var back = view.rows.find(function(r) { return r.id === "t4"; });
+      if (!check(back && !back.struck && store.error.indexOf("Todoist is limiting requests.") === 0, "the completion came back, with the error line (" + store.error + ")")) return;
+      // A move to tomorrow refused while rate limited says why too.
+      store.error = "";
+      store.moveToTomorrow("t6");
+      store.next();
+      if (!check(store.queue.length === 0 && store.error.indexOf("Todoist is limiting requests.") === 0, "a refused move to tomorrow says why (" + store.error + ")")) return;
+      store.error = "";
+      store.retryUntil = 0;
+      // A full queue, a repeated t, then sign-out: every add settles.
+      shell.put("slow-sync", "3");
+      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+      shell.put("reply-token-clear.json", JSON.stringify({ ok: true, state: "signed_out", user: null }));
+      shell.settled = [];
+      shell.callsBefore = shell.calls("add").length;
+      store.sync();
+      store.moveToTomorrow("t6");
+      store.moveToTomorrow("t6");
+      view.field.text = "Queued";
+      view.submit();
+      for (var i = 0; i < 25; i++) store.add("Task " + i, "", "");
+      var dues = store.queue.filter(function(job) { return job.command === "apply" && job.input.indexOf('"id":"t6"') >= 0; });
+      if (!check(dues.length === 1, "a repeated t queued one change (" + dues.length + ")")) return;
+      if (!check(store.queue.length === 20, "the queue holds 20 jobs (" + store.queue.length + ")")) return;
+      shell.queuedAdds = store.queue.filter(function(job) { return job.command === "add"; }).length;
+      store.signOut();
+      break;
+    case 25:
+      var capped = shell.settled.filter(function(s) { return !s.ok && s.message === shell.capText; });
+      var dropped = shell.settled.filter(function(s) { return !s.ok && s.message === ""; });
+      if (!check(capped.length === 26 - shell.queuedAdds && dropped.length === shell.queuedAdds && shell.settled.length === 26, "every add settled: " + (26 - shell.queuedAdds) + " over the cap, " + shell.queuedAdds + " dropped at sign-out (" + capped.length + ", " + dropped.length + ", " + shell.settled.length + ")")) return;
+      if (!check(shell.calls("add").length === shell.callsBefore && view.field.text === "Queued", "none ran; the field kept its text")) return;
+      // The token form keeps a refused token for fixing; nothing keeps it in memory.
+      view.settingsRequested();
+      var page = view.settingsPage;
+      // Typed like a user: a masked field ignores an assigned text. Later,
+      // so the settings page has already taken focus (its own callLater),
+      // as it has by the time a user clicks the field.
+      shell.put("reply-token-set.json", JSON.stringify({ ok: false, code: "INVALID_TOKEN", error: "Todoist didn't accept the API token." }));
+      Qt.callLater(function() {
+        page.tokenField.focusInput();
+        for (var t of "wrong-token") ev.keyClickChar(t, Qt.NoModifier, -1);
+        if (!check(page.tokenField.secretText === "wrong-token" && page.tokenField.text === "\u2022".repeat(11), "the token field shows dots only (" + page.tokenField.text.length + " dots, " + page.tokenField.secretText.length + " secret)")) return;
+        page.saveToken();
+      });
+      break;
+    case 26:
+      if (!check(store.helperInput === "", "the token isn't kept after it was written (" + store.helperInput.length + " characters)")) return;
+      if (!check(view.settingsPage.tokenField.secretText === "wrong-token", "a refused token stays in the field")) return;
+      shell.put("slow-sync", "");
+      shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+      view.settingsPage.tokenField.clear();
+      view.settingsPage.tokenField.focusInput();
+      for (var r of "right-token") ev.keyClickChar(r, Qt.NoModifier, -1);
+      view.settingsPage.saveToken();
+      break;
+    case 27:
+      if (!check(view.settingsPage.tokenField.secretText === "" && view.settingsPage.tokenField.text === "" && store.helperInput === "", "a stored token leaves the field and memory")) return;
+      view.settingsClosed();
+      view.field.text = "After sign-in";
+      view.submit();
+      if (!check(view.addBusy, "an add runs again")) return;
+      break;
+    case 28:
+      if (!check(view.field.text === "" && view.addError === "", "the add after signing in again worked (" + view.addError + ")")) return;
+      // A reply after the last bar went: nothing restarts the poll.
+      one.close();
+      shell.put("slow-sync", "2");
+      store.sync();
+      shell.panelsAlive = false;
+      break;
+    case 29:
+      if (!check(!store.polling && !store.poll.running, "no poll without a bar (" + store.poll.running + ")")) return;
+      shell.callsBefore = shell.calls().length;
+      store.refreshIfStale(0);
+      shell.put("slow-sync", "");
+      shell.panelsAlive = true;
+      break;
+    case 30:
+      if (!check(shell.calls().length === shell.callsBefore && !store.busy, "no refresh ran without a bar")) return;
+      // Autocomplete: projects after #, labels after @.
+      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+      one.open();
+      break;
+    case 31:
+      view.openField();
+      break;
+    case 32:
+      var list = shell.find(view, "suggestions");
+      var shown = function() { return list.visible ? view.suggest.items.map(function(item) { return item.name; }) : []; };
+      shell.callsBefore = shell.calls("add").length;
+      ev.keyClickChar("#", Qt.NoModifier, -1);
+      if (!check(list.visible && JSON.stringify(shown()) === JSON.stringify(["Home", "Inbox", "Launch", "Reading list", "Work"]), "# lists the projects (" + JSON.stringify(shown()) + ")")) return;
+      if (!check(shell.find(list, "suggestion-Home").hasCursor, "the first one is highlighted")) return;
+      var box = shell.find(view, "fieldBox");
+      if (!check(Math.abs(list.mapToItem(view, 0, 0).x - box.mapToItem(view, 0, 0).x) < 1 && Math.abs(list.width - box.width) < 1 && list.mapToItem(view, 0, 0).y >= box.mapToItem(view, 0, 0).y + box.height, "the list drops from the field, as wide as it")) return;
+      ev.keyClickChar("o", Qt.NoModifier, -1);
+      if (!check(JSON.stringify(shown()) === JSON.stringify(["Home", "Inbox", "Work"]), "typing narrows it (" + JSON.stringify(shown()) + ")")) return;
+      // ↓ then Enter: inserted, not added.
+      ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.field.text === "#Inbox " && view.field.cursorPosition === 7 && !list.visible && view.fieldFocused && !view.addBusy, "↓ Enter inserts #Inbox (" + JSON.stringify(view.field.text) + ")")) return;
+      // @: the labels; Tab inserts, and doesn't switch panels.
+      for (var ch of "@of") ev.keyClickChar(ch, Qt.NoModifier, -1);
+      if (!check(JSON.stringify(shown()) === JSON.stringify(["office"]), "@ lists the labels (" + JSON.stringify(shown()) + ")")) return;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(view.field.text === "#Inbox @office " && one.opened && view.fieldFocused, "Tab inserts @office (" + JSON.stringify(view.field.text) + ")")) return;
+      // Esc closes only the list; the next Esc clears as before.
+      for (var h of "#Ho") ev.keyClickChar(h, Qt.NoModifier, -1);
+      if (!check(list.visible, "#Ho shows the list")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!list.visible && view.field.text === "#Inbox @office #Ho" && view.fieldOpen && view.fieldFocused, "Esc closed only the list")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(view.field.text === "" && view.fieldOpen, "the next Esc cleared the text")) return;
+      // No match: no list.
+      for (var z of "#zzz") ev.keyClickChar(z, Qt.NoModifier, -1);
+      if (!check(!list.visible, "no match, no list")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // A click inserts; the field keeps the keys.
+      for (var l of "#La") ev.keyClickChar(l, Qt.NoModifier, -1);
+      var row = shell.find(list, "suggestion-Launch");
+      ev.mouseClick(row, row.width / 2, row.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(view.field.text === "#Launch " && view.fieldFocused && !list.visible, "a click inserts #Launch (" + JSON.stringify(view.field.text) + ")")) return;
+      // With the list closed, Enter adds.
+      ev.keyClickChar("x", Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      break;
+    case 33:
+      if (!check(JSON.parse(shell.calls("add").pop().slice("add ".length)).text === "#Launch x", "Enter with the list closed added the text")) return;
+      // Search never suggests.
+      view.startSearch();
+      ev.keyClickChar("#", Qt.NoModifier, -1);
+      if (!check(view.searching && !shell.find(view, "suggestions").visible, "no list in search")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      view.openField();
+      break;
+    case 34:
+      // /: the sections of the #project before it.
+      var list = shell.find(view, "suggestions");
+      for (var a of "#Work /re") ev.keyClickChar(a, Qt.NoModifier, -1);
+      if (!check(list.visible && JSON.stringify(view.suggest.items.map(function(i) { return i.name; })) === JSON.stringify(["Review"]), "/ lists Work's sections")) return;
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.field.text === "#Work /Review " && !view.addBusy, "Enter inserts /Review (" + JSON.stringify(view.field.text) + ")")) return;
+      // +: the people of a shared #project, the email beside the name.
+      view.field.text = "";
+      for (var b of "#Launch +b") ev.keyClickChar(b, Qt.NoModifier, -1);
+      var bo = shell.find(list, "suggestion-Bo Ek");
+      if (!check(list.visible && bo && shell.find(bo, "suggestionDetail").text === "bo@example.com", "+ lists Launch's people with their email")) return;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(view.field.text === "#Launch +Bo\\ Ek ", "Tab inserts +Bo\\ Ek (" + JSON.stringify(view.field.text) + ")")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // The footer's Todoist button: a cursor stop; Enter opens the view in the browser.
+      var button = shell.find(view, "openTodoist");
+      view.cursor.index = view.openStop;
+      if (!check(button.visible && button.hasCursor && button.label === "Todoist", "the footer button has the cursor")) return;
+      shell.expectedUrl = Model.webUrl(view.view, view.projectId);
+      view.returnRequested();
+      view.activateRequested();
+      break;
+    case 35:
+      if (!check(JSON.stringify(shell.opened()[0]) === JSON.stringify(["xdg-open", shell.expectedUrl]), "the default opens the link with xdg-open (" + JSON.stringify(shell.opened()) + ")")) return;
+      // A command: {url} replaced, used for Enter on a task.
+      one.prefs.save("openCommand", "todoist-open --app {url} --flag");
+      wait.waitFor(function() { return store.openCommand === "todoist-open --app {url} --flag"; }, 5000, function(ok) {
+        if (!check(ok, "the open command was saved")) return;
+        view.cursor.index = view.firstRowStop;
+        shell.expectedUrl = Model.webUrl("task", view.cursorRow().id);
+        view.returnRequested();
+        view.activateRequested();
+      });
+      break;
+    case 36:
+      if (!check(JSON.stringify(shell.opened()[1]) === JSON.stringify(["todoist-open", "--app", shell.expectedUrl, "--flag"]), "{url} replaced (" + JSON.stringify(shell.opened()) + ")")) return;
+      // Without {url}: appended; Open in Todoist in the menu uses it too.
+      one.prefs.save("openCommand", "todoist-open --new");
+      wait.waitFor(function() { return store.openCommand === "todoist-open --new"; }, 5000, function(ok) {
+        if (!check(ok, "the second command was saved")) return;
+        shell.expectedUrl = Model.webUrl(view.view, view.projectId);
+        var item = Array.prototype.find.call(view.band.menuItems, function(i) { return i.objectName === "openInTodoist"; });
+        item.triggered();
+      });
+      break;
+    case 37:
+      if (!check(JSON.stringify(shell.opened()[2]) === JSON.stringify(["todoist-open", "--new", shell.expectedUrl]), "the link appended (" + JSON.stringify(shell.opened()) + ")")) return;
+      // A launch that fails shows in the footer.
+      shell.put("open-fail", "3");
+      var footerButton = shell.find(view, "openTodoist");
+      ev.mouseClick(footerButton, footerButton.width / 2, footerButton.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      break;
+    case 38:
+      if (!check(view.footer.status === "Can't open Todoist" && view.footer.statusError, "the footer says the launch failed (" + view.footer.status + ")")) return;
+      shell.put("open-fail", "");
+      var again = shell.find(view, "openTodoist");
+      ev.mouseClick(again, again.width / 2, again.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      break;
+    case 39:
+      if (!check(!view.footer.statusError && view.footer.status.indexOf("Updated") === 0, "the next success clears it (" + view.footer.status + ")")) return;
+      // Wide: → on the add row does nothing, ← goes to the rail.
+      view.goTo(view.addStop);
+      view.moveRequested(1, 0);
+      if (!check(view.cursor.index === view.addStop, "→ on the add row stays (wide)")) return;
+      view.moveRequested(-1, 0);
+      if (!check(view.cursor.index === view.railStop, "← on the add row goes to the rail (wide)")) return;
+      one.prefs.save("openCommand", "");
+      one.prefs.save("panelWidth", "standard");
+      one.close();
+      wait.after(100, function() { one.open(); });
+      break;
+    case 40:
+      // Standard: ← and → on the add row do nothing.
+      view.goTo(view.addStop);
+      view.moveRequested(1, 0);
+      view.moveRequested(-1, 0);
+      if (!check(view.cursor.index === view.addStop, "← → on the add row stay (standard)")) return;
+      view.openField();
+      break;
+    case 41:
+      // A click on a tab while the empty field has the keys: it closes, the view switches.
+      view.setView("today");
+      var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
+      ev.mouseClick(tab, tab.width / 2, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(view.view === "inbox" && !view.fieldOpen && !view.fieldFocused, "a tab click closed the empty field (" + view.view + ", " + view.fieldOpen + ")")) return;
+      view.openField();
+      break;
+    case 42:
+      // A click on a ring: the field closes too.
+      var ring = shell.find(shell.builtRows(view)[0], "ring");
+      shell.ringTask = shell.builtRows(view)[0].entry.id;
+      ev.mouseClick(ring, ring.width / 2, ring.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(!view.fieldOpen && !view.fieldFocused && store.struck[shell.ringTask] === true, "a ring click closed the empty field")) return;
+      store.undo(shell.ringTask);
+      view.openField();
+      break;
+    case 43:
+      // A view switch leaves search: the query never becomes a draft.
+      view.closeField();
+      view.startSearch();
+      for (var q of "par") ev.keyClickChar(q, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_2, Qt.AltModifier, -1);
+      if (!check(view.view === "today" && !view.searching && view.query === "" && view.field.text === "", "Alt+2 left search, no draft (" + JSON.stringify(view.field.text) + ")")) return;
+      // A real draft stays across a view switch.
+      view.openField();
+      for (var d of "Draft") ev.keyClickChar(d, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_1, Qt.AltModifier, -1);
+      if (!check(view.view === "inbox" && view.fieldOpen && view.field.text === "Draft", "the add draft stays across Alt+1")) return;
+      // A suggestion that would make the task too long isn't put in.
+      var long = "x".repeat(494) + " #Wo";
+      view.field.text = long;
+      view.field.cursorPosition = long.length;
+      view.field.textEdited();
+      if (!check(shell.find(view, "suggestions").visible, "the list shows near the limit")) return;
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.field.text === long && view.addError === "The task is too long for this suggestion" && !view.addBusy, "too long: not inserted, said so (" + view.addError + ")")) return;
+      // The list closes so the error line under the field can be seen.
+      var tooLong = shell.find(view, "addErrorLine");
+      if (!check(!shell.find(view, "suggestions").visible && tooLong.visible && tooLong.parent.opacity > 0 && tooLong.text === view.addError, "the error line is visible")) return;
+      // Tab with text: nothing happens; the text stays.
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      view.field.text = "Keep me";
+      view.field.cursorPosition = 7;
+      shell.switches = 0;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Backtab, Qt.ShiftModifier, -1);
+      if (!check(shell.switches === 0 && view.field.text === "Keep me" && view.fieldFocused && one.opened, "Tab with text did nothing (" + shell.switches + ")")) return;
+      // The draft outlives the popup: reopened, the field has it, with the keys.
+      one.close();
+      wait.after(100, function() { one.open(); });
+      break;
+    case 44:
+      var back = one.popup.bodyItem;
+      if (!check(back.fieldOpen && back.field.text === "Keep me" && back.field.cursorPosition === 7, "the draft is back (" + JSON.stringify(back.field.text) + ")")) return;
+      // Esc clears it; then it's gone for good.
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(back.field.text === "", "Esc cleared the draft")) return;
+      // Tab in the empty field switches panels.
+      shell.switches = 0;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(shell.switches === 1, "Tab in an empty field switches panels (" + shell.switches + ")")) return;
+      one.close();
+      wait.after(100, function() { one.open(); });
+      break;
+    case 45:
+      var again = one.popup.bodyItem;
+      if (!check(!again.fieldOpen && again.field.text === "", "no draft after Esc cleared it")) return;
+      again.openField();
+      break;
+    case 46:
+      // A draft started before a search comes back when the search ends:
+      // Esc on the empty search, a view switch, the search button.
+      var leaves = [
+        function() { ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1); ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1); },
+        function() { ev.keyClick(Qt.Key_2, Qt.AltModifier, -1); },
+        function() { var search = shell.find(view, "searchAction"); ev.mouseClick(search, search.width / 2, search.height / 2, Qt.LeftButton, Qt.NoModifier, -1); },
+      ];
+      for (var k of "Keep") ev.keyClickChar(k, Qt.NoModifier, -1);
+      for (var n = 0; n < leaves.length; n++) {
+        view.startSearch();
+        if (!check(view.searching && view.field.text === "", "search " + n + " starts empty")) return;
+        ev.keyClickChar("x", Qt.NoModifier, -1);
+        leaves[n]();
+        if (!check(!view.searching && view.fieldOpen && view.fieldFocused && view.field.text === "Keep" && view.field.cursorPosition === 4, "leave " + n + ": the draft is back (" + JSON.stringify(view.field.text) + ", " + view.fieldOpen + ", " + view.fieldFocused + ")")) return;
+      }
+      // Without a draft, leaving search goes back to the Add row.
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      view.startSearch();
+      ev.keyClickChar("z", Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!view.searching && !view.fieldOpen && view.field.text === "" && view.cursor.index === view.addStop && shell.find(view, "addRow").visible, "no draft: back to the Add row")) return;
+      // The Inbox has one-line rows; Today then reuses them for two-line ones.
+      view.setView("inbox");
+      break;
+    case 47:
+      var oneLine = shell.builtRows(view).find(function(r) { return r.entry.id === "t7"; });
+      if (!check(oneLine && !oneLine.entry.detail, "t7 is a one-line row in the Inbox")) return;
+      if (!check(shell.rowGeometry(oneLine) === "", "one-line row: " + shell.rowGeometry(oneLine))) return;
+      shell.oneLineX = shell.find(oneLine, "taskSurface").mapToItem(view, 0, 0).x;
+      view.setView("today");
+      break;
+    case 48:
+      // A row that had no detail line shows one when its next task has only a project.
+      probeRow.entry = shell.probeEntry({ showProject: true, projectName: "Gjøremål", projectRole: "success", detail: true });
+      if (!check(shell.find(probeRow, "taskDetail").visible && shell.find(probeRow, "taskProject").visible && shell.find(probeRow, "taskProject").text === "Gjøremål", "a row reused for a project-only task shows the project")) return;
+      probeRow.entry = shell.probeEntry({ recurring: true, detail: true });
+      if (!check(shell.find(probeRow, "taskDetail").visible && shell.find(probeRow, "taskRepeat").visible, "and the repeat icon alone")) return;
+      // Today shows the project of a task in another project, also on a reused row.
+      for (var r of shell.builtRows(view)) {
+        var project = shell.find(r, "taskProject");
+        if (!check(r.entry.showProject && shell.find(r, "taskDetail").visible && project.visible && project.text === r.entry.projectName && project.text !== "", "Today: " + r.entry.id + " shows its project (" + project.text + ", detail " + shell.find(r, "taskDetail").visible + ")")) return;
+        if (!check(shell.rowGeometry(r) === "", "two-line row " + r.entry.id + ": " + shell.rowGeometry(r))) return;
+        if (!check(Math.abs(shell.find(r, "taskSurface").mapToItem(view, 0, 0).x - shell.oneLineX) < 1, "the same fill insets on every row")) return;
+      }
+      // An add whose reply comes after the popup closed leaves no draft.
+      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+      shell.put("slow-add", "1.5");
+      view.openField();
+      break;
+    case 49:
+      for (var m of "Milk soon") ev.keyClickChar(m, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.addBusy, "the add runs")) return;
+      one.close();
+      break;
+    case 50:
+      if (!check(store.addDraft === "", "the added text isn't a draft (" + JSON.stringify(store.addDraft) + ")")) return;
+      one.open();
+      break;
+    case 51:
+      if (!check(!view.fieldOpen && view.field.text === "", "reopened without a draft (" + JSON.stringify(view.field.text) + ")")) return;
+      view.openField();
+      break;
+    case 52:
+      // Edited after submitting: the edit is the draft and stays.
+      for (var e of "Eggs") ev.keyClickChar(e, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      for (var h of " and ham") ev.keyClickChar(h, Qt.NoModifier, -1);
+      one.close();
+      break;
+    case 53:
+      if (!check(store.addDraft === "Eggs and ham", "the edit stays the draft (" + JSON.stringify(store.addDraft) + ")")) return;
+      one.open();
+      break;
+    case 54:
+      if (!check(view.field.text === "Eggs and ham", "the edit is back (" + JSON.stringify(view.field.text) + ")")) return;
+      // Quick Add sent, no answer: the task may exist. Say so, keep the text, sync.
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      shell.put("slow-add", "");
+      shell.put("reply-add.json", JSON.stringify({ ok: false, code: "UNKNOWN_OUTCOME", error: shell.unknownText }));
+      shell.callsBefore = shell.calls("sync").length;
+      for (var b of "Call Bob") ev.keyClickChar(b, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      break;
+    case 55:
+      var line = shell.find(view, "addErrorLine");
+      if (!check(line.visible && line.parent.opacity > 0 && line.text === shell.unknownText, "the warning shows under the field (" + line.text + ")")) return;
+      if (!check(view.field.text === "Call Bob" && view.fieldOpen, "the text is kept")) return;
+      // The whole message shows, wrapped under the field; the keys give way.
+      if (!check(shell.addErrorLayout(view, shell.unknownText) === "", "the add error at standard width: " + shell.addErrorLayout(view, shell.unknownText))) return;
+      shell.pickLanguage("no");
+      break;
+    case 56:
+      // The same in Norwegian (a longer text): sent again, as the field still holds it.
+      shell.callsBefore = shell.calls("add").length;
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      break;
+    case 57:
+      var norwegian = Kit.FoamyI18n.t(shell.unknownText);
+      if (!check(norwegian !== shell.unknownText, "a Norwegian text (" + norwegian + ")")) return;
+      if (!check(shell.addErrorLayout(view, norwegian) === "", "the add error in Norwegian: " + shell.addErrorLayout(view, norwegian))) return;
+      shell.pickLanguage("en");
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // Tasks assigned to others: hidden by default, shown by the setting at
+      // once (no sync), in the rows and the bar number.
+      view.setView("today");
+      var assigned = shell.snapshot();
+      assigned.tasks = assigned.tasks.map(function(task) { return task.id === "t3" ? Object.assign({}, task, { responsible_uid: "7" }) : task; });
+      store.snapshot = assigned;
+      var count = one.barContent.countLabel;
+      var hiddenCount = Number(count.text);
+      if (!check(store.othersTasks === "hide" && !view.rows.some(function(row) { return row.id === "t3"; }), "hidden by default")) return;
+      shell.callsBefore = shell.calls("sync").length;
+      one.prefs.save("othersTasks", "show");
+      wait.waitFor(function() { return store.othersTasks === "show"; }, 5000, function(ok) {
+        if (!check(ok, "the setting was saved")) return;
+        if (!check(view.rows.some(function(row) { return row.id === "t3"; }) && Number(count.text) === hiddenCount + 1, "shown: the row and one more in the bar (" + count.text + " vs " + hiddenCount + ")")) return;
+        if (!check(shell.calls("sync").length === shell.callsBefore && !store.busy, "no sync for it")) return;
+        one.prefs.save("othersTasks", "hide");
+        shell.othersChecked = true;
+      });
+      break;
+    case 58:
+      if (!check(!view.rows.some(function(row) { return row.id === "t3"; }), "hidden again")) return;
+      // An add in flight is the shell's, not the popup's: sent on one
+      // monitor, the popup closed, the other monitor's popup opened before
+      // the reply shows the text as being added (no second add on Enter),
+      // and drops it once added.
+      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+      shell.put("slow-add", "1.5");
+      shell.callsBefore = shell.calls("add").length;
+      view.openField();
+      break;
+    case 59:
+      for (var k of "Buy milk") ev.keyClickChar(k, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.addBusy, "the add runs")) return;
+      one.close();
+      two.open();
+      break;
+    case 60:
+      var other = two.popup.bodyItem;
+      if (!check(other.field.text === "Buy milk", "the other popup has the text (" + JSON.stringify(other.field.text) + ")")) return;
+      if (!check(other.addBusy && shell.find(other, "addSpinner").visible, "and shows it being added")) return;
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      break;
+    case 61:
+      var second = two.popup.bodyItem;
+      if (!check(shell.calls("add").length === shell.callsBefore + 1, "Enter on the other monitor added nothing more (" + JSON.stringify(shell.calls("add")) + ")")) return;
+      if (!check(second.field.text === "" && store.addDraft === "", "added: the text is gone (" + JSON.stringify(second.field.text) + ", draft " + JSON.stringify(store.addDraft) + ")")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      two.close();
+      shell.put("slow-add", "");
+      // A suspend across midnight: the clock moves on, the midnight timer
+      // hasn't fired. The poll's next tick finds the new day.
+      var barCount = one.barContent.countLabel;
+      if (!check(store.today === shell.today && barCount.visible && Number(barCount.text) === 6, "6 left on the 18th (" + barCount.text + ")")) return;
+      shell.clock.at = new Date(2026, 10, 19, 0, 30, 0);
+      if (!check(store.today === shell.today, "no timer has fired")) return;
+      store.poll.triggered();
+      if (!check(store.today === "2026-11-19" && Number(barCount.text) === 8, "the poll tick: the 19th, 8 left (" + store.today + ", " + barCount.text + ")")) return;
+      break;
+    case 62:
+      // Another midnight; a sync reply arrives (no poll tick).
+      shell.clock.at = new Date(2026, 10, 21, 0, 30, 0);
+      shell.callsBefore = shell.calls("sync").length;
+      store.sync();
+      break;
+    case 63:
+      var later = one.barContent.countLabel;
+      if (!check(store.today === "2026-11-21" && Number(later.text) === 9, "the sync reply: the 21st, 9 left (" + store.today + ", " + later.text + ")")) return;
+      shell.clock.at = new Date(2026, 10, 18, 12, 0, 0);
+      store.updateToday();
+      one.close();
+      // No helper for this CPU: says so, no retry loop; an add waiting
+      // behind the sync ends as failed.
+      shell.put("exit-sync", "127");
+      shell.settled = [];
+      store.sync();
+      shell.lateAdd = store.add("Waiting", "", "");
+      break;
+    case 64:
+      if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
+      var before = shell.calls().length;
+      store.sync();
+      store.check();
+      if (!check(!store.busy && shell.calls().length === before && !store.polling, "unavailable: nothing runs again")) return;
+      var late = shell.settled.find(function(s) { return s.request === shell.lateAdd; });
+      if (!check(late && !late.ok && late.message === store.accountError, "the waiting add ended as failed (" + JSON.stringify(shell.settled) + ")")) return;
+      shell.afterAdd = store.add("After", "", "");
+      wait.after(50, function() {
+        // Not signed in any more: no request, so no view waits for one.
+        if (!check(shell.afterAdd === -1 && shell.calls().length === before, "an add while unavailable is refused at once, without a helper")) return;
+        shell.finishRun();
+      });
+      return;
+    }
+  }
+  function finishRun() {
+    {
+      one.close();
+      shell.finished = true;
+      console.log("FOAMY DONE runtime interactions passed"); Qt.quit();
+    }
+  }
+}
+"""
+
+# Stands in for xdg-open and a custom open command: logs its name and argv
+# (tab-separated), and fails with the status in $FOAMY_OUT/open-fail when
+# that file isn't empty.
+FAKE_OPENER = r"""#!/bin/sh
+{ printf '%s' "${0##*/}"; printf '\t%s' "$@"; printf '\n'; } >>"$FOAMY_OUT/opened.log"
+if [ -s "$FOAMY_OUT/open-fail" ]; then exit "$(cat "$FOAMY_OUT/open-fail")"; fi
+exit 0
+"""
+
+run = harness.Run(
+    "4.5",
+    SHELL,
+    plugin=plugin,
+    prefix="foamy-todoist-runtime-",
+    fakebin={"xdg-open": FAKE_OPENER, "todoist-open": FAKE_OPENER},
+)
+try:
+    (run.out / "reply-status.json").write_text(json.dumps({"ok": True, "state": "signed_out", "user": None}))
+    run.env["FAKE_HELPER"] = FAKE_HELPER
+    run.run(timeout=200)
+    refused = run.host_commands()
+    if refused:
+        print("FAIL: the plugin ran host commands:", *refused, sep="\n  ")
+        sys.exit(1)
+    # FOAMY_TEST_VERBOSE=1 prints the shell's log on success too.
+    print(run.log if not run.ok or os.environ.get("FOAMY_TEST_VERBOSE") else "PASS: real plugin runtime interactions")
+    sys.exit(0 if run.ok else 1)
+finally:
+    run.cleanup()

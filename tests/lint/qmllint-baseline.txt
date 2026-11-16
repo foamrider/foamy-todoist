@@ -1,0 +1,13 @@
+# qmllint findings accepted when the check was adopted. tests/validate.sh fails on any
+# finding not listed here. Regenerate with `tests/validate.sh --update-baseline qmllint`
+# only to drop fixed entries or after reviewing every added one; never to pass a check.
+Panel.qml: missing-property: Member "body" not found on type "QObject" | font.pixelSize: Style.font.body
+Panel.qml: missing-property: Member "iconCanvas" not found on type "QObject" | fixedWidth: root.bar && root.bar.vertical ? -1 : Math.max(Style.bar.iconSlot, barContent.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
+Panel.qml: missing-property: Member "iconCanvas" not found on type "QObject" | width: Style.bar.iconCanvas
+Panel.qml: missing-property: Member "iconSize" not found on type "QObject" | width: Style.bar.iconSize
+Panel.qml: missing-property: Member "iconSlot" not found on type "QObject" | fixedWidth: root.bar && root.bar.vertical ? -1 : Math.max(Style.bar.iconSlot, barContent.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
+Panel.qml: missing-property: Member "iconSlot" not found on type "QObject" | fixedWidth: root.bar && root.bar.vertical ? -1 : Math.max(Style.bar.iconSlot, barContent.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
+Panel.qml: missing-property: Member "urgent" not found on type "QObject" | color: root.bar ? root.bar.urgent : Commons.Color.urgent
+Panel.qml: missing-property: Member "vertical" not found on type "QObject" | fixedWidth: root.bar && root.bar.vertical ? -1 : Math.max(Style.bar.iconSlot, barContent.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
+Panel.qml: missing-property: Member "vertical" not found on type "QObject" | readonly property bool showCount: TodoStore.signedIn && TodoStore.loaded && TodoStore.counts.today > 0 && prefsQueue.value("barCount") === "today" && !(root.bar
+TodoStore.qml: import: Type TodoStore not declared as singleton in qmldir but using pragma Singleton

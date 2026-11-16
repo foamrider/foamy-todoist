@@ -1,0 +1,11 @@
+# native.pin: written by kit/native/build-native.sh; do not edit.
+# check.sh and tests/kit-check.sh verify bin/<arch>/<binary> against it and
+# report the binaries stale when `source` no longer matches the crate, kit/rust,
+# Cargo.toml, Cargo.lock and rust-toolchain.toml. Rebuild: kit/native/build-native.sh .
+crate native
+binary foamy-todoist-helper
+toolchain 1.99.1
+kit 0.12.0
+source 0a31e1c1d5968591585ee7de7e0dfc520d5d8cc15884c20fb119eb37fbfbe3c1
+306d22f9dd6ad496de22143eb2c8dbd80f2f9e14c50bc2ffc83711dd86c60c81  bin/aarch64/foamy-todoist-helper
+5cbe40d4c82a51619a30632fd578496dd82d22c23fca78269eefbf350be94eb5  bin/x86_64/foamy-todoist-helper

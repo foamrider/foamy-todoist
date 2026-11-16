@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "foamy.todoist",
+  "name": "Foamy Todoist",
+  "version": "0.1.0",
+  "author": "foamrider",
+  "description": "Todoist in the Omarchy bar: today's tasks, the Inbox and what is coming up, with quick add and complete.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Todoist",
+    "description": "The tasks left today in the bar; a popup with Inbox, Today, Upcoming and your projects.",
+    "category": "Information",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "barCount": "today",
+      "panelWidth": "standard",
+      "openOn": "today",
+      "othersTasks": "hide",
+      "refreshSeconds": 300,
+      "openCommand": ""
+    },
+    "schema": [
+      {
+        "key": "barCount",
+        "type": "enum",
+        "label": "Show in the bar",
+        "defaultValue": "today",
+        "options": [
+          "today",
+          "none"
+        ]
+      },
+      {
+        "key": "panelWidth",
+        "type": "enum",
+        "label": "Panel width",
+        "defaultValue": "standard",
+        "options": [
+          "standard",
+          "wide"
+        ]
+      },
+      {
+        "key": "openOn",
+        "type": "enum",
+        "label": "Open on",
+        "defaultValue": "today",
+        "options": [
+          "today",
+          "inbox",
+          "upcoming",
+          "last"
+        ]
+      },
+      {
+        "key": "othersTasks",
+        "type": "enum",
+        "label": "Tasks assigned to others",
+        "defaultValue": "hide",
+        "options": [
+          "hide",
+          "show"
+        ]
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "integer",
+        "label": "Refresh every (seconds)",
+        "defaultValue": 300,
+        "min": 60,
+        "max": 1800,
+        "step": 60
+      },
+      {
+        "key": "openCommand",
+        "type": "string",
+        "label": "Open command",
+        "defaultValue": ""
+      }
+    ]
+  },
+  "license": "MIT"
+}
