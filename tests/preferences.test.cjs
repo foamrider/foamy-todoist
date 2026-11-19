@@ -25,7 +25,8 @@ test('values are checked; missing ones take the defaults', () => {
   const ok = (key, value) => Prefs.valid(Schema.fields, key, value);
   const table = [
     ['barCount', 'today', true], ['barCount', 'none', true], ['barCount', 'all', false],
-    ['panelWidth', 'wide', true], ['panelWidth', 'huge', false],
+    ['panelWidth', 'standard', true], ['panelWidth', 'wide', true], ['panelWidth', 'large', true], ['panelWidth', 'huge', false],
+    ['afterAdd', 'close', true], ['afterAdd', 'keep', true], ['afterAdd', 'stay', false],
     ['openOn', 'last', true], ['openOn', 'project', false],
     ['othersTasks', 'hide', true], ['othersTasks', 'show', true], ['othersTasks', 'all', false],
     ['refreshSeconds', 60, true], ['refreshSeconds', 1800, true], ['refreshSeconds', 30, false],
@@ -34,6 +35,9 @@ test('values are checked; missing ones take the defaults', () => {
   for (const [key, value, expected] of table) assert.equal(ok(key, value), expected, `${key}=${JSON.stringify(value)}`);
   assert.equal(Prefs.value(Schema.fields, {}, 'refreshSeconds'), 300);
   assert.equal(Prefs.value(Schema.fields, {}, 'othersTasks'), 'hide');
+  assert.equal(Prefs.value(Schema.fields, {}, 'afterAdd'), 'close');
+  // A size saved before Large existed still reads as it was.
+  assert.equal(Prefs.value(Schema.fields, { panelWidth: 'wide' }, 'panelWidth'), 'wide');
   assert.equal(Prefs.value(Schema.fields, { refreshSeconds: 5 }, 'refreshSeconds'), 300);
   // Every refresh choice the settings page offers is a valid value.
   for (const seconds of Schema.refreshChoices) assert.ok(ok('refreshSeconds', seconds), seconds);

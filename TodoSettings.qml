@@ -144,21 +144,46 @@ FoamySettingsPage {
       objectName: "panelWidth"
       width: parent.width
       compact: true
-      label: FoamyI18n.t("Panel width")
+      label: FoamyI18n.t("Size")
       value: page.pref("panelWidth")
       enabled: !page.saving
       options: [
         {
           value: "standard",
-          label: FoamyI18n.t("Standard")
+          label: FoamyI18n.t("Small")
         },
         {
           value: "wide",
           label: FoamyI18n.t("Wide")
+        },
+        {
+          value: "large",
+          label: FoamyI18n.t("Large")
         }
       ]
       onChanged: function (value) {
         page.saveRequested("panelWidth", value)
+      }
+    }
+    FoamyDropdown {
+      objectName: "afterAdd"
+      width: parent.width
+      compact: true
+      label: FoamyI18n.t("After adding a task")
+      value: page.pref("afterAdd")
+      enabled: !page.saving
+      options: [
+        {
+          value: "close",
+          label: FoamyI18n.t("Close the panel")
+        },
+        {
+          value: "keep",
+          label: FoamyI18n.t("Keep the field open")
+        }
+      ]
+      onChanged: function (value) {
+        page.saveRequested("afterAdd", value)
       }
     }
     FoamyDropdown {
