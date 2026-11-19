@@ -681,7 +681,14 @@ PanelKeyCatcher {
     else if (enter)
       openTask(row.id, true)
     else
-      store.toggleComplete(row.id)
+      completeTask(row.id)
+  }
+  // A row's ring or Space: the editor's typed changes to the same task are
+  // saved first, so they reach the queue ahead of the completion.
+  function completeTask(id) {
+    if (taskEditor.shownId === id)
+      taskEditor.commit()
+    store.toggleComplete(id)
   }
   function openViewInTodoist() {
     store.openView(view === "week" ? "upcoming" : view, projectId)
@@ -1320,7 +1327,7 @@ PanelKeyCatcher {
             viewCursor.hover(root.stopOfRow[index])
           onCompleteRequested: {
             root.leaveField()
-            root.store.toggleComplete(modelData.id)
+            root.completeTask(modelData.id)
           }
           // Small and Wide: the editor page; Large: the pane shows it.
           onOpenRequested: {
@@ -1366,7 +1373,7 @@ PanelKeyCatcher {
         }
         onCompleteRequested: function (id) {
           root.leaveField()
-          root.store.toggleComplete(id)
+          root.completeTask(id)
         }
       }
 

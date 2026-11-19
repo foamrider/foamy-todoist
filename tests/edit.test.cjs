@@ -89,6 +89,15 @@ test('cut labels and an unloaded description are never sent', () => {
   assert.equal(change('description', 'typed', undefined).fields, null);
 });
 
+test('line ends alone are no change to a description', () => {
+  // The text area reads CRLF (and a lone CR) back as LF.
+  assert.deepEqual(change('description', 'Line one\nLine two\n', 'Line one\r\nLine two\r'), { fields: null, error: '' });
+  assert.ok(Edit.sameDescription('a\r\nb', 'a\nb'));
+  assert.ok(!Edit.sameDescription('a\nb', 'a b'));
+  // A real edit still goes, as typed.
+  assert.deepEqual(change('description', 'Line one\nLine 2', 'Line one\r\nLine two').fields, { description: 'Line one\nLine 2' });
+});
+
 test('the place dropdown: projects in order, each with its sections; or one project\'s sections', () => {
   const projects = [{ id: 'inbox', name: 'Inbox' }].concat(Model.railProjects(model, {}));
   const all = Edit.placeOptions(model, projects);

@@ -223,6 +223,40 @@ ShellRoot {
       });
     });
   }
+  // Typed in the pane, then the task completed without leaving the field
+  // (`how`: the pane's Complete button, or the row's ring): the typed text
+  // is saved first, ahead of the completion in the queue. Then `done`.
+  function draftThenComplete(view, how, done) {
+    var store = Plugin.TodoStore;
+    var editor = view.editor;
+    var id = view.paneTask;
+    var text = store.model.byId[id].content + " " + how;
+    var change = {};
+    change[id] = { content: text };
+    var results = {};
+    results[id] = "ok";
+    // One reply for both calls: the task stays (as a recurring one would).
+    shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith(change), { results: results })));
+    var from = shell.calls("apply").length;
+    editor.contentField.focusInput();
+    editor.contentField.cursorPosition = editor.contentField.text.length;
+    for (var c of " " + how) ev.keyClickChar(c, Qt.NoModifier, -1);
+    if (how === "button") {
+      // FoamyButton's click leaves the keys where they are, like the mouse.
+      shell.find(editor, "editComplete").clicked();
+    } else {
+      var ring = shell.find(shell.builtRows(view).find(function(r) { return r.entry.id === id; }), "ring");
+      ev.mouseClick(ring, ring.width / 2, ring.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+    }
+    var jobs = [store.current].concat(store.queue).filter(function(job) { return !!job; });
+    if (!check(store.struck[id] === true && jobs.length === 1 && jobs[0].extra.update === id, how + ": completed, the typed text queued first (" + JSON.stringify(jobs.map(function(job) { return job.extra; })) + ")")) return;
+    store.flushCompletions();
+    wait.waitFor(function() { return shell.calls("apply").length === from + 2 && !store.busy && !editor.saving; }, 15000, function(ok) {
+      var sent = shell.updatesSince(from);
+      if (!check(ok && JSON.stringify(sent) === JSON.stringify([{ op: "update", id: id, content: text }, { op: "close", id: id }]), how + ": the text, then the completion (" + JSON.stringify(sent) + ")")) return;
+      done();
+    });
+  }
   function check(ok, message) {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
     return ok;
@@ -379,9 +413,9 @@ ShellRoot {
     case 81: return [function() { return one.size === "large"; }, 10000, "Large"];
     case 82: return [function() { var o = shell.overlay(); return store.overlayOpen && o !== null && o.view.active; }, 10000, "the overlay"];
     case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1"; }, 15000, "the pane's description"];
-    case 84: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus; }, 10000, "e put the caret in the pane"];
+    case 84: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus && store.description.state === "ready" && store.description.id === o.view.paneTask; }, 10000, "e put the caret in the pane, the description read"];
     case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
-    case 86: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the view changed"];
+    case 86: return [function() { return shell.overlay().view.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 20000, "the pane's text saved as the view changed"];
     case 87: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
     case 88: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
     case 89: return [function() { return shell.overlay() === null; }, 10000, "the overlay is gone"];
@@ -1404,8 +1438,42 @@ ShellRoot {
       store.description = { id: "t7", state: "ready", text: "Line one\r\nLine two", truncated: false };
       view.editor.descriptionField.text = "Line one\nLine two";
       if (!check(!view.editor.dirty("description"), "CRLF read back as LF is no change")) return;
+      // Ctrl+Enter and leaving the field send no untouched CRLF description.
+      view.editor.descriptionField.focusInput();
+      ev.keyClick(Qt.Key_Return, Qt.ControlModifier, -1);
+      view.editor.contentField.focusInput();
+      if (!check(Object.keys(view.editor.pending).length === 0, "Ctrl+Enter and the blur sent no untouched CRLF description")) return;
       store.description = whole;
       view.editor.descriptionField.text = "Seven";
+      // Changed in Todoist while a field has the keys: untouched, the field
+      // follows and leaving it sends nothing; typed in, the typed text stays.
+      var ed = view.editor;
+      ed.contentField.focusInput();
+      var elsewhere = { content: "Call the dentist today" };
+      store.snapshot = shell.snapshotWith({ t7: elsewhere });
+      if (!check(ed.contentField.inputActiveFocus && ed.contentField.text === "Call the dentist today", "the untouched field with the keys follows Todoist (" + JSON.stringify(ed.contentField.text) + ")")) return;
+      ed.dueField.focusInput();
+      elsewhere.due = Fixtures.due(shell.today, false, "today");
+      store.snapshot = shell.snapshotWith({ t7: elsewhere });
+      if (!check(ed.dueField.text === "today", "the date follows too (" + JSON.stringify(ed.dueField.text) + ")")) return;
+      ed.deadlineField.focusInput();
+      elsewhere.deadline = "2026-12-01";
+      store.snapshot = shell.snapshotWith({ t7: elsewhere });
+      if (!check(ed.deadlineField.text === "2026-12-01", "the deadline follows too (" + JSON.stringify(ed.deadlineField.text) + ")")) return;
+      ed.descriptionField.focusInput();
+      store.description = { id: "t7", state: "ready", text: "Seven, from elsewhere", truncated: false };
+      if (!check(ed.descriptionField.text === "Seven, from elsewhere", "the description follows too (" + JSON.stringify(ed.descriptionField.text) + ")")) return;
+      ed.contentField.focusInput();
+      if (!check(Object.keys(ed.pending).length === 0 && !store.busy, "leaving the untouched fields sent nothing back")) return;
+      ed.contentField.cursorPosition = ed.contentField.text.length;
+      for (var t7c of " now") ev.keyClickChar(t7c, Qt.NoModifier, -1);
+      store.snapshot = shell.snapshotWith({ t7: { content: "Call the dentist soon" } });
+      if (!check(ed.contentField.text === "Call the dentist today now" && ed.dirty("content"), "the typed text stays over Todoist's (" + JSON.stringify(ed.contentField.text) + ")")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      store.snapshot = shell.snapshot();
+      if (!check(ed.contentField.text === "Call the dentist" && ed.dueField.text === "" && ed.deadlineField.text === "" && Object.keys(ed.pending).length === 0, "Esc dropped it; the fields follow back (" + JSON.stringify([ed.contentField.text, ed.dueField.text, ed.deadlineField.text]) + ")")) return;
+      store.description = whole;
+      if (!check(ed.descriptionField.text === "Seven", "the description back")) return;
       // A picked choice that Todoist refuses: Retry sends the same pick again.
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(), { results: { t7: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f502" } } })));
       shell.callsBefore = shell.calls("apply").length;
@@ -1458,6 +1526,8 @@ ShellRoot {
       big1.cursor.hover(big1.firstRowStop + 2);
       if (!check(big1.paneTask === "t1", "hover doesn't move the pane")) return;
       big1.cursor.index = big1.firstRowStop;
+      // The next task has a long description: the pane's form is taller than its view.
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: big1.rows[big1.stops[1]].id, description: "Step one\nStep two\nStep three\nStep four\nStep five\nStep six\nStep seven\nStep eight", truncated: false } }));
       ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
       if (!check(big1.paneTask === big1.rows[big1.stops[1]].id && big1.paneTask !== "t1", "↓ moves the pane (" + big1.paneTask + ")")) return;
       // e: the caret in the pane.
@@ -1470,6 +1540,22 @@ ShellRoot {
       if (!check(!big2.blocked && !big2.editor.activeFocus && store.overlayOpen, "Esc gave the keys back to the list")) return;
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
       if (!check(big2.editor.contentField.inputActiveFocus, "Tab goes into the pane")) return;
+      // Tab through the pane: each focused control scrolls into view; the
+      // first field shows again after it.
+      var paneScroll = shell.find(big2.editor, "editorScroll");
+      var descriptionField = big2.editor.descriptionField;
+      if (!check(descriptionField.height === descriptionField.implicitHeight && descriptionField.height > descriptionField.minimumHeight, "the description field grew with its text (" + JSON.stringify([descriptionField.height, descriptionField.implicitHeight]) + ")")) return;
+      if (!check(paneScroll.contentHeight > paneScroll.height + 1, "the pane's form is taller than its view (" + JSON.stringify([paneScroll.contentHeight, paneScroll.height]) + ")")) return;
+      var inPane = function(item) { var y = item.mapToItem(paneScroll, 0, 0).y; return y >= -1 && y + item.height <= paneScroll.height + 1; };
+      var paneOpen = shell.find(big2.editor, "editOpen");
+      for (var tabs = 0; tabs < 30 && !paneOpen.activeFocus; tabs++) {
+        ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+        var focused = big2.editor.Window.window.activeFocusItem;
+        if (!check(focused && inPane(focused), "Tab " + (tabs + 1) + ": the focused control is in view (" + focused + " at " + (focused ? focused.mapToItem(paneScroll, 0, 0).y : "?") + " of " + paneScroll.height + ")")) return;
+      }
+      if (!check(paneOpen.activeFocus && paneScroll.contentY > 0 && Object.keys(big2.editor.pending).length === 0, "Tab reached Open in Todoist, the pane scrolled, nothing saved (" + paneScroll.contentY + ")")) return;
+      big2.editor.focusFirst();
+      if (!check(big2.editor.contentField.inputActiveFocus && inPane(big2.editor.contentField) && paneScroll.contentY === 0, "the first field: the caret and the pane at the top (" + paneScroll.contentY + ")")) return;
       // Typed in the pane, then a click on another task (no Enter): the
       // text is saved for its own task first, and the keys go to the list.
       shell.paneFrom = big2.paneTask;
@@ -1503,9 +1589,12 @@ ShellRoot {
       ev.mouseClick(thirdSurface, thirdSurface.width * 0.6, thirdSurface.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big5.paneTask === thirdRow.entry.id && store.error === "Enter a deadline as YYYY-MM-DD." && shell.calls("apply").length === shell.callsBefore + 1, "the unsendable draft is said on the list's line (" + JSON.stringify(store.error) + ")")) return;
       store.error = "";
-      // Typed again, then the Week view from the rail: saved as the pane goes.
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
       if (!check(big5.editor.contentField.inputActiveFocus, "Tab into the pane again")) return;
+      shell.draftThenComplete(big5, "button", function() {
+      shell.draftThenComplete(big5, "ring", function() {
+      // Typed again, then the Week view from the rail: saved as the pane goes.
+      big5.editor.contentField.focusInput();
       shell.paneFrom = big5.paneTask;
       shell.paneText = store.model.byId[shell.paneFrom].content + " too";
       var paneChange2 = {};
@@ -1520,6 +1609,8 @@ ShellRoot {
       var weekEntry = shell.find(big5, "rail-week");
       ev.mouseClick(weekEntry, weekEntry.width / 2, weekEntry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big5.weekShown && !big5.editor.visible && !big5.blocked, "the Week view; the pane went, the keys with the list")) return;
+      });
+      });
       break;
     case 86:
       var big2 = shell.overlay().view;

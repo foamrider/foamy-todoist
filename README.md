@@ -172,12 +172,16 @@ Esc gives the keys back to the list. Its caption says "Saving…" or
   view or size, closing the panel) saves what you typed first; a change
   that can't be sent then, such as a deadline that isn't a day, is said on
   the list's error line. A save Todoist refuses shows why under the
-  field, with **Retry**, and keeps your text.
+  field, with **Retry**, and keeps your text. Only what you typed is
+  sent: a field you haven't changed follows the task when it changes in
+  Todoist (also while it has the caret); one you changed keeps your text,
+  and saving it replaces Todoist's.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
-- **Complete** and **Open in Todoist** are at the bottom. A task completed
-  or deleted elsewhere meanwhile: the page says it is no longer in
-  Todoist.
+- **Complete** and **Open in Todoist** are at the bottom. Completing the
+  task (here, or with its row's ring or Space) saves what you typed first.
+  A task completed or deleted elsewhere meanwhile: the page says it is no
+  longer in Todoist.
 
 Ctrl+O on a task opens it in Todoist.
 

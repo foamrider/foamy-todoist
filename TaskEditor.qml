@@ -56,8 +56,9 @@ FocusScope {
   readonly property alias backButton: pageBand.backButton
   readonly property alias labelMenu: labelPicker
 
-  // Saves in flight, {request: {key, typed, fields}}: the field, what it
-  // held when sent (a choice: what was picked) and the `update` fields.
+  // Saves in flight, {request: {key, typed, before, fields}}: the field,
+  // what it held when sent (a choice: what was picked), the field's
+  // baseline before the send and the `update` fields.
   // Each reply is matched to its own request, and only the newest request
   // of a field may change that field: an older reply never replaces a newer
   // draft or what a newer request sent.
@@ -67,6 +68,12 @@ FocusScope {
     return editor.pending[request].fields
   })
   property var errors: ({})
+  // Each text field's baseline: what it held when it last followed the
+  // task (shown, saved, or changed in Todoist while untouched) or was last
+  // sent. A field is dirty only when the user's text differs from it, so
+  // text the user never touched is never sent back over a newer value.
+  // Read imperatively (dirty()), never bound, so it is mutated in place.
+  property var baselines: ({})
   // What each choice (place, priority, labels) asked for last, for Retry.
   property var attempts: ({})
 
@@ -128,17 +135,28 @@ FocusScope {
   function initialOf(key) {
     return Edit.initial(baseNow(), key, descBase())
   }
+  // A text field set to what the task holds: its baseline moves with it
+  // (read back from the field, which may turn CRLF into LF).
+  function setText(key, value) {
+    var input = inputOf(key)
+    input.text = value
+    baselines[key] = input.text
+  }
+  // The user changed the field since its baseline.
+  function touched(key) {
+    var input = inputOf(key)
+    var base = Model.has(baselines, key) ? baselines[key] : ""
+    return key === "description" ? !Edit.sameDescription(input.text, base) : input.text !== base
+  }
   function dirty(key) {
     var input = inputOf(key)
     if (!input || !current())
       return false
-    if (key !== "description")
-      return input.text !== initialOf(key)
     // A cut description is read-only: never saved, or it would replace the
-    // whole one. The text area turns CRLF into LF, so compare without it.
-    if (descTruncated())
+    // whole one.
+    if (key === "description" && descTruncated())
       return false
-    return input.text !== initialOf(key).replace(/\r\n?/g, "\n")
+    return touched(key)
   }
   function descTruncated() {
     return !!desc && desc.state === "ready" && desc.truncated === true
@@ -147,25 +165,25 @@ FocusScope {
   function revert(key) {
     var input = inputOf(key)
     if (input && current())
-      input.text = initialOf(key)
+      setText(key, initialOf(key))
     setError(key, "")
   }
   function revertAll() {
     for (const key of ["content", "due", "deadline"])
       revert(key)
-    descriptionInput.text = descNow() && descNow().state === "ready" ? descNow().text : ""
+    setText("description", descNow() && descNow().state === "ready" ? descNow().text : "")
     errors = ({})
     attempts = ({})
   }
-  // Fields that don't have the keys follow the snapshot, unless they hold
-  // an unsaved change or a failed save's text.
+  // Untouched fields follow the snapshot, also the one with the keys;
+  // one the user changed, with a failed save's text or a save in flight
+  // keeps its text (the user's edit wins when it is saved).
   function follow() {
     if (!current())
       return
     for (const key of ["content", "due", "deadline"]) {
-      const input = inputOf(key)
-      if (!input.inputActiveFocus && errorOf(key) === "" && newest(key) < 0)
-        input.text = initialOf(key)
+      if (!touched(key) && errorOf(key) === "" && newest(key) < 0)
+        setText(key, initialOf(key))
     }
   }
 
@@ -194,18 +212,31 @@ FocusScope {
     next[request] = {
       key: key,
       typed: inputOf(key) ? String(value) : value,
+      before: inputOf(key) && Model.has(baselines, key) ? baselines[key] : "",
       fields: result.fields
     }
     pending = next
+    // What was sent is the field's baseline: typing on from it is the next
+    // change, typing back to the old text is one too.
+    if (inputOf(key))
+      baselines[key] = String(value)
   }
+  // A text field's save (blur, Enter, Ctrl+Enter, leaving the task): only
+  // the user's change is sent. Untouched, the field shows the task again.
   function saveField(key) {
+    if (!dirty(key)) {
+      setError(key, "")
+      if (current() && newest(key) < 0)
+        setText(key, initialOf(key))
+      return
+    }
     save(key, inputOf(key).text)
   }
   // Retry under a field: a text field sends what it holds, a choice what
   // was picked last.
   function retry(key) {
     if (inputOf(key))
-      saveField(key)
+      save(key, inputOf(key).text)
     else if (Model.has(attempts, key))
       save(key, attempts[key])
   }
@@ -224,23 +255,26 @@ FocusScope {
       // field shows (it holds this one's change too).
       if (editor.newest(save.key) > request)
         return
+      var input = editor.inputOf(save.key)
       if (!ok) {
-        // The typed text stays; the line under the field says why.
+        // The typed text stays, a change again (leaving the task resends
+        // it); the line under the field says why.
+        if (input)
+          editor.baselines[save.key] = save.before
         editor.setError(save.key, message !== "" ? message : FoamyI18n.t("Todoist didn't accept the change."))
         return
       }
       // The snapshot has the new value: the field shows it, unless typing went on.
-      var input = editor.inputOf(save.key)
       if (input && input.text === save.typed)
-        input.text = editor.initialOf(save.key)
+        editor.setText(save.key, editor.initialOf(save.key))
     }
     function onModelChanged() {
       editor.follow()
     }
     function onDescriptionChanged() {
       var d = editor.descNow()
-      if (d && d.state === "ready" && !descriptionInput.inputActiveFocus && editor.errorOf("description") === "" && editor.newest("description") < 0)
-        descriptionInput.text = d.text
+      if (d && d.state === "ready" && !editor.touched("description") && editor.errorOf("description") === "" && editor.newest("description") < 0)
+        editor.setText("description", d.text)
     }
   }
 
@@ -303,10 +337,24 @@ FocusScope {
       store.editRefused(errorOf(key))
     }
   }
+  // Complete: the typed changes are saved first (a click here doesn't take
+  // the keys from the field, and the task may leave the snapshot after),
+  // so they reach the queue ahead of the completion.
+  function completeTask() {
+    var id = shownId
+    commit()
+    store.complete(id)
+    if (!pane)
+      back()
+  }
   // The caret in the first field (`e`, Enter on a row in Large).
   function focusFirst() {
-    if (task)
-      contentInput.focusInput()
+    if (!task)
+      return
+    contentInput.focusInput()
+    // The first field is at the top; it may have had the keys already, so
+    // no focus change scrolls to it.
+    scroll.contentY = 0
   }
 
   // ---- keys -----------------------------------------------------------------------
@@ -395,8 +443,31 @@ FocusScope {
     id: wheel
     target: scroll
   }
+  // Focus follow, as FoamySettingsPage: the least scroll that shows the
+  // focused control (Tab, focusFirst()), in the page and the pane.
+  function keepVisible(item) {
+    var ancestor = item
+    while (ancestor && ancestor !== scroll.contentItem)
+      ancestor = ancestor.parent
+    if (!ancestor)
+      return
+    var point = item.mapToItem(scroll.contentItem, 0, 0)
+    var margin = FoamyStyle.gap
+    if (point.y < scroll.contentY)
+      scroll.contentY = Math.max(0, point.y - margin)
+    else if (point.y + item.height > scroll.contentY + scroll.height)
+      scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, point.y + item.height - scroll.height + margin))
+  }
+  Connections {
+    target: editor.Window
+    function onActiveFocusItemChanged() {
+      if (editor.Window.activeFocusItem)
+        editor.keepVisible(editor.Window.activeFocusItem)
+    }
+  }
   Flickable {
     id: scroll
+    objectName: "editorScroll"
     visible: editor.task !== null
     anchors.top: editor.pane ? paneCaption.bottom : pageBand.bottom
     anchors.bottom: parent.bottom
@@ -658,7 +729,6 @@ FocusScope {
           objectName: "editDescription"
           visible: !(editor.desc && editor.desc.state === "ready" && editor.desc.truncated)
           Layout.fillWidth: true
-          Layout.preferredHeight: height
           enabled: !!editor.desc && editor.desc.state === "ready" && !editor.descTruncated()
           placeholderText: !editor.desc || editor.desc.state === "loading" ? FoamyI18n.t("Loading…") : editor.desc.state === "error" ? "" : FoamyI18n.t("Description")
           maximumLength: 32766
@@ -696,11 +766,7 @@ FocusScope {
           focusable: true
           text: FoamyI18n.t("Complete")
           iconName: "check"
-          onClicked: {
-            editor.store.complete(editor.taskId)
-            if (!editor.pane)
-              editor.back()
-          }
+          onClicked: editor.completeTask()
         }
         FoamyButton {
           objectName: "editOpen"

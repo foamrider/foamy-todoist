@@ -103,6 +103,12 @@ function pending(task, saves) {
   return out
 }
 
+// Two descriptions read the same: line ends don't count (the text area
+// turns CRLF into LF, so an untouched CRLF description is no change).
+function sameDescription(a, b) {
+  return String(a).replace(/\r\n?/g, "\n") === String(b).replace(/\r\n?/g, "\n")
+}
+
 // The same names, in any order (a change of case is a change).
 function sameLabels(a, b) {
   return a.length === b.length && JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort())
@@ -179,7 +185,7 @@ function change(task, key, value, description) {
     return send(place.sectionId ? { section_id: place.sectionId } : { project_id: place.projectId, section_id: "" })
   case "description":
     var text = String(value)
-    if (typeof description !== "string" || text === description)
+    if (typeof description !== "string" || sameDescription(text, description))
       return none
     if (chars(text) > MAX_DESCRIPTION)
       return fail(ERRORS.longDescription)
@@ -228,4 +234,4 @@ function placeOptions(model, projects, sectionsOf, noSection) {
 }
 
 if (typeof module !== "undefined")
-  module.exports = { MAX_CONTENT, MAX_DESCRIPTION, ERRORS, chars, validDate, placeValue, parsePlace, initial, pending, change, request, placeOptions }
+  module.exports = { MAX_CONTENT, MAX_DESCRIPTION, ERRORS, chars, validDate, placeValue, parsePlace, initial, pending, sameDescription, change, request, placeOptions }
