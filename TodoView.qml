@@ -937,7 +937,8 @@ PanelKeyCatcher {
   // The list pane around the rows: a gap, the error lines (when shown), and a gap.
   readonly property real listChrome: FoamyStyle.gap + (errorLine.visible ? errorLine.height + FoamyStyle.gapSmall : 0) + FoamyStyle.gap
   readonly property real railHeight: Math.min(railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
-  readonly property real paneHeight: paneShown && !weekShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : 0
+  // The pane (also over the Week view, which then grows to show it).
+  readonly property real paneHeight: paneShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : 0
   readonly property real bodyHeight: large ? Math.max(railHeight, listChrome + listHeight, paneHeight) : wide ? Math.max(railHeight, listChrome + listHeight) : (tabsBox.visible ? tabsBox.height : 0) + listChrome + listHeight
   implicitHeight: editingSettings ? settingsView.implicitHeight : pageShown ? taskEditor.implicitHeight : heroBand.implicitHeight + bodyHeight + (panelFooter.visible ? panelFooter.implicitHeight : 0)
 
