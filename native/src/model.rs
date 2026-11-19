@@ -23,6 +23,9 @@ pub const MAX_LABEL_RECORDS: usize = 2_000;
 pub const MAX_COLLABORATORS: usize = 2_000;
 /// Active "user in shared project" pairs kept.
 pub const MAX_MEMBERSHIPS: usize = 20_000;
+/// Label names `names` lists: the personal ones, then names from tasks
+/// (shared labels) while there is room.
+pub const MAX_LABEL_NAMES: usize = 2_000;
 /// Task content longer than this (in characters) is cut, ending in "…".
 pub const MAX_CONTENT: usize = 500;
 const MAX_NAME: usize = 200;
@@ -519,18 +522,151 @@ impl State {
         Ok(())
     }
 
+    /// The tasks a snapshot lists: those of projects it has (not archived,
+    /// left, or cut by the bound).
+    fn listed_tasks(&self) -> impl Iterator<Item = &Value> {
+        self.tasks.values().filter(|task| {
+            string(task, "project_id").is_some_and(|project| self.projects.contains_key(project))
+        })
+    }
+
+    /// The people active in each shared project, `{"<project id>": ["<user id>", …]}`.
+    fn project_collaborators(&self) -> Value {
+        let mut members = Map::new();
+        for state in self.memberships.values() {
+            if let (Some(project), Some(user)) =
+                (string(state, "project_id"), string(state, "user_id"))
+            {
+                let list = members
+                    .entry(project.to_string())
+                    .or_insert_with(|| json!([]));
+                if let Some(list) = list.as_array_mut() {
+                    list.push(json!(user));
+                }
+            }
+        }
+        Value::Object(members)
+    }
+
+    /// The Inbox's id: the user's, else the project marked as the Inbox.
+    fn inbox_project_id(&self) -> Option<&str> {
+        self.user
+            .as_ref()
+            .and_then(|user| string(user, "inbox_project_id"))
+            .or_else(|| {
+                self.projects
+                    .values()
+                    .find(|project| flag(project, "inbox"))
+                    .and_then(|project| string(project, "id"))
+            })
+    }
+
+    /// The label names to suggest, as the panel's `Model.labelList` builds
+    /// them: the personal labels in `item_order`, then the other names on
+    /// listed tasks (shared labels exist only there) by name, each name
+    /// once ignoring case (a personal one wins). At most
+    /// [`MAX_LABEL_NAMES`] in all: the shared names fill the room the
+    /// personal ones leave, the first by name; the bool says whether some
+    /// were cut.
+    fn label_names(&self) -> (Vec<String>, bool) {
+        let mut personal: Vec<&Value> = self.labels.values().collect();
+        personal.sort_by_key(|label| {
+            let name = string(label, "name").unwrap_or("");
+            (integer(label, "item_order"), name.to_lowercase(), name)
+        });
+        let mut seen = std::collections::BTreeSet::new();
+        let mut names = Vec::new();
+        for name in personal.iter().filter_map(|label| string(label, "name")) {
+            if seen.insert(name.to_lowercase()) {
+                names.push(name.to_string());
+            }
+        }
+        // Keyed by the lowercase name; the first spelling seen stays. Only
+        // the first `room` keys are kept while reading, so up to 20 000
+        // tasks with 50 labels each never build a map of them all.
+        let room = MAX_LABEL_NAMES.saturating_sub(names.len());
+        let mut shared = BTreeMap::new();
+        let mut cut = false;
+        for task in self.listed_tasks() {
+            let labels = task.get("labels").and_then(Value::as_array);
+            for name in labels.into_iter().flatten().filter_map(Value::as_str) {
+                let key = name.to_lowercase();
+                if seen.contains(&key) {
+                    continue;
+                }
+                shared.entry(key).or_insert_with(|| name.to_string());
+                if shared.len() > room {
+                    shared.pop_last();
+                    cut = true;
+                }
+            }
+        }
+        names.extend(shared.into_values());
+        (names, cut)
+    }
+
+    /// What `names` reports: the projects, sections, labels and people the
+    /// launcher suggests, without tasks.
+    pub fn names(&self) -> Value {
+        let pick = |records: &BTreeMap<String, Value>, keys: &[&str]| -> Vec<Value> {
+            records
+                .values()
+                .map(|record| {
+                    let mut out = Map::new();
+                    for key in keys {
+                        out.insert(
+                            (*key).to_string(),
+                            record.get(*key).cloned().unwrap_or(Value::Null),
+                        );
+                    }
+                    Value::Object(out)
+                })
+                .collect()
+        };
+        let (labels, labels_cut) = self.label_names();
+        json!({
+            "inbox_project_id": self.inbox_project_id(),
+            "projects": pick(&self.projects, &["id", "name", "parent_id", "child_order", "inbox", "shared"]),
+            "sections": pick(&self.sections, &["id", "project_id", "name", "section_order"]),
+            "labels": labels,
+            "collaborators": json!(self.collaborators.values().collect::<Vec<_>>()),
+            "project_collaborators": self.project_collaborators(),
+            "truncated": self.truncated || labels_cut,
+        })
+    }
+
+    /// `add`'s short reply for the task `id`: the task (null when the
+    /// snapshot doesn't list it) and its project.
+    pub fn added(&self, id: &str) -> (Value, Value) {
+        let Some(task) = self.tasks.get(id) else {
+            return (Value::Null, Value::Null);
+        };
+        let Some(project) = string(task, "project_id").and_then(|p| self.projects.get(p)) else {
+            return (Value::Null, Value::Null);
+        };
+        let field = |record: &Value, key: &str| record.get(key).cloned().unwrap_or(Value::Null);
+        (
+            json!({
+                "id": field(task, "id"),
+                "content": field(task, "content"),
+                "project_id": field(task, "project_id"),
+                "section_id": field(task, "section_id"),
+                "priority": field(task, "priority"),
+                "labels": field(task, "labels"),
+                "due": field(task, "due"),
+            }),
+            json!({
+                "id": field(project, "id"),
+                "name": field(project, "name"),
+                "inbox": field(project, "inbox"),
+            }),
+        )
+    }
+
     /// What the panel gets. Tasks of projects it doesn't have (archived,
     /// left, or cut by the bound) are left out with them.
     pub fn snapshot(&self) -> Value {
-        let tasks: Vec<&Value> = self
-            .tasks
-            .values()
-            .filter(|task| {
-                task.get("project_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|project| self.projects.contains_key(project))
-            })
-            .collect();
+        let tasks: Vec<&Value> = self.listed_tasks().collect();
         let mut out = Map::new();
         out.insert("user".into(), self.user.clone().unwrap_or(Value::Null));
         out.insert(
@@ -550,20 +686,7 @@ impl State {
             "collaborators".into(),
             json!(self.collaborators.values().collect::<Vec<_>>()),
         );
-        let mut members = Map::new();
-        for state in self.memberships.values() {
-            if let (Some(project), Some(user)) =
-                (string(state, "project_id"), string(state, "user_id"))
-            {
-                let list = members
-                    .entry(project.to_string())
-                    .or_insert_with(|| json!([]));
-                if let Some(list) = list.as_array_mut() {
-                    list.push(json!(user));
-                }
-            }
-        }
-        out.insert("project_collaborators".into(), Value::Object(members));
+        out.insert("project_collaborators".into(), self.project_collaborators());
         out.insert("truncated".into(), json!(self.truncated));
         out.insert("synced_at".into(), json!(self.synced_at));
         Value::Object(out)
@@ -865,6 +988,131 @@ mod tests {
             .unwrap();
         assert_eq!(state.labels.len(), MAX_LABEL_RECORDS);
         assert!(state.snapshot()["truncated"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn names_list_what_the_launcher_suggests() {
+        assert_eq!(
+            State::empty().names(),
+            json!({"inbox_project_id": null, "projects": [], "sections": [], "labels": [],
+                   "collaborators": [], "project_collaborators": {}, "truncated": false})
+        );
+        let mut state = State::empty();
+        let labelled = |id: &str, project: &str, labels: Value| {
+            let mut t = task(id, "x");
+            t["project_id"] = json!(project);
+            t["labels"] = labels;
+            t
+        };
+        state
+            .merge(
+                &json!({"sync_token": "A", "full_sync": true,
+                "projects": [{"id": "P1", "name": "Inbox", "inbox_project": true, "color": "grey", "child_order": 0},
+                             {"id": "P2", "name": "Team", "parent_id": "P1", "child_order": 3, "shared": true}],
+                "sections": [{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 2}],
+                "labels": [{"id": "L1", "name": "Zeta", "item_order": 1},
+                           {"id": "L2", "name": "alpha", "item_order": 2},
+                           {"id": "L3", "name": "ALPHA", "item_order": 3}],
+                "items": [labelled("T1", "P1", json!(["shared-b", "zeta", "Shared-A"])),
+                          labelled("T2", "P2", json!(["shared-a", "Alpha"])),
+                          // A task of a project not listed adds no label.
+                          labelled("T3", "P9", json!(["hidden"]))],
+                "collaborators": [{"id": "7", "full_name": "Grace", "email": "g@example.com"}],
+                "collaborator_states": [{"project_id": "P2", "user_id": "7", "state": "active"}]}),
+                "x",
+            )
+            .unwrap();
+        assert_eq!(
+            state.names(),
+            json!({"inbox_project_id": "P1",
+                   "projects": [{"id": "P1", "name": "Inbox", "parent_id": null, "child_order": 0, "inbox": true, "shared": false},
+                                {"id": "P2", "name": "Team", "parent_id": "P1", "child_order": 3, "inbox": false, "shared": true}],
+                   "sections": [{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 2}],
+                   "labels": ["Zeta", "alpha", "Shared-A", "shared-b"],
+                   "collaborators": [{"id": "7", "full_name": "Grace", "email": "g@example.com"}],
+                   "project_collaborators": {"P2": ["7"]},
+                   "truncated": false})
+        );
+        // The user's Inbox id wins over the flag.
+        state.user = Some(json!({"id": "1", "inbox_project_id": "P2"}));
+        assert_eq!(state.names()["inbox_project_id"], "P2");
+    }
+
+    #[test]
+    fn names_are_bounded_like_the_snapshot() {
+        let mut state = State::empty();
+        // 2 001 distinct shared names on 41 tasks: the first 2 000 by name stay.
+        let tasks: Vec<Value> = (0..41)
+            .map(|t| {
+                let mut one = task(&format!("T{t}"), "x");
+                one["labels"] = json!(
+                    (0..50)
+                        .map(|l| format!("s{:05}", t * 50 + l))
+                        .filter(|name| name.as_str() <= "s02000")
+                        .collect::<Vec<_>>()
+                );
+                one
+            })
+            .collect();
+        state
+            .merge(
+                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": tasks}),
+                "x",
+            )
+            .unwrap();
+        assert!(!state.truncated);
+        let names = state.names();
+        let labels = names["labels"].as_array().unwrap();
+        assert_eq!(labels.len(), MAX_LABEL_NAMES);
+        assert_eq!(labels[0], "s00000");
+        assert_eq!(labels[MAX_LABEL_NAMES - 1], "s01999");
+        assert_eq!(names["truncated"], true);
+        // Personal labels take room first: the whole list stays at the cap.
+        state.labels.insert(
+            "L1".into(),
+            json!({"id": "L1", "name": "mine", "item_order": 1}),
+        );
+        let names = state.names();
+        let labels = names["labels"].as_array().unwrap();
+        assert_eq!(labels.len(), MAX_LABEL_NAMES);
+        assert_eq!(labels[0], "mine");
+        assert_eq!(labels[MAX_LABEL_NAMES - 1], "s01998");
+        assert_eq!(names["truncated"], true);
+        state.labels.remove("L1");
+        // Exactly the cap: nothing cut.
+        state.tasks.remove("T40");
+        let mut last = task("T40", "x");
+        last["labels"] = json!([]);
+        state.tasks.insert("T40".into(), last);
+        assert_eq!(state.names()["truncated"], false);
+        // A cut snapshot is a cut names list.
+        state.truncated = true;
+        assert_eq!(state.names()["truncated"], true);
+    }
+
+    #[test]
+    fn the_added_task_comes_with_its_project() {
+        let mut state = State::empty();
+        state
+            .merge(
+                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox", "inbox_project": true}],
+                        "items": [task("T1", "Buy milk")]}),
+                "x",
+            )
+            .unwrap();
+        assert_eq!(
+            state.added("T1"),
+            (
+                json!({"id": "T1", "content": "Buy milk", "project_id": "P1", "section_id": null,
+                       "priority": 4, "labels": ["home"],
+                       "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"}}),
+                json!({"id": "P1", "name": "Inbox", "inbox": true})
+            )
+        );
+        assert_eq!(state.added("T9"), (Value::Null, Value::Null));
+        // A task whose project isn't listed isn't in the snapshot either.
+        state.projects.clear();
+        assert_eq!(state.added("T1"), (Value::Null, Value::Null));
     }
 
     #[test]

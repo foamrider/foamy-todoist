@@ -644,6 +644,16 @@ QtObject {
   function openView(kind, id) {
     openUrl(Model.webUrl(kind, id))
   }
+  // IPC `openTask` (Foamy Menu's "Open in Todoist" and its notification):
+  // the same launch as Enter on a task row. The id comes from another
+  // process, so an invalid one is refused and logged, never opened.
+  function openTask(id) {
+    if (!Model.validId(id)) {
+      console.warn("foamy.todoist: openTask refused an invalid task id")
+      return
+    }
+    openView("task", id)
+  }
   function launchNext() {
     if (launchRunning || !launches.length)
       return
