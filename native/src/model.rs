@@ -188,7 +188,11 @@ fn labels(record: &Value) -> (Vec<String>, bool) {
         .take(MAX_LABELS)
         .map(|label| cap(label, MAX_LABEL))
         .collect();
-    (kept, names.len() > MAX_LABELS)
+    // A cached task comes through here again on load with the kept 50:
+    // its saved marker still says the list is partial.
+    let cut =
+        names.len() > MAX_LABELS || record.get("labels_truncated") == Some(&Value::Bool(true));
+    (kept, cut)
 }
 
 pub fn normalize_task(record: &Value) -> Change {
@@ -900,6 +904,11 @@ mod tests {
         };
         assert_eq!(kept["labels"].as_array().unwrap().len(), MAX_LABELS);
         assert_eq!(kept["labels_truncated"], true);
+        // Loading the cache normalizes the kept task again: still partial.
+        let Change::Keep(_, reloaded) = normalize_task(&kept) else {
+            panic!("kept")
+        };
+        assert_eq!(reloaded["labels_truncated"], true);
         record["labels"] = json!((0..MAX_LABELS).map(|n| format!("l{n}")).collect::<Vec<_>>());
         let Change::Keep(_, kept) = normalize_task(&record) else {
             panic!("kept")
