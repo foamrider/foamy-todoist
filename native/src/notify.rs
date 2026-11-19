@@ -77,10 +77,18 @@ fn clean(value: &str) -> String {
 }
 
 /// `&`, `<` and `>` as entities: the body is markup for the daemon.
+/// Untrusted text (a task, project or label name; collaborators can write
+/// them) for the body. Escaping alone is not enough: Omarchy's notification
+/// renderer decodes entities up to three times and then turns
+/// `<a href="…">` back into a link, so "&lt;a href=…&gt;" in a task would
+/// become a clickable link with a made-up label. A WORD JOINER (U+2060,
+/// invisible) after each escaped `&` and `<` keeps any decoding from
+/// producing an entity or a tag: `&lt;a` can't reappear, and `&amp;lt;`
+/// decodes only to the text "&⁠lt;".
 fn escape(value: &str) -> String {
     value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
+        .replace('&', "&amp;\u{2060}")
+        .replace('<', "&lt;\u{2060}")
         .replace('>', "&gt;")
 }
 
@@ -356,15 +364,60 @@ mod tests {
         assert_eq!(shown[2], "Added[31m <now>");
         assert_eq!(
             shown[3],
-            "<b>&lt;i&gt;a&lt;/i&gt; &amp; b  c d</b>\n#R&amp;D &lt;x&gt; · every day · @a&lt;b&gt; @c"
+            "<b>&lt;\u{2060}i&gt;a&lt;\u{2060}/i&gt; &amp;\u{2060} b  c d</b>\n#R&amp;\u{2060}D &lt;\u{2060}x&gt; · every day · @a&lt;\u{2060}b&gt; @c"
         );
         assert_eq!(shown[5], "Open & go");
         let failed = json!({"kind": "unknown", "title": "t", "open_label": "o",
                             "text": "x</b><img src=y>", "detail": "1 < 2\u{1}"});
         assert_eq!(
             argv(&parse(&map(failed)).unwrap())[3],
-            "<b>x&lt;/b&gt;&lt;img src=y&gt;</b>\n1 &lt; 2"
+            "<b>x&lt;\u{2060}/b&gt;&lt;\u{2060}img src=y&gt;</b>\n1 &lt;\u{2060} 2"
         );
+    }
+
+    /// What Omarchy's notification renderer does to a body before it puts
+    /// links back (shell/plugins/notifications/Markup.js decodeEntities):
+    /// up to three passes of entity decoding.
+    fn stock_decode(body: &str) -> String {
+        let mut out = body.to_string();
+        for _ in 0..3 {
+            let once = out
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#60;", "<")
+                .replace("&#x3c;", "<")
+                .replace("&amp;", "&");
+            if once == out {
+                break;
+            }
+            out = once;
+        }
+        out
+    }
+
+    #[test]
+    fn task_text_never_becomes_a_tag_or_a_link_after_decoding() {
+        for content in [
+            r#"<a href="https://example.org/">Open in Todoist</a>"#,
+            r#"&lt;a href="https://example.org/"&gt;Open&lt;/a&gt;"#,
+            r#"&amp;lt;a href=&amp;quot;https://example.org/&amp;quot;&amp;gt;x&amp;lt;/a&amp;gt;"#,
+            r#"&#60;a href="https://example.org/">x</a>"#,
+            "<b>bold</b> &amp; <i>it</i>",
+        ] {
+            let mut request = json!({"kind": "added", "title": "Added", "open_label": "Open",
+                "task": {"id": "T9", "content": content, "project": content, "due": "", "labels": []}});
+            request["text"] = json!(content);
+            let body = argv(&parse(&map(request)).unwrap())[3].clone();
+            let decoded = stock_decode(&body);
+            // Only the helper's own <b>…</b> stays a tag: every other "<" is
+            // followed by the joiner, so no tag or link can start there.
+            let rest = decoded.replacen("<b>", "", 1).replacen("</b>", "", 1);
+            let tag = rest.char_indices().any(|(i, c)| {
+                c == '<' && rest[i + 1..].starts_with(|n: char| n.is_ascii_alphabetic() || n == '/')
+            });
+            assert!(!tag, "{content}: {decoded}");
+        }
     }
 
     #[test]

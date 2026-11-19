@@ -723,7 +723,7 @@ impl State {
         };
         let (labels, labels_cut) = self.label_names();
         let (tasks, tasks_cut) = self.search_tasks();
-        json!({
+        let mut out = json!({
             "inbox_project_id": self.inbox_project_id(),
             "projects": pick(&self.projects, &["id", "name", "parent_id", "child_order", "inbox", "shared"]),
             "sections": pick(&self.sections, &["id", "project_id", "name", "section_order"]),
@@ -732,7 +732,9 @@ impl State {
             "project_collaborators": self.project_collaborators(),
             "tasks": tasks,
             "truncated": self.truncated || labels_cut || tasks_cut,
-        })
+        });
+        fit_names(&mut out, MAX_NAMES_BYTES);
+        out
     }
 
     /// `add`'s short reply for the task `id`: the task (null when the
@@ -787,6 +789,37 @@ impl State {
 
 /// The fields of a task that `add`'s short reply and `names` give other
 /// plugins.
+/// The `names` reply stays under this many bytes as JSON: the launcher reads
+/// at most 16 MiB of it. Each list has its own cap, but text that JSON
+/// escapes (control characters take 6 bytes each) can still pass the sum of
+/// them, so the whole reply is measured too.
+pub const MAX_NAMES_BYTES: usize = 14 << 20;
+
+/// Cuts `names` until its JSON fits `budget`: halving the lists the launcher
+/// can best do without first (the tasks it searches, then sections, people,
+/// labels, projects), then dropping who is in which project. Whatever is
+/// cut sets `truncated`, so the launcher says the lists are partial. Only a
+/// reply over the budget is measured more than once.
+fn fit_names(out: &mut Value, budget: usize) {
+    let size = |value: &Value| serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len());
+    if size(out) <= budget {
+        return;
+    }
+    out["truncated"] = true.into();
+    for key in ["tasks", "sections", "collaborators", "labels", "projects"] {
+        while size(out) > budget {
+            let Some(list) = out[key].as_array_mut().filter(|list| !list.is_empty()) else {
+                break;
+            };
+            let keep = list.len() / 2;
+            list.truncate(keep);
+        }
+    }
+    if size(out) > budget {
+        out["project_collaborators"] = json!({});
+    }
+}
+
 /// A task as the launcher's search keeps it: [`task_brief`] with the text
 /// cut to [`MAX_SEARCH_CONTENT`] and at most [`MAX_SEARCH_LABELS`] labels.
 fn search_brief(task: &Value) -> Value {
@@ -1291,6 +1324,32 @@ mod tests {
                    "due": {"date": "2026-01-01", "is_recurring": false, "string": "2026-01-01"}})
         );
         assert_eq!(names["truncated"], false);
+    }
+
+    #[test]
+    fn a_names_reply_over_its_byte_budget_is_cut_and_marked_partial() {
+        // Control characters are 6 bytes each in JSON: 400 tasks of 200 fit
+        // every list cap but not a 300 KB budget.
+        let task = json!({"id": "T", "content": "\u{1}".repeat(200), "labels": []});
+        let mut out = json!({"projects": [{"id": "P", "name": "Inbox"}], "sections": [],
+            "labels": [], "collaborators": [], "project_collaborators": {"P": ["U"]},
+            "tasks": vec![task; 400], "truncated": false});
+        fit_names(&mut out, 300_000);
+        let bytes = serde_json::to_vec(&out).unwrap().len();
+        assert!(bytes <= 300_000, "{bytes}");
+        assert_eq!(out["truncated"], true);
+        assert!(!out["tasks"].as_array().unwrap().is_empty());
+        assert_eq!(
+            out["projects"].as_array().unwrap().len(),
+            1,
+            "projects kept while tasks can go"
+        );
+        // Within the budget nothing changes.
+        let small = json!({"projects": [], "sections": [], "labels": [], "collaborators": [],
+            "project_collaborators": {}, "tasks": [], "truncated": false});
+        let mut same = small.clone();
+        fit_names(&mut same, 300_000);
+        assert_eq!(same, small);
     }
 
     #[test]

@@ -39,9 +39,10 @@
 //!   (earliest, so overdue, first; compared as Todoist's text), then
 //!   undated ones; ties by project (the Inbox, then the panel's project
 //!   tree), then `child_order`; at most 1 000, each with its text cut to
-//!   200 characters and at most 10 labels. `truncated` when one of
-//!   these lists was cut. Signed out, or before the first sync, every list
-//!   is empty.
+//!   200 characters and at most 10 labels. The whole reply stays under
+//!   14 MiB of JSON: past that the tasks, then sections, people, labels and
+//!   projects are halved. `truncated` when one of these lists was cut.
+//!   Signed out, or before the first sync, every list is empty.
 //! - `token-set` reads at most 4 KiB; the token is 1–256 printable ASCII
 //!   characters without whitespace. The cache directory is checked first,
 //!   then the token with a Sync request for the user (401/403:
@@ -114,8 +115,10 @@
 //!   its button runs `omarchy-shell foamy.todoist openTask <id>`; `failed`
 //!   and `unknown` show `text` in bold, then `detail`, and the button runs
 //!   `omarchy-shell foamy.todoist openInbox`. Control characters are
-//!   removed from every text, and `&`, `<`, `>` escaped in the body (the
-//!   headline and the button are plain text); a `title` or `detail` that
+//!   removed from every text, and `&`, `<`, `>` escaped in the body, with
+//!   an invisible WORD JOINER after `&` and `<`: Omarchy's renderer decodes
+//!   entities again and would turn an escaped `<a href>` in a task into a
+//!   link (the headline and the button are plain text); a `title` or `detail` that
 //!   starts with `-` is refused (the sender could read it as an option).
 //!   The texts are in the sender's argv for that moment. Reply
 //!   `{"ok":true}`, else `INVALID_ARGUMENT` or `NOTIFY_FAILED` (the sender
