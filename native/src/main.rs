@@ -28,11 +28,19 @@
 //!   `{"ok":true,"state":…,"inbox_project_id":…|null,
 //!   "projects":[{"id","name","parent_id","child_order","inbox","shared"}],
 //!   "sections":[{"id","project_id","name","section_order"}],"labels":["name",…],
-//!   "collaborators":[…],"project_collaborators":{…},"truncated":bool}`
+//!   "collaborators":[…],"project_collaborators":{…},
+//!   "tasks":[{"id","content","project_id","section_id","priority","labels",
+//!   "due":{"date","is_recurring","string"}|null}],"truncated":bool}`
 //!   (the same records and bounds as the snapshot below). `labels` are the
 //!   personal labels in `item_order`, then the other names on open tasks
 //!   (shared labels) by name, each once ignoring case, at most 2 000
-//!   names in all (`truncated` when some were cut). Signed out, or before the first sync, every list is empty.
+//!   names in all. `tasks` are the open tasks the panel lists (assigned to
+//!   others too), for the launcher's task search: dated ones by `due.date`
+//!   (earliest, so overdue, first; compared as Todoist's text), then
+//!   undated ones; ties by project (the Inbox, then the panel's project
+//!   tree), then `child_order`; at most 5 000. `truncated` when one of
+//!   these lists was cut. Signed out, or before the first sync, every list
+//!   is empty.
 //! - `token-set` reads at most 4 KiB; the token is 1–256 printable ASCII
 //!   characters without whitespace. The cache directory is checked first,
 //!   then the token with a Sync request for the user (401/403:

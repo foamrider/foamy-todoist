@@ -26,6 +26,8 @@ pub const MAX_MEMBERSHIPS: usize = 20_000;
 /// Label names `names` lists: the personal ones, then names from tasks
 /// (shared labels) while there is room.
 pub const MAX_LABEL_NAMES: usize = 2_000;
+/// Tasks `names` lists for the launcher's task search; more sets `truncated`.
+pub const MAX_SEARCH_TASKS: usize = 5_000;
 /// Task content longer than this (in characters) is cut, ending in "…".
 pub const MAX_CONTENT: usize = 500;
 const MAX_NAME: usize = 200;
@@ -605,8 +607,97 @@ impl State {
         (names, cut)
     }
 
+    /// Each project's place in the panel's order: the Inbox first, then the
+    /// project tree as `Model.projectTree` walks it (roots, each followed by
+    /// its subprojects, siblings by `child_order`, name, id). Projects the
+    /// tree never reaches (a parent cycle, another project flagged as the
+    /// Inbox) come last, by id, so every listed project has a rank.
+    fn project_ranks(&self) -> BTreeMap<&str, usize> {
+        let inbox = self.inbox_project_id();
+        let mut roots = Vec::new();
+        let mut children: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
+        for project in self.projects.values() {
+            if string(project, "id") == inbox || flag(project, "inbox") {
+                continue;
+            }
+            let parent = string(project, "parent_id")
+                .filter(|parent| self.projects.contains_key(*parent) && Some(*parent) != inbox);
+            match parent {
+                Some(parent) => children.entry(parent).or_default().push(project),
+                None => roots.push(project),
+            }
+        }
+        fn key<'a>(project: &&'a Value) -> (i64, &'a str, &'a str) {
+            (
+                integer(project, "child_order"),
+                string(project, "name").unwrap_or(""),
+                string(project, "id").unwrap_or(""),
+            )
+        }
+        let mut ranks = BTreeMap::new();
+        if let Some(inbox) = inbox {
+            ranks.insert(inbox, 0);
+        }
+        // Depth first without recursion: a chain of 2 000 subprojects must
+        // not grow the call stack. Siblings go on the stack in reverse.
+        roots.sort_by_key(key);
+        let mut stack: Vec<&Value> = roots.into_iter().rev().collect();
+        while let Some(project) = stack.pop() {
+            let Some(id) = string(project, "id") else {
+                continue;
+            };
+            let next = ranks.len();
+            ranks.entry(id).or_insert(next);
+            if let Some(mut list) = children.remove(id) {
+                list.sort_by_key(key);
+                stack.extend(list.into_iter().rev());
+            }
+        }
+        for id in self.projects.keys() {
+            let next = ranks.len();
+            ranks.entry(id.as_str()).or_insert(next);
+        }
+        ranks
+    }
+
+    /// The open tasks for the launcher's task search, every one the panel
+    /// lists (assigned to others too): dated ones by `due.date` (earliest,
+    /// so overdue, first), then undated ones; ties by the project's place
+    /// in the panel's order, then `child_order`, then id. At most
+    /// [`MAX_SEARCH_TASKS`]; the bool says whether some were cut.
+    fn search_tasks(&self) -> (Vec<Value>, bool) {
+        let ranks = self.project_ranks();
+        let mut tasks: Vec<_> = self
+            .listed_tasks()
+            .map(|task| {
+                let due = task.get("due").and_then(|due| string(due, "date"));
+                let rank = string(task, "project_id")
+                    .and_then(|project| ranks.get(project))
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                let key = (
+                    due.is_none(),
+                    due.unwrap_or(""),
+                    rank,
+                    integer(task, "child_order"),
+                    string(task, "id").unwrap_or(""),
+                );
+                (key, task)
+            })
+            .collect();
+        // Ids are unique, so the key orders every pair: no stable sort needed.
+        tasks.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let cut = tasks.len() > MAX_SEARCH_TASKS;
+        let list = tasks
+            .into_iter()
+            .take(MAX_SEARCH_TASKS)
+            .map(|(_, task)| task_brief(task))
+            .collect();
+        (list, cut)
+    }
+
     /// What `names` reports: the projects, sections, labels and people the
-    /// launcher suggests, without tasks.
+    /// launcher suggests, and the open tasks it searches.
     pub fn names(&self) -> Value {
         let pick = |records: &BTreeMap<String, Value>, keys: &[&str]| -> Vec<Value> {
             records
@@ -624,6 +715,7 @@ impl State {
                 .collect()
         };
         let (labels, labels_cut) = self.label_names();
+        let (tasks, tasks_cut) = self.search_tasks();
         json!({
             "inbox_project_id": self.inbox_project_id(),
             "projects": pick(&self.projects, &["id", "name", "parent_id", "child_order", "inbox", "shared"]),
@@ -631,7 +723,8 @@ impl State {
             "labels": labels,
             "collaborators": json!(self.collaborators.values().collect::<Vec<_>>()),
             "project_collaborators": self.project_collaborators(),
-            "truncated": self.truncated || labels_cut,
+            "tasks": tasks,
+            "truncated": self.truncated || labels_cut || tasks_cut,
         })
     }
 
@@ -646,15 +739,7 @@ impl State {
         };
         let field = |record: &Value, key: &str| record.get(key).cloned().unwrap_or(Value::Null);
         (
-            json!({
-                "id": field(task, "id"),
-                "content": field(task, "content"),
-                "project_id": field(task, "project_id"),
-                "section_id": field(task, "section_id"),
-                "priority": field(task, "priority"),
-                "labels": field(task, "labels"),
-                "due": field(task, "due"),
-            }),
+            task_brief(task),
             json!({
                 "id": field(project, "id"),
                 "name": field(project, "name"),
@@ -691,6 +776,24 @@ impl State {
         out.insert("synced_at".into(), json!(self.synced_at));
         Value::Object(out)
     }
+}
+
+/// The fields of a task that `add`'s short reply and `names` give other
+/// plugins.
+fn task_brief(task: &Value) -> Value {
+    let mut out = Map::new();
+    for key in [
+        "id",
+        "content",
+        "project_id",
+        "section_id",
+        "priority",
+        "labels",
+        "due",
+    ] {
+        out.insert(key.into(), task.get(key).cloned().unwrap_or(Value::Null));
+    }
+    Value::Object(out)
 }
 
 /// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
@@ -995,7 +1098,7 @@ mod tests {
         assert_eq!(
             State::empty().names(),
             json!({"inbox_project_id": null, "projects": [], "sections": [], "labels": [],
-                   "collaborators": [], "project_collaborators": {}, "truncated": false})
+                   "collaborators": [], "project_collaborators": {}, "tasks": [], "truncated": false})
         );
         let mut state = State::empty();
         let labelled = |id: &str, project: &str, labels: Value| {
@@ -1031,6 +1134,12 @@ mod tests {
                    "labels": ["Zeta", "alpha", "Shared-A", "shared-b"],
                    "collaborators": [{"id": "7", "full_name": "Grace", "email": "g@example.com"}],
                    "project_collaborators": {"P2": ["7"]},
+                   "tasks": [{"id": "T1", "content": "x", "project_id": "P1", "section_id": null,
+                              "priority": 4, "labels": ["shared-b", "zeta", "Shared-A"],
+                              "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"}},
+                             {"id": "T2", "content": "x", "project_id": "P2", "section_id": null,
+                              "priority": 4, "labels": ["shared-a", "Alpha"],
+                              "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"}}],
                    "truncated": false})
         );
         // The user's Inbox id wins over the flag.
@@ -1088,6 +1197,114 @@ mod tests {
         // A cut snapshot is a cut names list.
         state.truncated = true;
         assert_eq!(state.names()["truncated"], true);
+    }
+
+    #[test]
+    fn names_list_the_open_tasks_in_the_panels_order() {
+        let at = |id: &str, project: &str, date: Option<&str>, order: i64| {
+            let mut t = task(id, id);
+            t["project_id"] = json!(project);
+            t["due"] = date.map_or(
+                Value::Null,
+                |date| json!({"date": date, "is_recurring": false, "string": date}),
+            );
+            t["child_order"] = json!(order);
+            t
+        };
+        let mut others = at("assigned", "PB", None, 5);
+        others["responsible_uid"] = json!("99");
+        let mut state = State::empty();
+        state
+            .merge(
+                &json!({"sync_token": "A", "full_sync": true,
+                "user": {"id": "1", "inbox_project_id": "PI"},
+                "projects": [{"id": "PI", "name": "Inbox", "inbox_project": true},
+                             {"id": "PA", "name": "Alpha", "child_order": 2},
+                             {"id": "PB", "name": "Beta", "child_order": 1},
+                             {"id": "PB1", "name": "Beta sub", "parent_id": "PB", "child_order": 1},
+                             // A parent cycle: the tree never reaches them.
+                             {"id": "PY", "name": "Loop", "parent_id": "PZ"},
+                             {"id": "PZ", "name": "Loop", "parent_id": "PY"},
+                             {"id": "PX", "name": "Old", "is_archived": true},
+                             {"id": "PD", "name": "Gone", "is_deleted": true}],
+                "items": [at("undated-a", "PA", None, 1),
+                          at("undated-b1-second", "PB1", None, 1),
+                          at("undated-b1-first", "PB1", None, 0),
+                          at("undated-inbox", "PI", None, 9),
+                          at("undated-loop", "PY", None, 0),
+                          others,
+                          at("dated-b", "PB", Some("2026-12-01"), 0),
+                          at("dated-inbox-timed", "PI", Some("2026-12-01T10:00:00"), 0),
+                          at("dated-inbox", "PI", Some("2026-12-01"), 3),
+                          at("overdue", "PA", Some("2026-01-01"), 7),
+                          at("archived", "PX", None, 0),
+                          at("deleted", "PD", Some("2026-01-01"), 0)]}),
+                "x",
+            )
+            .unwrap();
+        let names = state.names();
+        let ids: Vec<&str> = names["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "overdue",
+                "dated-inbox",
+                "dated-b",
+                "dated-inbox-timed",
+                "undated-inbox",
+                "assigned",
+                "undated-b1-first",
+                "undated-b1-second",
+                "undated-a",
+                "undated-loop",
+            ]
+        );
+        assert_eq!(
+            names["tasks"][0],
+            json!({"id": "overdue", "content": "overdue", "project_id": "PA", "section_id": null,
+                   "priority": 4, "labels": ["home"],
+                   "due": {"date": "2026-01-01", "is_recurring": false, "string": "2026-01-01"}})
+        );
+        assert_eq!(names["truncated"], false);
+    }
+
+    #[test]
+    fn names_list_at_most_5000_tasks() {
+        let mut state = State::empty();
+        let tasks: Vec<Value> = (0..=MAX_SEARCH_TASKS)
+            .map(|n| {
+                let mut one = task(&format!("T{n}"), "x");
+                one["due"] = Value::Null;
+                one["labels"] = json!([]);
+                one["child_order"] = json!(n);
+                one
+            })
+            .collect();
+        state
+            .merge(
+                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": tasks}),
+                "x",
+            )
+            .unwrap();
+        assert!(!state.truncated);
+        let names = state.names();
+        let listed = names["tasks"].as_array().unwrap();
+        assert_eq!(listed.len(), MAX_SEARCH_TASKS);
+        assert_eq!(
+            listed[MAX_SEARCH_TASKS - 1]["id"],
+            format!("T{}", MAX_SEARCH_TASKS - 1)
+        );
+        assert_eq!(names["truncated"], true);
+        // Exactly the cap: nothing cut.
+        state.tasks.remove(&format!("T{MAX_SEARCH_TASKS}"));
+        let names = state.names();
+        assert_eq!(names["tasks"].as_array().unwrap().len(), MAX_SEARCH_TASKS);
+        assert_eq!(names["truncated"], false);
     }
 
     #[test]

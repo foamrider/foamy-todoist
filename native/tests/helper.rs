@@ -983,7 +983,7 @@ fn names_come_from_the_cache_without_network() {
     let home = Home::new("names");
     let empty = json!({"ok": true, "contract": 1, "inbox_project_id": null, "projects": [],
                        "sections": [], "labels": [], "collaborators": [],
-                       "project_collaborators": {}, "truncated": false});
+                       "project_collaborators": {}, "tasks": [], "truncated": false});
     // Signed out: everything empty.
     let (reply, _) = home.run("names", "", &closed());
     let mut expected = empty.clone();
@@ -999,6 +999,11 @@ fn names_come_from_the_cache_without_network() {
     sync["labels"] = json!([{"id": "L1", "name": "home", "item_order": 2},
                             {"id": "L2", "name": "Work", "item_order": 1}]);
     sync["items"][0]["labels"] = json!(["home", "team-shared"]);
+    sync["items"][1]["project_id"] = json!("P2");
+    sync["items"][1]["due"] =
+        json!({"date": "2026-11-20", "is_recurring": true, "string": "every fri"});
+    sync["items"][1]["section_id"] = json!("S1");
+    sync["items"][2]["child_order"] = json!(0);
     sync["sections"] =
         json!([{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 1}]);
     let server = Server::start(vec![ok(sync)], TOKEN);
@@ -1015,7 +1020,19 @@ fn names_come_from_the_cache_without_network() {
         .map(|p| p["name"].as_str().unwrap())
         .collect();
     assert_eq!(projects, ["Inbox", "Work"]);
-    assert!(reply.get("tasks").is_none() && reply.get("user").is_none());
+    // The open tasks: dated first, then the Inbox's by child_order.
+    assert_eq!(
+        reply["tasks"],
+        json!([{"id": "T2", "content": "two", "project_id": "P2", "section_id": "S1",
+                "priority": 1, "labels": [],
+                "due": {"date": "2026-11-20", "is_recurring": true, "string": "every fri"}},
+               {"id": "T3", "content": "three", "project_id": "P1", "section_id": null,
+                "priority": 1, "labels": [], "due": null},
+               {"id": "T1", "content": "one", "project_id": "P1", "section_id": null,
+                "priority": 1, "labels": ["home", "team-shared"], "due": null}])
+    );
+    assert_eq!(reply["truncated"], false);
+    assert!(reply.get("user").is_none());
     // A locked keyring is an error, not an empty list.
     fs::write(home.bin().join("locked"), "").unwrap();
     let (reply, _) = home.run("names", "", &closed());
