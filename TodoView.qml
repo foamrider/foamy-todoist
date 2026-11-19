@@ -508,7 +508,7 @@ PanelKeyCatcher {
         kind: "view",
         value: "week",
         text: FoamyI18n.t("Week"),
-        iconName: "clock",
+        iconName: "calendar-range",
         count: -1
       })
     var projects = Model.railProjects(store.model, counts.projects)

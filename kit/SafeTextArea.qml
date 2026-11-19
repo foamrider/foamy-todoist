@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 f002f716fb9c7fbb50864b33c48365ec888c23aab7304628a293220ed836694e — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 13ac77166dfe020049e04c225746fca584bd7dbe91500619ec4ca5b4bed25c5a — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.Commons
@@ -229,7 +229,8 @@ Flickable {
   color: foreground
   selectionColor: selectionTint
   selectedTextColor: foreground
-  placeholderTextColor: Qt.darker(foreground, 1.6)
+  // A hint: the palette's muted text (as SafeTextField).
+  placeholderTextColor: FoamyPalette.mutedText
   wrapMode: TextEdit.Wrap
   leftPadding: FoamyStyle.controlPaddingX + Border.left(_borderSpec)
   rightPadding: FoamyStyle.controlPaddingX + Border.right(_borderSpec)
