@@ -1,4 +1,4 @@
-// foamy-kit 0.12.1 ae76311ecab592565b50a170021c66b6512aa47d3499004b4dfed92a2977d797 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 ae76311ecab592565b50a170021c66b6512aa47d3499004b4dfed92a2977d797 — do not edit; change foamy-kit and run sync
 import QtQuick
 
 // Normal wheel and touchpad scrolling for a Flickable (ListView, GridView…),
