@@ -22,7 +22,7 @@ run() {
   "$@" || status=1
 }
 skip() { echo "SKIP $*"; }
-run node --test tests/model.test.cjs tests/i18n.test.cjs tests/preferences.test.cjs
+run node --test tests/model.test.cjs tests/edit.test.cjs tests/i18n.test.cjs tests/preferences.test.cjs
 if ((ci || fast)); then
   skip "the kit's preview/i18n_runtime.py and tests/runtime.py: offscreen Quickshell"
 else

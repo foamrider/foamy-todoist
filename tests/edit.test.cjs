@@ -1,0 +1,97 @@
+// Edit.js: one field's save holds only what changed, checked before it is sent.
+process.env.TZ = 'Europe/Oslo';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const Edit = require('../Edit.js');
+const Model = require('../Model.js');
+const Fixtures = require('../preview/Fixtures.js');
+
+const TODAY = '2026-11-16';
+const model = Model.index(Fixtures.snapshot(TODAY));
+// t4: "Review **pull request** #482" in Work › Review, p3 (API 2), @code, today 14:00.
+const t4 = model.byId.t4;
+const change = (key, value, description) => Edit.change(t4, key, value, description);
+
+test('an unchanged field sends nothing', () => {
+  for (const key of ['content', 'due', 'deadline', 'priority', 'labels', 'place'])
+    assert.deepEqual(change(key, Edit.initial(t4, key)), { fields: null, error: '' }, key);
+  assert.deepEqual(change('description', 'Notes', 'Notes'), { fields: null, error: '' });
+  // Surrounding spaces are not a change.
+  assert.deepEqual(change('content', `  ${t4.content} `), { fields: null, error: '' });
+  // The label order is not a change; the case is.
+  const two = Object.assign({}, t4, { labels: ['a', 'b'] });
+  assert.equal(Edit.change(two, 'labels', ['b', 'a']).fields, null);
+  assert.deepEqual(Edit.change(two, 'labels', ['A', 'b']).fields, { labels: ['A', 'b'] });
+});
+
+test('each field sends only itself, in the helper names', () => {
+  assert.equal(Edit.initial(t4, 'content'), 'Review **pull request** #482', 'the raw content, Markdown kept');
+  assert.deepEqual(change('content', ' Review it '), { fields: { content: 'Review it' }, error: '' });
+  assert.deepEqual(change('due', 'next monday 9am').fields, { due_string: 'next monday 9am' });
+  assert.deepEqual(change('deadline', '2026-12-01').fields, { deadline: '2026-12-01' });
+  assert.deepEqual(change('priority', 4).fields, { priority: 4 });
+  assert.deepEqual(change('labels', ['code', 'office']).fields, { labels: ['code', 'office'] });
+  assert.deepEqual(change('labels', []).fields, { labels: [] });
+  assert.deepEqual(change('description', 'Line 1\nLine 2\tend', 'old').fields, { description: 'Line 1\nLine 2\tend' });
+  assert.deepEqual(change('description', '', 'old').fields, { description: '' });
+  // The request: one update command for the task.
+  assert.deepEqual(Edit.request('t4', { priority: 4 }), { commands: [{ op: 'update', id: 't4', priority: 4 }] });
+});
+
+test('an emptied date or deadline removes it; an empty one on a task without stays', () => {
+  assert.deepEqual(Edit.change(model.byId.t3, 'due', '').fields, { due_string: '' });
+  // A date without Todoist's words starts empty: empty is no change.
+  assert.equal(change('due', '').fields, null);
+  assert.deepEqual(change('deadline', '').fields, null, 't4 has no deadline');
+  const withDeadline = Object.assign({}, t4, { deadline: '2026-11-20' });
+  assert.deepEqual(Edit.change(withDeadline, 'deadline', ' ').fields, { deadline: '' });
+  const undated = model.byId.t7;
+  assert.equal(Edit.change(undated, 'due', '').fields, null);
+});
+
+test('moves: only what the user changed', () => {
+  // Another project's root, another project's section, this project's root.
+  assert.deepEqual(change('place', 'home/').fields, { project_id: 'home' });
+  assert.deepEqual(change('place', 'work/s-ops').fields, { section_id: 's-ops' });
+  assert.deepEqual(change('place', 'work/').fields, { project_id: 'work', section_id: '' });
+  const inbox = model.byId.t6;
+  assert.deepEqual(Edit.change(inbox, 'place', 'work/s-review').fields, { project_id: 'work', section_id: 's-review' });
+  assert.equal(change('place', '/').fields, null);
+});
+
+test('what the helper would refuse is caught first, with its message', () => {
+  assert.equal(change('content', '   ').error, 'Enter a task.');
+  assert.equal(change('content', 'x'.repeat(501)).error, 'A task can have at most 500 characters.');
+  assert.equal(change('content', '😀'.repeat(500)).error, '', '500 characters, though 1000 UTF-16 units');
+  assert.equal(change('content', 'a\u0007b').error, "A task can't have line breaks or other control characters.");
+  assert.equal(change('due', 'x'.repeat(201)).error, 'Enter the date in words, at most 200 characters.');
+  for (const bad of ['2026-02-30', '26-12-01', 'friday', '2026-1-1'])
+    assert.equal(change('deadline', bad).error, 'Enter a deadline as YYYY-MM-DD.', bad);
+  assert.equal(change('labels', ['a', 'A']).error, 'A label is given twice.');
+  assert.equal(change('labels', ['x'.repeat(61)]).error, 'Give at most 50 labels of 1 to 60 characters each, without control characters.');
+  assert.equal(change('labels', Array.from({ length: 51 }, (_, i) => `l${i}`)).error, 'Give at most 50 labels of 1 to 60 characters each, without control characters.');
+  assert.equal(change('description', 'x'.repeat(16384), '').error, 'A description can have at most 16383 characters.');
+  assert.equal(change('description', 'a\u0000b', '').error, "A description can't have control characters other than line breaks and tabs.");
+  // Every message is a helper catalog key.
+  const en = require('../i18n/en.json');
+  for (const key of Object.values(Edit.ERRORS)) assert.ok(Object.hasOwn(en, key), key);
+});
+
+test('cut labels and an unloaded description are never sent', () => {
+  const cut = Object.assign({}, t4, { labelsTruncated: true });
+  assert.equal(Edit.change(cut, 'labels', ['other']).fields, null);
+  assert.equal(change('description', 'typed', undefined).fields, null);
+});
+
+test('the place dropdown: projects in order, each with its sections; or one project\'s sections', () => {
+  const projects = [{ id: 'inbox', name: 'Inbox' }].concat(Model.railProjects(model, {}));
+  const all = Edit.placeOptions(model, projects);
+  assert.deepEqual(all.slice(0, 4).map((o) => [o.value, o.label]), [
+    ['inbox/', 'Inbox'],
+    ['work/', 'Work'],
+    ['work/s-review', 'Work › Review'],
+    ['work/s-ops', 'Work › Ops'],
+  ]);
+  assert.deepEqual(Edit.placeOptions(model, projects, 'work', 'No section').map((o) => o.label), ['No section', 'Review', 'Ops']);
+  assert.deepEqual(Edit.parsePlace('work/s-ops'), { projectId: 'work', sectionId: 's-ops' });
+});
