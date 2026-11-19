@@ -1,14 +1,14 @@
 # foamy-kit.lock: written by foamy-kit sync.sh; do not edit.
 # Hashes are of each file's body (the file without its stamp line);
 # notices and REVIEW.md are hashed whole. tests/kit-check.sh verifies them.
-version 0.12.0
-source 2538b3ad1669f09d99a3c0851a7867c294e76084
+version 0.12.1
+source b0e700ddbf81b26d21d601c9dcbde2851121ef63
 components FoamyAction,FoamyButton,FoamyClipboard,FoamyCursor,FoamyDropdown,FoamyHeader,FoamyHeroBand,FoamyI18n,FoamyIcon,FoamyInfoNote,FoamyIpc,FoamyMenu,FoamyMotion,FoamyNative,FoamyNumberField,FoamyPalette,FoamyPanelFooter,FoamyPopup,FoamyPrefs,FoamySettings,FoamyShared,FoamyStyle,FoamyTabs,FoamyText,FoamyWallClock,FoamyWheelScroll,SafeTextField
 5079c3e4ecd2ca5399dff48f64327729d8e84916a4c73fbcb9e0491b16014990  .github/workflows/checks.yml
 98bd9e4430551129a6f4c309ee8ba59b66514db5ca1d4c5b7151ec308f6d632b  .github/workflows/verify-native.yml
 23adc6c9c393c6f29eab5dcbabc13a27a38abdee1cf78c07efb69879dc28f6f7  .oxlintrc.json
 771e7eeb95d50551c7a7a8038f0d033ad3385a63b90f6d767133f5f15b872d5a  .qmlformat.ini
-f486b8b76dc0d143efdf29b506e3cf39c67a797e37cd0fcf6f269fb95e95bae0  REVIEW.md
+d54e207b22d24631b957bef1c6e308dd144e38db31bc6fa29fb9d9de4346311a  REVIEW.md
 36b6a8f3b7ca613a7652eae6e5ada16595d8c9f846ee6b1505417bbb06ba3e7a  kit/FoamyAction.qml
 4832a4672f7b84bd6caf8ebf70823a2077c78329e576c4b18962d41e36f4b195  kit/FoamyButton.qml
 72e6ada917c8a212adcb224e4f7420ab753965c0fc03ddb1a27b2955305eb0e1  kit/FoamyClipboard.qml
@@ -63,7 +63,7 @@ f13ac89b575cec786e8e5a1daf8f4d9a52265ca928b89653e689f0f103aba62b  kit/rust/foamy
 679f2ef456edb218d8a465a3ff6638cede2d0ceb9b884e9dcba72e88d6133464  kit/rust/foamy-helper/src/favicon/tests.rs
 2f17136d803e674f7a0576813750d8406680381102023f4669102bbceadc1555  kit/rust/foamy-helper/src/fs.rs
 444eba5d6f73ead3d00fecbe31574cfc3c260cd220d162448a12ac28ef0ca13c  kit/rust/foamy-helper/src/hash.rs
-17d4cde5814661e1eedce8abdb7ea1e46ef8f9a588d3454920e5fdba99b83c0c  kit/rust/foamy-helper/src/io.rs
+9a9f20618fae90ac83706a645329ac25fe6180ed841d9004b3e0f759c29a6af4  kit/rust/foamy-helper/src/io.rs
 f086c00ed761a46bea42c7ff4e69cb7a0558d6b5c8c26794f95bf0d96de2a316  kit/rust/foamy-helper/src/json.rs
 2031c896c17cb22f18bf68cedd06b6e6db13ddeea700850d743f7de891e80797  kit/rust/foamy-helper/src/lib.rs
 ebfadf5a33e10c001e6c9d83e0c02ea3f79003807fc4b0ecc655d7427bac54a2  kit/rust/foamy-helper/src/lock.rs

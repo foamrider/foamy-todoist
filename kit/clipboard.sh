@@ -1,5 +1,5 @@
 #!/bin/bash
-# foamy-kit 0.12.0 d4706efaf23739bf5520e9243518865059dce66a6a301a9a0666bdb96dadffc9 — do not edit; change foamy-kit and run sync
+# foamy-kit 0.12.1 d4706efaf23739bf5520e9243518865059dce66a6a301a9a0666bdb96dadffc9 — do not edit; change foamy-kit and run sync
 # Bounded clipboard read for a field that must never let Qt paste itself.
 #
 #   bash kit/clipboard.sh clipboard|primary
