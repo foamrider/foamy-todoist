@@ -38,7 +38,8 @@
 //!   others too), for the launcher's task search: dated ones by `due.date`
 //!   (earliest, so overdue, first; compared as Todoist's text), then
 //!   undated ones; ties by project (the Inbox, then the panel's project
-//!   tree), then `child_order`; at most 5 000. `truncated` when one of
+//!   tree), then `child_order`; at most 1 000, each with its text cut to
+//!   200 characters and at most 10 labels. `truncated` when one of
 //!   these lists was cut. Signed out, or before the first sync, every list
 //!   is empty.
 //! - `token-set` reads at most 4 KiB; the token is 1–256 printable ASCII

@@ -27,7 +27,14 @@ pub const MAX_MEMBERSHIPS: usize = 20_000;
 /// (shared labels) while there is room.
 pub const MAX_LABEL_NAMES: usize = 2_000;
 /// Tasks `names` lists for the launcher's task search; more sets `truncated`.
-pub const MAX_SEARCH_TASKS: usize = 5_000;
+/// The launcher keeps them in the shell's memory and searches them on every
+/// keystroke, so the list stays small: about 2.6 MB with every task, text and
+/// label at its longest, a few hundred bytes per task in practice.
+pub const MAX_SEARCH_TASKS: usize = 1_000;
+/// A searched task's text, cut ending in "…"; enough to find and show it.
+pub const MAX_SEARCH_CONTENT: usize = 200;
+/// Labels kept per searched task.
+pub const MAX_SEARCH_LABELS: usize = 10;
 /// Task content longer than this (in characters) is cut, ending in "…".
 pub const MAX_CONTENT: usize = 500;
 const MAX_NAME: usize = 200;
@@ -691,7 +698,7 @@ impl State {
         let list = tasks
             .into_iter()
             .take(MAX_SEARCH_TASKS)
-            .map(|(_, task)| task_brief(task))
+            .map(|(_, task)| search_brief(task))
             .collect();
         (list, cut)
     }
@@ -780,6 +787,19 @@ impl State {
 
 /// The fields of a task that `add`'s short reply and `names` give other
 /// plugins.
+/// A task as the launcher's search keeps it: [`task_brief`] with the text
+/// cut to [`MAX_SEARCH_CONTENT`] and at most [`MAX_SEARCH_LABELS`] labels.
+fn search_brief(task: &Value) -> Value {
+    let mut out = task_brief(task);
+    if let Some(content) = out["content"].as_str() {
+        out["content"] = cap(content, MAX_SEARCH_CONTENT).into();
+    }
+    if let Some(labels) = out["labels"].as_array_mut() {
+        labels.truncate(MAX_SEARCH_LABELS);
+    }
+    out
+}
+
 fn task_brief(task: &Value) -> Value {
     let mut out = Map::new();
     for key in [
@@ -1274,7 +1294,37 @@ mod tests {
     }
 
     #[test]
-    fn names_list_at_most_5000_tasks() {
+    fn searched_tasks_are_cut_to_200_characters_and_10_labels() {
+        let mut state = State::empty();
+        let mut long = task("T1", &"é".repeat(MAX_CONTENT));
+        long["labels"] = json!((0..12).map(|n| format!("l{n}")).collect::<Vec<_>>());
+        state
+            .merge(
+                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": [long]}),
+                "x",
+            )
+            .unwrap();
+        let listed = state.names()["tasks"][0].clone();
+        let content = listed["content"].as_str().unwrap();
+        assert_eq!(content.chars().count(), MAX_SEARCH_CONTENT);
+        assert!(content.ends_with('…'));
+        assert_eq!(
+            listed["labels"].as_array().unwrap().len(),
+            MAX_SEARCH_LABELS
+        );
+        // The add reply keeps the whole task.
+        assert_eq!(
+            state.added("T1").0["content"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            MAX_CONTENT
+        );
+    }
+
+    #[test]
+    fn names_list_at_most_1000_tasks() {
         let mut state = State::empty();
         let tasks: Vec<Value> = (0..=MAX_SEARCH_TASKS)
             .map(|n| {

@@ -204,8 +204,8 @@ to Todoist stay here. Every reply has `"contract": 1`, the version of the
 replies other plugins read. The commands they use:
 
 - `names`: the projects, sections, labels and people in the cache, for
-  suggestions, and the open tasks (at most 5 000, dated ones first), for
-  the launcher's task search. No network; empty lists when signed out or
+  suggestions, and the open tasks (at most 1 000, dated ones first, each
+  cut to 200 characters and 10 labels), for the launcher's task search. No network; empty lists when signed out or
   before the first sync.
 - `add` with `"reply": "task"`: adds as the panel does, but replies with the
   added task and its project instead of every task.
