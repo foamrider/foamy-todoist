@@ -40,6 +40,8 @@ FocusScope {
   readonly property var store: TodoStore
   readonly property bool pane: mode === "pane"
   readonly property var task: taskId !== "" && store.model.byId[taskId] ? store.model.byId[taskId] : null
+  // The task as the saves in flight will leave it: the choices show it.
+  readonly property var base: task ? Edit.pending(task, inFlight) : null
   // The task went from the snapshot (completed or deleted elsewhere).
   readonly property bool gone: taskId !== "" && task === null
   readonly property var desc: store.description.id === taskId && taskId !== "" ? store.description : null
@@ -54,22 +56,54 @@ FocusScope {
   readonly property alias backButton: pageBand.backButton
   readonly property alias labelMenu: labelPicker
 
-  // Saves in flight, {request: field key}, and each field's error.
+  // Saves in flight, {request: {key, typed, fields}}: the field, what it
+  // held when sent (a choice: what was picked) and the `update` fields.
+  // Each reply is matched to its own request, and only the newest request
+  // of a field may change that field: an older reply never replaces a newer
+  // draft or what a newer request sent.
   property var pending: ({})
+  // Their `update` fields, oldest first (for Edit.pending).
+  readonly property var inFlight: requests().map(function (request) {
+    return editor.pending[request].fields
+  })
   property var errors: ({})
-  // What each text field sent last ({key: text}): a reply resets the field
-  // only where it still holds that.
-  property var sent: ({})
   // What each choice (place, priority, labels) asked for last, for Retry.
   property var attempts: ({})
 
-  // The task now: a binding may not have caught up with taskId yet when
-  // these functions run (onTaskIdChanged).
+  // The task the fields belong to (shownId): while the editor changes task,
+  // the fields still hold the old one's text, and its edits go to it.
   function current() {
-    return taskId !== "" && store.model.byId[taskId] ? store.model.byId[taskId] : null
+    return shownId !== "" && store.model.byId[shownId] ? store.model.byId[shownId] : null
   }
   function descNow() {
-    return store.description.id === taskId && taskId !== "" ? store.description : null
+    return store.description.id === shownId && shownId !== "" ? store.description : null
+  }
+  // The requests in flight, oldest first, and a field's newest (-1: none).
+  function requests() {
+    return Object.keys(pending).map(Number).sort(function (a, b) {
+      return a - b
+    })
+  }
+  function newest(key) {
+    var found = -1
+    for (const request of requests())
+      if (pending[request].key === key)
+        found = request
+    return found
+  }
+  // current() with the saves in flight applied: what an edit is measured
+  // against, so a second edit before the first reply builds on the first.
+  function baseNow() {
+    return Edit.pending(current(), requests().map(function (request) {
+      return editor.pending[request].fields
+    }))
+  }
+  // The description likewise: the newest one sent, else the fetched one.
+  function descBase() {
+    var request = newest("description")
+    if (request >= 0)
+      return pending[request].fields.description
+    return descNow() && descNow().state === "ready" ? descNow().text : undefined
   }
   function translate(key, values) {
     return FoamyI18n.t(key, values)
@@ -92,7 +126,7 @@ FocusScope {
     return key === "content" ? contentInput : key === "due" ? dueInput : key === "deadline" ? deadlineInput : key === "description" ? descriptionInput : null
   }
   function initialOf(key) {
-    return Edit.initial(current(), key, descNow() && descNow().state === "ready" ? descNow().text : undefined)
+    return Edit.initial(baseNow(), key, descBase())
   }
   function dirty(key) {
     var input = inputOf(key)
@@ -110,7 +144,6 @@ FocusScope {
       revert(key)
     descriptionInput.text = descNow() && descNow().state === "ready" ? descNow().text : ""
     errors = ({})
-    sent = ({})
     attempts = ({})
   }
   // Fields that don't have the keys follow the snapshot, unless they hold
@@ -120,16 +153,17 @@ FocusScope {
       return
     for (const key of ["content", "due", "deadline"]) {
       const input = inputOf(key)
-      if (!input.inputActiveFocus && errorOf(key) === "" && !Model.has(sent, key))
+      if (!input.inputActiveFocus && errorOf(key) === "" && newest(key) < 0)
         input.text = initialOf(key)
     }
   }
 
   // One field's save (Edit.change), or why it can't be sent.
   function save(key, value) {
-    if (!current())
+    var task = baseNow()
+    if (!task)
       return
-    var result = Edit.change(current(), key, value, descNow() && descNow().state === "ready" ? descNow().text : undefined)
+    var result = Edit.change(task, key, value, descBase())
     if (result.error !== "") {
       setError(key, FoamyI18n.t(result.error))
       return
@@ -142,17 +176,16 @@ FocusScope {
       asked[key] = value
       attempts = asked
     }
-    var request = store.saveTask(current().id, result.fields)
+    var request = store.saveTask(task.id, result.fields)
     if (request < 0)
       return
     var next = Object.assign({}, pending)
-    next[request] = key
-    pending = next
-    if (inputOf(key)) {
-      const texts = Object.assign({}, sent)
-      texts[key] = String(value)
-      sent = texts
+    next[request] = {
+      key: key,
+      typed: inputOf(key) ? String(value) : value,
+      fields: result.fields
     }
+    pending = next
   }
   function saveField(key) {
     save(key, inputOf(key).text)
@@ -170,39 +203,41 @@ FocusScope {
     function onTaskSaved(request, id, ok, message) {
       if (!Model.has(editor.pending, request))
         return
-      var key = editor.pending[request]
+      var save = editor.pending[request]
       var rest = Object.assign({}, editor.pending)
       delete rest[request]
       editor.pending = rest
-      var input = editor.inputOf(key)
-      var typed = Model.has(editor.sent, key) ? editor.sent[key] : null
-      var texts = Object.assign({}, editor.sent)
-      delete texts[key]
-      editor.sent = texts
+      if (ok)
+        editor.savedOnce = true
+      // A newer save of the field is in flight: its reply decides what the
+      // field shows (it holds this one's change too).
+      if (editor.newest(save.key) > request)
+        return
       if (!ok) {
         // The typed text stays; the line under the field says why.
-        editor.setError(key, message !== "" ? message : FoamyI18n.t("Todoist didn't accept the change."))
+        editor.setError(save.key, message !== "" ? message : FoamyI18n.t("Todoist didn't accept the change."))
         return
       }
-      editor.savedOnce = true
       // The snapshot has the new value: the field shows it, unless typing went on.
-      if (input && typed !== null && input.text === typed)
-        input.text = editor.initialOf(key)
+      var input = editor.inputOf(save.key)
+      if (input && input.text === save.typed)
+        input.text = editor.initialOf(save.key)
     }
     function onModelChanged() {
       editor.follow()
     }
     function onDescriptionChanged() {
       var d = editor.descNow()
-      if (d && d.state === "ready" && !descriptionInput.inputActiveFocus && editor.errorOf("description") === "" && !Model.has(editor.sent, "description"))
+      if (d && d.state === "ready" && !descriptionInput.inputActiveFocus && editor.errorOf("description") === "" && editor.newest("description") < 0)
         descriptionInput.text = d.text
     }
   }
 
   // ---- which task -------------------------------------------------------------
-  // A new task: the fields start over, its saves in flight report to the
-  // error line from now on, and its description is read (in the pane once
-  // the selection rests).
+  // A new task: the old one's changed fields are saved first and the keys
+  // go back to the list (the pane), then the fields start over, the old
+  // saves in flight report to the error line from now on, and the new
+  // task's description is read (in the pane once the selection rests).
   property string shownId: ""
   onTaskIdChanged: show()
   Component.onCompleted: show()
@@ -214,6 +249,10 @@ FocusScope {
   function show() {
     if (taskId === shownId)
       return
+    commit()
+    // Before the fields change: a field losing the keys saves what it holds.
+    if (pane && editor.activeFocus)
+      keysReturned()
     store.releaseSaves(Object.keys(pending).map(Number))
     pending = ({})
     savedOnce = false
@@ -237,13 +276,20 @@ FocusScope {
     onTriggered: if (editor.taskId !== "" && editor.task)
       editor.store.loadDescription(editor.taskId)
   }
-  // The field that has the keys, saved now: the page or the panel closes,
-  // which may take the keys only after the editor has let the task go.
+  // Every field with an unsaved change, saved now: the editor lets its
+  // task go (another selection, Back, a view or size change, the panel
+  // closing), which may take the keys only after the fields have changed.
+  // A change that can't be sent (a deadline that isn't a day) goes to the
+  // list's error line, as the editor's error lines go with the task.
   function commit() {
+    if (!current())
+      return
     for (const key of ["content", "due", "deadline", "description"]) {
       const input = inputOf(key)
-      if (input.inputActiveFocus && input.enabled && dirty(key))
-        saveField(key)
+      if (!input.enabled || !dirty(key))
+        continue
+      saveField(key)
+      store.editRefused(errorOf(key))
     }
   }
   // The caret in the first field (`e`, Enter on a row in Large).
@@ -441,8 +487,8 @@ FocusScope {
             Layout.fillWidth: true
             showLabel: false
             Accessible.name: FoamyI18n.t("Project")
-            value: editor.task ? (editor.columns > 1 ? Edit.placeValue(editor.task.projectId, "") : Edit.placeValue(editor.task.projectId, editor.task.sectionId)) : ""
-            options: editor.task ? (editor.columns > 1 ? editor.projects.map(function (project) {
+            value: editor.base ? (editor.columns > 1 ? Edit.placeValue(editor.base.projectId, "") : Edit.placeValue(editor.base.projectId, editor.base.sectionId)) : ""
+            options: editor.base ? (editor.columns > 1 ? editor.projects.map(function (project) {
                 return {
                   value: Edit.placeValue(project.id, ""),
                   label: project.name
@@ -451,7 +497,7 @@ FocusScope {
             onChanged: function (value) {
               // Two columns: another project goes to its root; the same
               // one keeps its section (that is the Section dropdown's).
-              if (editor.columns > 1 && editor.task && Edit.parsePlace(value).projectId === editor.task.projectId)
+              if (editor.columns > 1 && editor.base && Edit.parsePlace(value).projectId === editor.base.projectId)
                 return
               editor.save("place", value)
             }
@@ -465,8 +511,8 @@ FocusScope {
             Layout.fillWidth: true
             showLabel: false
             Accessible.name: FoamyI18n.t("Section")
-            value: editor.task ? Edit.placeValue(editor.task.projectId, editor.task.sectionId) : ""
-            options: editor.task && editor.columns > 1 ? Edit.placeOptions(editor.store.model, editor.projects, editor.task.projectId, FoamyI18n.t("No section")) : []
+            value: editor.base ? Edit.placeValue(editor.base.projectId, editor.base.sectionId) : ""
+            options: editor.base && editor.columns > 1 ? Edit.placeOptions(editor.store.model, editor.projects, editor.base.projectId, FoamyI18n.t("No section")) : []
             onChanged: function (value) {
               editor.save("place", value)
             }
@@ -487,7 +533,7 @@ FocusScope {
                 id: chip
                 required property int modelData
                 required property int index
-                readonly property bool chosen: editor.task !== null && editor.task.priority === modelData
+                readonly property bool chosen: editor.base !== null && editor.base.priority === modelData
                 readonly property color tone: chip.roleColor(Model.priorityRole(modelData))
                 function roleColor(role) {
                   return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
@@ -540,7 +586,7 @@ FocusScope {
             Layout.fillWidth: true
             spacing: FoamyStyle.gapSmall
             Repeater {
-              model: editor.task ? editor.task.labels : []
+              model: editor.base ? editor.base.labels : []
               Rectangle {
                 id: labelChip
                 required property string modelData
@@ -573,9 +619,7 @@ FocusScope {
                     iconName: "x"
                     foreground: FoamyPalette.secondaryText
                     tooltipText: FoamyI18n.t("Remove %1", [labelChip.modelData])
-                    onClicked: editor.save("labels", editor.task.labels.filter(function (name) {
-                      return name !== labelChip.modelData
-                    }))
+                    onClicked: editor.removeLabel(labelChip.modelData)
                   }
                 }
               }
@@ -664,9 +708,9 @@ FocusScope {
   // ---- labels ---------------------------------------------------------------------
   // "+ label": the personal labels the task doesn't have, in a menu.
   readonly property var freeLabels: {
-    if (!task)
+    if (!base)
       return []
-    var have = task.labels.map(function (name) {
+    var have = base.labels.map(function (name) {
       return name.toLowerCase()
     })
     return (store.model.labels || []).filter(function (label) {
@@ -675,6 +719,19 @@ FocusScope {
       return label.name
     })
   }
+  // Each edit starts from the list the saves in flight leave.
+  function removeLabel(name) {
+    var task = baseNow()
+    if (task)
+      save("labels", task.labels.filter(function (label) {
+        return label !== name
+      }))
+  }
+  function addLabel(name) {
+    var task = baseNow()
+    if (task)
+      save("labels", task.labels.concat([name]))
+  }
   property var labelItems: []
   Component {
     id: labelItem
@@ -682,7 +739,7 @@ FocusScope {
       property string labelName: ""
       text: labelName
       iconName: "plus"
-      onTriggered: editor.save("labels", editor.task.labels.concat([labelName]))
+      onTriggered: editor.addLabel(labelName)
     }
   }
   function openLabelMenu(keyboard) {

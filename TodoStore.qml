@@ -221,6 +221,12 @@ QtObject {
     })
     editorSaves = owned
   }
+  // An edit the editor couldn't send as it let its task go: the error
+  // line says why, as for a save that fails after the editor closed.
+  function editRefused(message) {
+    if (message !== "")
+      error = message
+  }
   function saveDone(job, ok, message) {
     var request = job.extra.request
     var owned = Model.has(editorSaves, request)

@@ -67,6 +67,9 @@ ShellRoot {
   property var ipcPanel: null
   property string expectedUrl: ""
   property string ringTask: ""
+  // The task the pane's typed text belongs to, and the text.
+  property string paneFrom: ""
+  property string paneText: ""
   property real oneLineX: 0
   property bool othersChecked: false
   // The store's wall clock: moved by setting `clock.at`, which (like a real
@@ -166,6 +169,59 @@ ShellRoot {
     reply.synced_at = new Date().toISOString();
     reply.tasks = reply.tasks.filter(function(task) { return (drop || []).indexOf(task.id) < 0; });
     return reply;
+  }
+  // The editor's apply requests since `from`, as their update commands.
+  function updatesSince(from) {
+    return shell.calls("apply").slice(from).map(function(line) { return JSON.parse(line.slice("apply ".length)).commands[0]; });
+  }
+  // A save reply for t4 with these fields (the slow helper reads it as it answers).
+  function t4Reply(fields) {
+    shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: fields }), { results: { t4: "ok" } })));
+  }
+  // Two saves of one field before the first reply (the helper slow): each
+  // reply is matched to its own request, and each edit builds on the one in
+  // flight. Then `done`.
+  function racingSaves(view, done) {
+    var store = Plugin.TodoStore;
+    var editor = view.editor;
+    var from = shell.calls("apply").length;
+    shell.put("slow-apply", "0.6");
+    shell.t4Reply({ content: "One", priority: 4, labels: ["code", "calls"] });
+    editor.contentField.focusInput();
+    editor.contentField.selectAll();
+    for (var c1 of "One") ev.keyClickChar(c1, Qt.NoModifier, -1);
+    ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+    for (var c2 of " Two") ev.keyClickChar(c2, Qt.NoModifier, -1);
+    ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+    if (!check(Object.keys(editor.pending).length === 2, "two saves of the text in flight")) return;
+    wait.waitFor(function() { return Object.keys(editor.pending).length === 1; }, 15000, function(ok) {
+      // The first reply: Todoist has "One"; the newer text stays, still tracked.
+      if (!check(ok && store.model.byId.t4.content === "One" && editor.contentField.text === "One Two" && editor.newest("content") > 0, "the first reply kept the newer text (" + JSON.stringify(editor.contentField.text) + ")")) return;
+      shell.t4Reply({ content: "One Two", priority: 4, labels: ["code", "calls"] });
+      wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy; }, 15000, function(ok2) {
+        var sent = shell.updatesSince(from).map(function(command) { return command.content; });
+        if (!check(ok2 && JSON.stringify(sent) === JSON.stringify(["One", "One Two"]) && editor.contentField.text === "One Two" && editor.errorOf("content") === "" && !editor.dirty("content"), "both replies: the field shows the newest (" + JSON.stringify([sent, editor.contentField.text]) + ")")) return;
+        // Leaving the field sends nothing more.
+        editor.deadlineField.focusInput();
+        if (!check(shell.calls("apply").length === from + 2, "the next blur sent nothing")) return;
+        // Two labels removed before the first reply: the second keeps the first off.
+        var from2 = shell.calls("apply").length;
+        shell.t4Reply({ content: "One Two", priority: 4, labels: ["calls"] });
+        shell.find(shell.find(editor, "label-code"), "removeLabel").clicked();
+        if (!check(shell.find(editor, "label-code") === null && shell.find(editor, "label-calls") !== null, "the chips show the list in flight")) return;
+        shell.find(shell.find(editor, "label-calls"), "removeLabel").clicked();
+        wait.waitFor(function() { return Object.keys(editor.pending).length === 1; }, 15000, function(ok3) {
+          if (!check(ok3 && shell.find(editor, "label-code") === null && shell.find(editor, "label-calls") === null, "the first reply didn't bring a label back")) return;
+          shell.t4Reply({ content: "One Two", priority: 4, labels: [] });
+          wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy; }, 15000, function(ok4) {
+            var lists = shell.updatesSince(from2).map(function(command) { return command.labels; });
+            if (!check(ok4 && JSON.stringify(lists) === JSON.stringify([["calls"], []]) && store.model.byId.t4.labels.length === 0, "each removal built on the one in flight (" + JSON.stringify(lists) + ")")) return;
+            shell.put("slow-apply", "");
+            done();
+          });
+        });
+      });
+    });
   }
   function check(ok, message) {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
@@ -324,14 +380,16 @@ ShellRoot {
     case 82: return [function() { var o = shell.overlay(); return store.overlayOpen && o !== null && o.view.active; }, 10000, "the overlay"];
     case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1"; }, 15000, "the pane's description"];
     case 84: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus; }, 10000, "e put the caret in the pane"];
-    case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
-    case 86: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
-    case 87: return [function() { return shell.overlay() === null; }, 10000, "the overlay is gone"];
-    case 88: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the Wide popup"];
-    case 89: return [function() { var o = shell.overlay(); return o !== null && o.view.active; }, 10000, "the overlay from IPC"];
-    case 90: return [function() { return !store.overlayOpen && one.size === "standard" && one.prefs.value("openOn") === "last" && shell.overlay() === null; }, 10000, "another size closed the overlay"];
-    case 91: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 92: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
+    case 86: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the view changed"];
+    case 87: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
+    case 88: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
+    case 89: return [function() { return shell.overlay() === null; }, 10000, "the overlay is gone"];
+    case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the Wide popup"];
+    case 91: return [function() { var o = shell.overlay(); return o !== null && o.view.active; }, 10000, "the overlay from IPC"];
+    case 92: return [function() { return !store.overlayOpen && one.size === "standard" && one.prefs.value("openOn") === "last" && shell.overlay() === null; }, 10000, "another size closed the overlay"];
+    case 93: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
+    case 94: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -1214,6 +1272,7 @@ ShellRoot {
       if (!check(editor.contentField.text === "Review **pull request** #482" && editor.descriptionField.text === "Check the tests\nthen merge" && editor.descriptionField.enabled, "the fields hold the task: the raw text, the description (" + JSON.stringify([editor.contentField.text, editor.descriptionField.text]) + ")")) return;
       var words = shell.find(editor.dueField.parent.parent, "fieldWords");
       if (!check(words.visible && words.text === "Today 14:00", "the date in the panel's words (" + words.text + ")")) return;
+      if (!check(editor.dueField.text === "today 14:00", "the Date field holds Todoist's words for it (" + JSON.stringify(editor.dueField.text) + ")")) return;
       if (!check(shell.find(editor, "priority-p3").chosen, "P3 is the task's priority (the API's 2)")) return;
       // The task text: only it is sent.
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR" } }), { results: { t4: "ok" } })));
@@ -1240,6 +1299,7 @@ ShellRoot {
       // A save Todoist refuses: the error under the field, with Retry, the text kept.
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR" } }), { results: { t4: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f500" } } })));
       editor1.dueField.focusInput();
+      editor1.dueField.selectAll();
       for (var n1 of "next monday") ev.keyClickChar(n1, Qt.NoModifier, -1);
       // Leaving the field saves it.
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
@@ -1277,16 +1337,34 @@ ShellRoot {
         if (!check(ok, "the labels were saved")) return;
         var sentLabels = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
         if (!check(JSON.stringify(sentLabels) === JSON.stringify({ commands: [{ op: "update", id: "t4", labels: ["code", "calls"] }] }) && shell.find(editor4, "label-calls") !== null, "the whole list was sent (" + JSON.stringify(sentLabels) + ")")) return;
-        // Esc in a field without a change: back to the list, t4 under the cursor.
-        editor4.contentField.focusInput();
-        ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-        var back4 = view.cursorRow();
-        if (!check(!view.pageShown && back4 && back4.id === "t4" && view.band.visible && !view.blocked, "Esc went back, t4 selected (" + (back4 && back4.id) + ")")) return;
-        if (!check(store.description.id === "", "the description went with the editor")) return;
-        // Enter on the row: the page; a description read that fails says so, with Retry.
-        shell.put("reply-task.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
-        view.returnRequested();
-        view.activateRequested();
+        shell.racingSaves(view, function() {
+          // Typed, then Back (no Enter): saved as the page closes.
+          var from3 = shell.calls("apply").length;
+          shell.t4Reply({ content: "One Two Three", priority: 4, labels: [] });
+          editor4.contentField.focusInput();
+          editor4.contentField.cursorPosition = editor4.contentField.text.length;
+          for (var c3 of " Three") ev.keyClickChar(c3, Qt.NoModifier, -1);
+          ev.mouseClick(editor4.backButton, editor4.backButton.width / 2, editor4.backButton.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+          if (!check(!view.pageShown, "Back closed the page")) return;
+          wait.waitFor(function() { return shell.calls("apply").length === from3 + 1 && !store.busy; }, 15000, function(ok5) {
+            var backSent = shell.updatesSince(from3);
+            if (!check(ok5 && JSON.stringify(backSent) === JSON.stringify([{ op: "update", id: "t4", content: "One Two Three" }]), "Back saved the typed text (" + JSON.stringify(backSent) + ")")) return;
+            view.openTask("t4", false);
+            wait.waitFor(function() { return view.pageShown && store.description.state === "ready" && editor4.contentField.text === "One Two Three"; }, 15000, function(ok6) {
+              if (!check(ok6, "the page again, with the saved text")) return;
+              // Esc in a field without a change: back to the list, t4 under the cursor.
+              editor4.contentField.focusInput();
+              ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+              var back4 = view.cursorRow();
+              if (!check(!view.pageShown && back4 && back4.id === "t4" && view.band.visible && !view.blocked, "Esc went back, t4 selected (" + (back4 && back4.id) + ")")) return;
+              if (!check(store.description.id === "", "the description went with the editor")) return;
+              // Enter on the row: the page; a description read that fails says so, with Retry.
+              shell.put("reply-task.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
+              view.returnRequested();
+              view.activateRequested();
+            });
+          });
+        });
       });
       break;
     case 75:
@@ -1381,10 +1459,61 @@ ShellRoot {
       if (!check(!big2.blocked && !big2.editor.activeFocus && store.overlayOpen, "Esc gave the keys back to the list")) return;
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
       if (!check(big2.editor.contentField.inputActiveFocus, "Tab goes into the pane")) return;
-      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // Typed in the pane, then a click on another task (no Enter): the
+      // text is saved for its own task first, and the keys go to the list.
+      shell.paneFrom = big2.paneTask;
+      shell.paneText = store.model.byId[shell.paneFrom].content + " now";
+      var paneChange = {};
+      paneChange[shell.paneFrom] = { content: shell.paneText };
+      var paneResults = {};
+      paneResults[shell.paneFrom] = "ok";
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith(paneChange), { results: paneResults })));
+      shell.callsBefore = shell.calls("apply").length;
+      big2.editor.contentField.cursorPosition = big2.editor.contentField.text.length;
+      for (var p1 of " now") ev.keyClickChar(p1, Qt.NoModifier, -1);
+      var otherRow = shell.builtRows(big2).find(function(r) { return r.entry.id !== shell.paneFrom; });
+      var otherSurface = shell.find(otherRow, "taskSurface");
+      ev.mouseClick(otherSurface, otherSurface.width * 0.6, otherSurface.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(big2.paneTask === otherRow.entry.id && big2.editor.contentField.text === store.model.byId[otherRow.entry.id].content && !big2.blocked && !big2.editor.activeFocus, "the click moved the pane, the keys back to the list (" + big2.paneTask + ", " + JSON.stringify(big2.editor.contentField.text) + ")")) return;
+      break;
+    case 85:
+      var big5 = shell.overlay().view;
+      var paneSent = shell.updatesSince(shell.callsBefore);
+      if (!check(JSON.stringify(paneSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]) && store.model.byId[shell.paneFrom].content === shell.paneText, "the typed text was saved for its own task (" + JSON.stringify(paneSent) + ")")) return;
+      // A draft that can't be sent (a deadline that isn't a day), then
+      // another task: the list's error line says why, nothing is sent.
+      big5.editor.deadlineField.focusInput();
+      for (var d5 of "2026-02-30") ev.keyClickChar(d5, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(big5.editor.errorOf("deadline") === "Enter a deadline as YYYY-MM-DD.", "the bad deadline is caught in the pane")) return;
+      var badFrom = big5.paneTask;
+      var thirdRow = shell.builtRows(big5).find(function(r) { return r.entry.id !== badFrom; });
+      var thirdSurface = shell.find(thirdRow, "taskSurface");
+      ev.mouseClick(thirdSurface, thirdSurface.width * 0.6, thirdSurface.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(big5.paneTask === thirdRow.entry.id && store.error === "Enter a deadline as YYYY-MM-DD." && shell.calls("apply").length === shell.callsBefore + 1, "the unsendable draft is said on the list's line (" + JSON.stringify(store.error) + ")")) return;
+      store.error = "";
+      // Typed again, then the Week view from the rail: saved as the pane goes.
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(big5.editor.contentField.inputActiveFocus, "Tab into the pane again")) return;
+      shell.paneFrom = big5.paneTask;
+      shell.paneText = store.model.byId[shell.paneFrom].content + " too";
+      var paneChange2 = {};
+      paneChange2[shell.paneFrom] = { content: shell.paneText };
+      var paneResults2 = {};
+      paneResults2[shell.paneFrom] = "ok";
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith(paneChange2), { results: paneResults2 })));
+      shell.callsBefore = shell.calls("apply").length;
+      big5.editor.contentField.cursorPosition = big5.editor.contentField.text.length;
+      for (var p2 of " too") ev.keyClickChar(p2, Qt.NoModifier, -1);
       // The Week view, from the rail: four columns.
-      var weekEntry = shell.find(big2, "rail-week");
+      var weekEntry = shell.find(big5, "rail-week");
       ev.mouseClick(weekEntry, weekEntry.width / 2, weekEntry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(big5.weekShown && !big5.editor.visible && !big5.blocked, "the Week view; the pane went, the keys with the list")) return;
+      break;
+    case 86:
+      var big2 = shell.overlay().view;
+      var weekSent = shell.updatesSince(shell.callsBefore);
+      if (!check(JSON.stringify(weekSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]), "the view change saved the typed text (" + JSON.stringify(weekSent) + ")")) return;
       var ids = big2.weekColumns.map(function(col) { return col.entries.map(function(e) { return e.kind === "day" ? e.key : e.id; }); });
       if (!check(big2.weekShown && big2.week.visible && !big2.list.visible && JSON.stringify(ids) === JSON.stringify([["t1", "t2"], ["t3", "t4", "t5", "t6"], ["t10", "t11"], ["day:2026-11-21", "t12"]]), "the Week view's columns (" + JSON.stringify(ids) + ")")) return;
       if (!check(!big2.editor.visible, "no pane until a card is opened")) return;
@@ -1408,7 +1537,7 @@ ShellRoot {
       big2.focusList();
       ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
       break;
-    case 85:
+    case 87:
       var big3 = shell.overlay().view;
       var sent5 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent5) === JSON.stringify({ commands: [{ op: "due", id: "t2", date: shell.today }] }), "Ctrl+→ moved t2 to today (" + JSON.stringify(sent5) + ")")) return;
@@ -1421,7 +1550,7 @@ ShellRoot {
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       if (!check(big3.weekPaneOpen && big3.editor.visible && big3.editor.taskId === "t2" && Math.abs(big3.week.width - shell.find(big3, "listArea").width) < 1, "Enter opened the pane over the week")) return;
       break;
-    case 86:
+    case 88:
       var big4 = shell.overlay().view;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big4.blocked && big4.weekPaneOpen, "Esc: the keys back, the pane stays")) return;
@@ -1453,14 +1582,14 @@ ShellRoot {
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!store.overlayOpen, "Esc: the overlay closes")) return;
       break;
-    case 87:
+    case 89:
       // Large where the screen has no room: Wide, in the popup.
       one.screenWidth = 800;
       if (!check(one.size === "wide", "too narrow for Large: Wide (" + one.size + ")")) return;
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(one.opened && !store.overlayOpen, "the popup opened")) return;
       break;
-    case 88:
+    case 90:
       if (!check(view.size === "wide" && view.wide && view.width > 540, "the popup is Wide (" + view.size + ")")) return;
       one.close();
       one.screenWidth = 1920;
@@ -1469,7 +1598,7 @@ ShellRoot {
       ipc.toggle();
       if (!check(store.overlayOpen && store.overlayScreen === null, "IPC toggle opened the overlay for the focused monitor")) return;
       break;
-    case 89:
+    case 91:
       var overlay2 = shell.overlay();
       if (!check(overlay2.targetScreen === Quickshell.screens[0], "on the focused monitor")) return;
       // The Week view, then another size: the overlay goes, and "Open on:
@@ -1479,10 +1608,10 @@ ShellRoot {
       one.prefs.save("openOn", "last");
       one.prefs.save("panelWidth", "standard");
       break;
-    case 90:
+    case 92:
       one.open();
       break;
-    case 91:
+    case 93:
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
       one.close();
       one.prefs.save("openOn", "today");
@@ -1493,7 +1622,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 92:
+    case 94:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();

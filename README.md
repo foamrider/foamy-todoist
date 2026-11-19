@@ -155,7 +155,8 @@ Esc gives the keys back to the list. Its caption says "Saving…" or
 
 - **Task**, **Date** and **Deadline** are text fields. The date is written
   as in Todoist ("tomorrow 9am", "every Monday") and Todoist reads it; the
-  panel's own words for the current date show beside its label. An empty
+  field starts with Todoist's own words for the date (a repeating task's
+  rule), and the panel's words for it show beside its label. An empty
   date or deadline removes it; a deadline is `YYYY-MM-DD`.
 - **Project and section** (one list in Small and Large, two in Wide),
   **Priority** (P1 to P4, in the rows' colours) and **Labels** (× takes
@@ -167,7 +168,10 @@ Esc gives the keys back to the list. Its caption says "Saving…" or
   edited: open it in Todoist.
 - A text field saves when it loses the keys, or on Enter (Ctrl+Enter in
   the description); Esc in it drops what you typed there. Each save sends
-  only the field that changed. A save Todoist refuses shows why under the
+  only the field that changed. Leaving the task (another task, Back, another
+  view or size, closing the panel) saves what you typed first; a change
+  that can't be sent then, such as a deadline that isn't a day, is said on
+  the list's error line. A save Todoist refuses shows why under the
   field, with **Retry**, and keeps your text.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.

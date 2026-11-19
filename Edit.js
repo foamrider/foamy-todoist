@@ -70,6 +70,39 @@ function initial(task, key, description) {
   return ""
 }
 
+// The task as it will be once the saves in flight land: `saves` are their
+// `update` fields (Edit.change), oldest first. Each new edit is measured
+// against this, so a second edit made before the first reply builds on the
+// first (two labels removed in a row stay removed) and an older reply can't
+// stand in for a newer request.
+function pending(task, saves) {
+  if (!task)
+    return null
+  var out = Object.assign({}, task)
+  saves.forEach(function (fields) {
+    if (typeof fields.content === "string")
+      out.content = fields.content
+    if (typeof fields.due_string === "string") {
+      out.dueString = fields.due_string
+      if (fields.due_string === "")
+        out.due = null
+    }
+    if (typeof fields.deadline === "string")
+      out.deadline = fields.deadline
+    if (typeof fields.priority === "number")
+      out.priority = fields.priority
+    if (Array.isArray(fields.labels))
+      out.labels = fields.labels.slice()
+    // A move to another project lands in its root unless a section is named.
+    if (typeof fields.project_id === "string") {
+      out.projectId = fields.project_id
+      out.sectionId = fields.section_id || ""
+    } else if (typeof fields.section_id === "string")
+      out.sectionId = fields.section_id
+  })
+  return out
+}
+
 // The same names, in any order (a change of case is a change).
 function sameLabels(a, b) {
   return a.length === b.length && JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort())
@@ -102,7 +135,7 @@ function change(task, key, value, description) {
     return send({ content: content })
   case "due":
     var due = String(value).trim()
-    if (due === task.dueString.trim() || (due === "" && !task.due))
+    if (due === task.dueString.trim())
       return none
     if (chars(due) > MAX_DUE_STRING || /[\u0000-\u001f\u007f]/.test(due))
       return fail(ERRORS.dueString)
@@ -195,4 +228,4 @@ function placeOptions(model, projects, sectionsOf, noSection) {
 }
 
 if (typeof module !== "undefined")
-  module.exports = { MAX_CONTENT, MAX_DESCRIPTION, ERRORS, chars, validDate, placeValue, parsePlace, initial, change, request, placeOptions }
+  module.exports = { MAX_CONTENT, MAX_DESCRIPTION, ERRORS, chars, validDate, placeValue, parsePlace, initial, pending, change, request, placeOptions }

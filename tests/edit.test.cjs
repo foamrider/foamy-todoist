@@ -40,8 +40,14 @@ test('each field sends only itself, in the helper names', () => {
 
 test('an emptied date or deadline removes it; an empty one on a task without stays', () => {
   assert.deepEqual(Edit.change(model.byId.t3, 'due', '').fields, { due_string: '' });
+  // The field starts with Todoist's words for the date; emptied, it removes it.
+  assert.equal(Edit.initial(t4, 'due'), 'today 14:00');
+  assert.equal(Edit.initial(model.byId.t3, 'due'), 'every weekday at 9:30', 'a recurring task shows its rule');
+  assert.equal(change('due', 'today 14:00').fields, null);
+  assert.deepEqual(change('due', '').fields, { due_string: '' });
   // A date without Todoist's words starts empty: empty is no change.
-  assert.equal(change('due', '').fields, null);
+  const wordless = Object.assign({}, t4, { dueString: '' });
+  assert.equal(Edit.change(wordless, 'due', '').fields, null);
   assert.deepEqual(change('deadline', '').fields, null, 't4 has no deadline');
   const withDeadline = Object.assign({}, t4, { deadline: '2026-11-20' });
   assert.deepEqual(Edit.change(withDeadline, 'deadline', ' ').fields, { deadline: '' });
@@ -94,4 +100,35 @@ test('the place dropdown: projects in order, each with its sections; or one proj
   ]);
   assert.deepEqual(Edit.placeOptions(model, projects, 'work', 'No section').map((o) => o.label), ['No section', 'Review', 'Ops']);
   assert.deepEqual(Edit.parsePlace('work/s-ops'), { projectId: 'work', sectionId: 's-ops' });
+});
+
+test('an edit made while saves are in flight builds on them (Edit.pending)', () => {
+  const three = Object.assign({}, t4, { labels: ['a', 'b', 'c'] });
+  // Two labels removed before the first reply: the second starts from the first's list.
+  const first = Edit.change(three, 'labels', ['b', 'c']).fields;
+  const base = Edit.pending(three, [first]);
+  assert.deepEqual(base.labels, ['b', 'c']);
+  assert.deepEqual(three.labels, ['a', 'b', 'c'], 'the snapshot task is not changed');
+  assert.deepEqual(Edit.change(base, 'labels', base.labels.filter((name) => name !== 'b')).fields, { labels: ['c'] });
+  // Adding twice keeps both.
+  const added = Edit.pending(three, [{ labels: ['a', 'b', 'c', 'x'] }]);
+  assert.deepEqual(Edit.change(added, 'labels', added.labels.concat(['y'])).fields, { labels: ['a', 'b', 'c', 'x', 'y'] });
+  // Text: the newest request wins; sending what is already in flight sends nothing.
+  const texts = Edit.pending(t4, [{ content: 'One' }, { content: 'Two' }]);
+  assert.equal(texts.content, 'Two');
+  assert.equal(Edit.change(texts, 'content', 'Two').fields, null);
+  assert.deepEqual(Edit.change(texts, 'content', t4.content).fields, { content: t4.content }, 'back to the old text is a change again');
+  // A removed date, a deadline, a priority, a move.
+  const rest = Edit.pending(t4, [{ due_string: '' }, { deadline: '2026-12-01' }, { priority: 4 }, { project_id: 'home' }]);
+  assert.equal(rest.due, null);
+  assert.equal(rest.dueString, '');
+  assert.equal(rest.deadline, '2026-12-01');
+  assert.equal(rest.priority, 4);
+  assert.equal(rest.projectId, 'home');
+  assert.equal(rest.sectionId, '', 'a move lands in the root');
+  assert.equal(Edit.pending(t4, [{ section_id: 's-ops' }]).sectionId, 's-ops');
+  assert.equal(Edit.pending(null, []), null);
+  // A date set on an undated task, then emptied before the reply: the removal is sent.
+  const dated = Edit.pending(model.byId.t7, [{ due_string: 'tomorrow' }]);
+  assert.deepEqual(Edit.change(dated, 'due', '').fields, { due_string: '' });
 });

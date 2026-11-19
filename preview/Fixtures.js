@@ -16,8 +16,12 @@ function task(id, content, project, extra) {
   return out
 }
 
+// Todoist always sends its words for a date (`string`): what was typed, or
+// for a picked date its day and month ("16 Nov 14:00").
 function due(date, recurring, string) {
-  return { date: date, is_recurring: recurring === true, string: string || "" }
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  var picked = Number(date.slice(8, 10)) + " " + months[Number(date.slice(5, 7)) - 1] + (date.length > 10 ? " " + date.slice(11, 16) : "")
+  return { date: date, is_recurring: recurring === true, string: typeof string === "string" ? string : picked }
 }
 
 function snapshot(today) {
@@ -41,14 +45,14 @@ function snapshot(today) {
       task("t1", "Send the quarterly report to [Finance](https://example.com/finance)", "work", { priority: 4, due: due(d(-2)), deadline: d(3), labels: ["office"], child_order: 1 }),
       task("t2", "Renew the passport", "home", { priority: 3, due: due(d(-1)), child_order: 1 }),
       task("t3", "Stand-up with the platform team", "work", { due: due(d(0, "09:30"), true, "every weekday at 9:30"), section_id: "s-ops", child_order: 1 }),
-      task("t4", "Review **pull request** #482", "work", { priority: 2, due: due(d(0, "14:00")), section_id: "s-review", labels: ["code"], child_order: 1 }),
+      task("t4", "Review **pull request** #482", "work", { priority: 2, due: due(d(0, "14:00"), false, "today 14:00"), section_id: "s-review", labels: ["code"], child_order: 1 }),
       task("t5", "Water the plants", "home", { due: due(d(0), true, "every 3 days"), day_order: 1, child_order: 2 }),
-      task("t6", "Book a table for Friday", "inbox", { priority: 2, due: due(d(0)), day_order: 2, child_order: 1 }),
+      task("t6", "Book a table for Friday", "inbox", { priority: 2, due: due(d(0), false, "today"), day_order: 2, child_order: 1 }),
       task("t7", "Call the dentist", "inbox", { child_order: 2 }),
       task("t8", "Ask about the opening hours", "inbox", { parent_id: "t7", child_order: 1 }),
       task("t9", "Pick up the parcel", "inbox", { child_order: 3, labels: ["errand"] }),
-      task("t10", "Draft the launch post", "launch", { priority: 3, due: due(d(1, "10:00")), child_order: 1, responsible_uid: "7" }),
-      task("t11", "Pay the electricity bill", "home", { priority: 4, due: due(d(1)), child_order: 3 }),
+      task("t10", "Draft the launch post", "launch", { priority: 3, due: due(d(1, "10:00"), false, "tomorrow 10:00"), child_order: 1, responsible_uid: "7" }),
+      task("t11", "Pay the electricity bill", "home", { priority: 4, due: due(d(1), false, "tomorrow"), child_order: 3 }),
       task("t12", "Team retro", "work", { due: due(d(3, "15:00"), true, "every other thursday"), section_id: "s-ops", child_order: 2 }),
       task("t13", "Finish *Middlemarch*", "reading", { due: due(d(9)), child_order: 1 }),
       task("t14", "Update the on-call runbook", "work", { section_id: "s-ops", child_order: 3 }),
