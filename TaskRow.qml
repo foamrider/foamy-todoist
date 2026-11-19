@@ -9,6 +9,8 @@ Item {
   id: row
   required property var entry
   property bool hasCursor: false
+  // The task the Large details pane shows.
+  property bool selected: false
   property bool interactive: true
   readonly property string kind: entry ? entry.kind : ""
   readonly property bool isTask: kind === "task"
@@ -182,6 +184,7 @@ Item {
     width: parent.width - FoamyStyle.gapLarge * 2 - row.indent
     height: parent.height
     hasCursor: row.hasCursor
+    current: row.isTask && row.selected
     cursorShape: Qt.PointingHandCursor
     onHovered: row.hovered()
     onClicked: row.openRequested()

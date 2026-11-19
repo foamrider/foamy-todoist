@@ -77,6 +77,10 @@ function dataKeys() {
     // Upcoming's words and date formats, through the `t` the view passes in.
     ...Model.UPCOMING_KEYS,
     ...Model.DETAIL_KEYS,
+    // The add field's placeholders (Model.addPlaceholder).
+    ...Model.PLACEHOLDER_KEYS,
+    // The editor's checks (Edit.change), the helper's own messages.
+    ...Object.values(require('../Edit.js').ERRORS),
   ];
 }
 

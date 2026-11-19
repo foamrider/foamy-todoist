@@ -60,19 +60,19 @@ Item {
       })
     if (previewState === "add-open" || previewState === "wide-add-open")
       Qt.callLater(function () {
-        view.openField()
+        view.openAdd()
         view.field.text = "Call the plumber tomorrow #Home"
       })
     // Quick Add sent, no answer: the whole warning under the field.
     if (previewState === "add-error")
       Qt.callLater(function () {
-        view.openField()
+        view.openAdd()
         view.field.text = "Call the plumber tomorrow #Home"
         store.addError = FoamyI18n.t("Todoist didn't answer. The task may have been added: check the list before adding it again.")
       })
     if (previewState.indexOf("suggest-") === 0)
       Qt.callLater(function () {
-        view.openField()
+        view.openAdd()
         view.field.text = ({
             "suggest-projects": "Call the plumber #h",
             "suggest-labels": "Pay the rent @",
@@ -102,7 +102,7 @@ Item {
     wide: preview.wide
     body: Component {
       Plugin.TodoView {
-        wide: preview.wide
+        size: preview.wide ? "wide" : "standard"
         onSettingsRequested: editingSettings = true
         onSettingsClosed: editingSettings = false
       }

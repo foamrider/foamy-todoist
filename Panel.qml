@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Quickshell
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui as Ui
@@ -8,7 +9,13 @@ import "Preferences.js" as Schema
 
 // One bar instance (4.5 draws one per monitor). Todoist lives in the
 // TodoStore singleton; every instance pushes the saved settings into it,
-// the leader owns the IPC target, and any instance can save settings.
+// the leader owns the IPC target and draws the Large overlay, and any
+// instance can save settings.
+//
+// Sizes: Small and Wide are this bar's popup; Large is one overlay for
+// the whole shell (TodoStore.overlayOpen), drawn by the leader on the
+// monitor of the bar that was clicked (from IPC: the focused one). Where
+// Large doesn't fit it falls back to Wide, and Wide to Small.
 Ui.Panel {
   id: root
   ipcTarget: "foamy.todoist"
@@ -30,7 +37,7 @@ Ui.Panel {
   FoamyMember {
     id: member
     scope: "todoist"
-    demanding: root.opened
+    demanding: root.opened || (member.isLeader && TodoStore.overlayOpen)
   }
   function pushSettings() {
     TodoStore.refreshSeconds = prefsQueue.value("refreshSeconds")
@@ -45,8 +52,46 @@ Ui.Panel {
   }
   Component.onCompleted: pushSettings()
 
-  // Wide only where the screen has room for it (the bar window spans the screen).
-  readonly property bool wide: prefsQueue.value("panelWidth") === "wide" && (!button.Window.window || button.Window.window.width >= FoamyStyle.popupWidthWide + FoamyStyle.padding * 2)
+  // The size setting, and what this bar's screen has room for: Large
+  // needs the overlay's width and the margins beside it, Wide the wide
+  // popup (the bar window spans the screen).
+  readonly property string sizeSetting: prefsQueue.value("panelWidth")
+  readonly property int largeWidth: Style.space(880)
+  // The bar's screen (Quickshell's, for the overlay), found by the name of
+  // the bar window's screen.
+  readonly property var barScreen: {
+    var name = button.Screen.name
+    for (const screen of Quickshell.screens)
+      if (screen.name === name)
+        return screen
+    return null
+  }
+  // This bar's screen width (tests replace it).
+  property real screenWidth: barScreen ? barScreen.width : 0
+  function fitsLarge(width) {
+    return width >= root.largeWidth + FoamyStyle.padding * 4
+  }
+  readonly property bool wideFits: !button.Window.window || button.Window.window.width >= FoamyStyle.popupWidthWide + FoamyStyle.padding * 2
+  // What a click on this bar opens: "large" (the overlay), "wide" or "standard".
+  readonly property string size: sizeSetting === "large" && fitsLarge(screenWidth) ? "large" : (sizeSetting === "wide" || sizeSetting === "large") && wideFits ? "wide" : "standard"
+  // The popup is never Large: where Large can't be, it is Wide.
+  readonly property bool wide: size !== "standard"
+  // Another size: the overlay goes (its view falls back from the Week view itself).
+  onSizeSettingChanged: if (sizeSetting !== "large" && TodoStore.overlayOpen)
+    TodoStore.hideOverlay()
+
+  // A click on the bar: the overlay (Large) or the popup.
+  function togglePanel() {
+    if (root.size === "large") {
+      if (root.opened)
+        root.close()
+      TodoStore.toggleOverlay(root.barScreen)
+    } else {
+      if (TodoStore.overlayOpen)
+        TodoStore.hideOverlay()
+      root.toggle()
+    }
+  }
 
   // The next open puts the caret in the add field whatever the setting says (IPC `add`).
   property bool addOnOpen: false
@@ -54,7 +99,7 @@ Ui.Panel {
     if (root.opened) {
       const view = panelPopup.ensureBody()
       if (view)
-        view.openField()
+        view.openAdd()
       return
     }
     addOnOpen = true
@@ -65,19 +110,77 @@ Ui.Panel {
     panel: root
   }
   function openSettings() {
-    settingsState.show()
+    if (root.size === "large")
+      TodoStore.showOverlay(root.barScreen, "settings")
+    else
+      settingsState.show()
   }
+  // IPC (the leader): Large opens on the focused monitor.
   FoamyIpc {
     enabled: member.isLeader
     target: "foamy.todoist"
     function toggle(): void {
-      root.toggle()
+      if (root.sizeSetting === "large" && !root.opened)
+        TodoStore.toggleOverlay(null)
+      else
+        root.toggle()
     }
     function add(): void {
-      root.openToAdd()
+      if (root.sizeSetting !== "large" || root.opened)
+        root.openToAdd()
+      else if (TodoStore.overlayOpen && root.overlay.item)
+        (root.overlay.item as TodoOverlay).view.openAdd()
+      else
+        TodoStore.showOverlay(null, "add")
     }
     function refresh(): void {
       TodoStore.sync()
+    }
+  }
+
+  // ---- the Large overlay (the leader's) -----------------------------------------
+  // It exists only while open. It stays one more turn after closing, so its
+  // view's closed() (the draft, the completions, the editor's field) runs first.
+  property bool overlayLive: false
+  Connections {
+    target: TodoStore
+    function onOverlayOpenChanged() {
+      if (TodoStore.overlayOpen)
+        root.overlayLive = true
+      else
+        Qt.callLater(function () {
+          root.overlayLive = TodoStore.overlayOpen
+        })
+    }
+  }
+  readonly property alias overlay: overlayLoader
+  LazyLoader {
+    id: overlayLoader
+    active: member.isLeader && (TodoStore.overlayOpen || root.overlayLive)
+    TodoOverlay {
+      wantedScreen: TodoStore.overlayScreen
+      cardWidth: root.largeWidth
+      open: TodoStore.overlayOpen
+      preferences: prefsQueue.effectiveSettings
+      saving: prefsQueue.busy
+      settingsError: prefsQueue.error !== "" ? FoamyI18n.t(prefsQueue.error) : ""
+      retryable: prefsQueue.canRetry
+      onCloseRequested: TodoStore.hideOverlay()
+      // The focused monitor (IPC) has no room: Wide in this bar's popup.
+      onTooNarrow: {
+        const page = TodoStore.overlayPage
+        TodoStore.hideOverlay()
+        if (page === "settings")
+          settingsState.show()
+        else if (page === "add")
+          root.openToAdd()
+        else
+          root.open()
+      }
+      onSaveRequested: function (key, value) {
+        prefsQueue.save(key, value)
+      }
+      onRetryRequested: prefsQueue.retry()
     }
   }
 
@@ -97,7 +200,7 @@ Ui.Panel {
       if (pressedButton === Qt.RightButton)
         root.openSettings()
       else
-        root.toggle()
+        root.togglePanel()
     }
     Row {
       id: barContent
@@ -139,7 +242,7 @@ Ui.Panel {
     body: Component {
       TodoView {
         active: root.opened
-        wide: root.wide
+        size: root.wide ? "wide" : "standard"
         preferences: prefsQueue.effectiveSettings
         saving: prefsQueue.busy
         settingsError: prefsQueue.error !== "" ? FoamyI18n.t(prefsQueue.error) : ""
