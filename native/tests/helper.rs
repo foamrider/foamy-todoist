@@ -1038,7 +1038,7 @@ fn an_update_and_its_move_go_in_one_sync_with_one_result_per_task() {
          "due_string": "tomorrow 9am", "deadline": "2026-12-01", "description": "Ask about\nthe trip",
          "project_id": "P2"},
         {"op": "update", "id": "T2", "deadline": "", "due_string": "", "section_id": "S1"},
-        // T3 is already in S1: only its text changes.
+        // T3's cached place is S1, but the cache may be stale: the move goes too.
         {"op": "update", "id": "T3", "content": "three!", "project_id": "P2", "section_id": "S1"},
         {"op": "close", "id": "T9"}
     ]});
@@ -1066,6 +1066,7 @@ fn an_update_and_its_move_go_in_one_sync_with_one_result_per_task() {
             ),
             ("item_move", &json!({"id": "T2", "section_id": "S1"})),
             ("item_update", &json!({"id": "T3", "content": "three!"})),
+            ("item_move", &json!({"id": "T3", "section_id": "S1"})),
             ("item_close", &json!({"id": "T9"})),
         ]
     );
@@ -1073,7 +1074,7 @@ fn an_update_and_its_move_go_in_one_sync_with_one_result_per_task() {
         .iter()
         .map(|c| c["uuid"].as_str().unwrap())
         .collect();
-    assert_eq!(uuids.len(), 6, "a UUID per command");
+    assert_eq!(uuids.len(), commands.len(), "a UUID per command");
     assert_eq!(request.field("sync_token").as_deref(), Some("S1"));
     assert_eq!(
         reply["results"],
@@ -1127,6 +1128,12 @@ fn an_invalid_update_never_reaches_todoist() {
                              {"op": "close", "id": "T1"}]}),
             "The same task is changed twice.",
         ),
+        (
+            // 51 changes are allowed, but each is two Sync commands.
+            json!({"commands": (0..51).map(|n| json!({"op": "update", "id": format!("T{n}"),
+                "content": "x", "project_id": "P2"})).collect::<Vec<_>>()}),
+            "These changes need more than 100 Todoist commands. Send fewer at a time.",
+        ),
     ] {
         let (reply, _) = home.run("apply", &input.to_string(), &closed());
         assert_eq!(
@@ -1138,7 +1145,7 @@ fn an_invalid_update_never_reaches_todoist() {
     // The longest single update fits the request limit and goes out.
     let longest = json!({"commands": [{"op": "update", "id": "T1",
         "description": "\u{1F600}".repeat(16_383),
-        "labels": (0..100).map(|n| format!("{n:\u{1F600}>60}")).collect::<Vec<_>>()}]});
+        "labels": (0..50).map(|n| format!("{n:\u{1F600}>60}")).collect::<Vec<_>>()}]});
     let (base, thread) = apply_server(|_| json!("ok"), json!([]));
     let (reply, _) = home.run("apply", &longest.to_string(), &base);
     thread.join().unwrap();

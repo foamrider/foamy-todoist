@@ -171,19 +171,24 @@ fn deadline(record: &Value) -> Result<Value, ()> {
     }
 }
 
-fn labels(record: &Value) -> Vec<String> {
-    record
+/// The task's labels, at most MAX_LABELS, and whether some were left out.
+fn labels(record: &Value) -> (Vec<String>, bool) {
+    let names: Vec<&str> = record
         .get("labels")
         .and_then(Value::as_array)
         .map(|list| {
             list.iter()
                 .filter_map(Value::as_str)
                 .filter(|label| !label.is_empty())
-                .take(MAX_LABELS)
-                .map(|label| cap(label, MAX_LABEL))
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let kept = names
+        .iter()
+        .take(MAX_LABELS)
+        .map(|label| cap(label, MAX_LABEL))
+        .collect();
+    (kept, names.len() > MAX_LABELS)
 }
 
 pub fn normalize_task(record: &Value) -> Change {
@@ -195,7 +200,8 @@ pub fn normalize_task(record: &Value) -> Change {
     }
     let build = || -> Result<Value, ()> {
         let priority = record.get("priority").and_then(Value::as_i64).unwrap_or(1);
-        Ok(json!({
+        let (labels, labels_cut) = labels(record);
+        let mut task = json!({
             "id": id,
             "content": cap(string(record, "content").ok_or(())?, MAX_CONTENT),
             "project_id": id_field(record, "project_id").ok_or(())?,
@@ -204,13 +210,19 @@ pub fn normalize_task(record: &Value) -> Change {
             "priority": if (1..=4).contains(&priority) { priority } else { 1 },
             "due": due(record)?,
             "deadline": deadline(record)?,
-            "labels": labels(record),
+            "labels": labels,
             "child_order": integer(record, "child_order"),
             "day_order": integer(record, "day_order"),
             // Who the task is assigned to (shared projects); anything that
             // isn't an id is no one, never a reason to drop the task.
             "responsible_uid": optional_id(record, "responsible_uid").unwrap_or(Value::Null),
-        }))
+        });
+        // Only on the rare task with more labels than kept: the list is
+        // partial, so an editor must not save it back as the whole list.
+        if labels_cut {
+            task["labels_truncated"] = json!(true);
+        }
+        Ok(task)
     };
     match build() {
         Ok(task) => Change::Keep(id, task),
@@ -873,6 +885,26 @@ mod tests {
         // The cache keeps them.
         let back = State::from_cache(&state.to_cache()).unwrap();
         assert_eq!(back.snapshot()["labels"], state.snapshot()["labels"]);
+    }
+
+    #[test]
+    fn a_task_with_more_labels_than_kept_says_so() {
+        let mut record = task("T1", "one");
+        record["labels"] = json!(
+            (0..MAX_LABELS + 1)
+                .map(|n| format!("l{n}"))
+                .collect::<Vec<_>>()
+        );
+        let Change::Keep(_, kept) = normalize_task(&record) else {
+            panic!("kept")
+        };
+        assert_eq!(kept["labels"].as_array().unwrap().len(), MAX_LABELS);
+        assert_eq!(kept["labels_truncated"], true);
+        record["labels"] = json!((0..MAX_LABELS).map(|n| format!("l{n}")).collect::<Vec<_>>());
+        let Change::Keep(_, kept) = normalize_task(&record) else {
+            panic!("kept")
+        };
+        assert!(kept.get("labels_truncated").is_none());
     }
 
     #[test]

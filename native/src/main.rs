@@ -34,7 +34,8 @@
 //!   "sections":[{"id","project_id","name","section_order"}],
 //!   "tasks":[{"id","content","project_id","section_id","parent_id","priority",
 //!   "due":{"date","is_recurring","string"}|null,"deadline":"YYYY-MM-DD"|null,
-//!   "labels","child_order","day_order",
+//!   "labels" (at most 50; "labels_truncated":true only when more were cut),
+//!   "child_order","day_order",
 //!   "responsible_uid"}],
 //!   "labels":[{"id","name","color","item_order"}],
 //!   "collaborators":[{"id","full_name","email"}],
@@ -62,7 +63,7 @@
 //!   task: `{"op":"update","id",` then at least one of `"content"` (1–500
 //!   characters after trimming, no control characters), `"description"`
 //!   (0–16 383 characters; line breaks and tabs allowed; "" clears it),
-//!   `"priority"` (1–4, Todoist's: 4 is p1), `"labels"` (0–100 names of
+//!   `"priority"` (1–4, Todoist's: 4 is p1), `"labels"` (0–50 names of
 //!   1–60 characters, each once ignoring case; the whole list replaces the
 //!   task's), `"due_string"` (at most 200 characters in words for Todoist
 //!   to parse, sent as `due.string`; "" removes the date), `"deadline"`
@@ -71,10 +72,11 @@
 //!   is the root of `project_id`, which it then needs)`}`; any other key is
 //!   `INVALID_ARGUMENT`. The fields go in one `item_update`, a place in one
 //!   `item_move` with only the section (when there is one) or only the
-//!   project, as Todoist takes one destination. A move to where the cached
-//!   task already is (same project, no section; or same section) is left
-//!   out: Todoist would make a subtask a root task. They all go in one Sync
-//!   request with the incremental read. The snapshot comes with
+//!   project, as Todoist takes one destination. A requested place is always
+//!   sent (a subtask moved this way becomes a root task), so an editor sends
+//!   `project_id`/`section_id` only when the user changes them. They all go
+//!   in one Sync request with the incremental read, at most 100 commands
+//!   (an update with a move counts two). The snapshot comes with
 //!   `"results":{"<task id>":"ok"|{"code":…,"error":…}}` from Todoist's
 //!   `sync_status` (`code` its `error_tag`), one per task: an update whose
 //!   `item_update` or `item_move` failed has that failure (the first), even
@@ -154,7 +156,7 @@ const RUN_BUDGET: Duration = Duration::from_secs(25);
 const MAX_TOKEN_REQUEST: u64 = 4 << 10;
 const MAX_ADD_REQUEST: u64 = 16 << 10;
 /// One update at its longest fits, even with every character escaped as
-/// JSON (a description of 16 383 characters, 100 labels of 60).
+/// JSON (a description of 16 383 characters, 50 labels of 60).
 const MAX_APPLY_REQUEST: u64 = 512 << 10;
 const MAX_TASK_REQUEST: u64 = 4 << 10;
 

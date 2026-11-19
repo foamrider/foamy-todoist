@@ -28,7 +28,7 @@ pub const MAX_DESCRIPTION: usize = 16_383;
 /// A description `task` reads: longer ones are cut, ending in "…".
 pub const MAX_READ_DESCRIPTION: usize = 16_384;
 /// Labels an update sets, and each name's length in characters.
-pub const MAX_UPDATE_LABELS: usize = 100;
+pub const MAX_UPDATE_LABELS: usize = 50;
 pub const MAX_UPDATE_LABEL: usize = 60;
 /// A date in words for Todoist to parse.
 pub const MAX_DUE_STRING: usize = 200;
@@ -399,12 +399,19 @@ impl Context {
         let mut commands = Vec::new();
         let mut planned = Vec::with_capacity(changes.len());
         for change in &changes {
-            let parts = change.commands(&state);
+            let parts = change.commands();
             let ids = uuids(parts.len())?;
             for ((kind, args), uuid) in parts.into_iter().zip(&ids) {
                 commands.push(json!({"type": kind, "uuid": uuid, "args": args}));
             }
             planned.push((change.id(), ids));
+        }
+        // Todoist takes at most 100 commands per request; an update with a
+        // move is two, so check the expanded count, not the changes.
+        if commands.len() > MAX_COMMANDS {
+            return Err(invalid(
+                "These changes need more than 100 Todoist commands. Send fewer at a time.",
+            ));
         }
         let sync_reply = exchange(&client, &token, &mut state, &commands)?;
         // One result per task: its first command that failed, else "ok".
@@ -617,9 +624,8 @@ impl Edit {
         }
     }
 
-    /// The Sync commands (type, args) this change needs, given the cached
-    /// task: none, one or two.
-    fn commands(&self, state: &State) -> Vec<(&'static str, Value)> {
+    /// The Sync commands (type, args) this change needs: one or two.
+    fn commands(&self) -> Vec<(&'static str, Value)> {
         match self {
             Edit::Close(id) => vec![("item_close", json!({"id": id}))],
             Edit::Due(id, date) => {
@@ -632,9 +638,7 @@ impl Edit {
                     args.insert("id".into(), json!(update.id));
                     out.push(("item_update", Value::Object(args)));
                 }
-                if let Some(moved) = &update.moved
-                    && !already_there(state, &update.id, moved)
-                {
+                if let Some(moved) = &update.moved {
                     let (key, target) = match moved {
                         Move::Project(project) => ("project_id", project),
                         Move::Section(section) => ("section_id", section),
@@ -644,22 +648,6 @@ impl Edit {
                 out
             }
         }
-    }
-}
-
-/// Whether the cached task is already where `moved` would put it. A move
-/// makes the task the last root task there (a subtask leaves its parent),
-/// so an editor that sends the unchanged place moves nothing.
-fn already_there(state: &State, id: &str, moved: &Move) -> bool {
-    let Some(task) = state.tasks.get(id) else {
-        return false;
-    };
-    let field = |key: &str| task.get(key).and_then(Value::as_str);
-    match moved {
-        Move::Project(project) => {
-            field("project_id") == Some(project.as_str()) && field("section_id").is_none()
-        }
-        Move::Section(section) => field("section_id") == Some(section.as_str()),
     }
 }
 
@@ -731,7 +719,7 @@ fn long_description() -> Failure {
 }
 
 fn bad_labels() -> Failure {
-    invalid("Give at most 100 labels of 1 to 60 characters each, without control characters.")
+    invalid("Give at most 50 labels of 1 to 60 characters each, without control characters.")
 }
 
 fn bad_due_string() -> Failure {
@@ -1009,7 +997,7 @@ mod tests {
         // Bounds, at the limit.
         let longest = update(json!({
             "content": "é".repeat(500), "description": "é".repeat(MAX_DESCRIPTION),
-            "labels": (0..100).map(|n| format!("{n:0>60}")).collect::<Vec<_>>(),
+            "labels": (0..MAX_UPDATE_LABELS).map(|n| format!("{n:0>60}")).collect::<Vec<_>>(),
             "due_string": "x".repeat(200), "priority": 1
         }));
         assert!(longest.is_ok(), "{longest:?}");
@@ -1089,31 +1077,31 @@ mod tests {
             (json!({"priority": "4"}), "Pick a priority from 1 to 4."),
             (
                 json!({"labels": "home"}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
-                json!({"labels": vec!["a"; 101]}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                json!({"labels": (0..=MAX_UPDATE_LABELS).map(|n| format!("l{n}")).collect::<Vec<_>>()}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
                 json!({"labels": [""]}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
                 json!({"labels": ["  "]}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
                 json!({"labels": ["x".repeat(61)]}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
                 json!({"labels": ["a\tb"]}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
                 json!({"labels": [5]}),
-                "Give at most 100 labels of 1 to 60 characters each, without control characters.",
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
             ),
             (
                 json!({"labels": ["Home", "home"]}),
@@ -1176,16 +1164,7 @@ mod tests {
     }
 
     #[test]
-    fn an_update_is_an_item_update_and_a_move_unless_already_there() {
-        let mut state = State::empty();
-        state.tasks.insert(
-            "T1".into(),
-            json!({"id": "T1", "project_id": "P1", "section_id": null}),
-        );
-        state.tasks.insert(
-            "T2".into(),
-            json!({"id": "T2", "project_id": "P2", "section_id": "S1", "parent_id": "T9"}),
-        );
+    fn an_update_is_an_item_update_and_a_move() {
         let edit = |id: &str, fields: Value| {
             let mut entry = fields;
             entry["op"] = json!("update");
@@ -1196,39 +1175,30 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(
-            edit("T1", json!({"content": "x", "project_id": "P2"})).commands(&state),
+            edit("T1", json!({"content": "x", "project_id": "P2"})).commands(),
             [
                 ("item_update", json!({"id": "T1", "content": "x"})),
                 ("item_move", json!({"id": "T1", "project_id": "P2"}))
             ]
         );
         assert_eq!(
-            edit("T1", json!({"section_id": "S1"})).commands(&state),
+            edit("T1", json!({"section_id": "S1"})).commands(),
             [("item_move", json!({"id": "T1", "section_id": "S1"}))]
         );
-        // Unchanged places move nothing (a subtask keeps its parent).
         assert_eq!(
-            edit(
-                "T1",
-                json!({"priority": 2, "project_id": "P1", "section_id": ""})
-            )
-            .commands(&state),
+            edit("T1", json!({"priority": 2})).commands(),
             [("item_update", json!({"id": "T1", "priority": 2}))]
         );
-        assert!(
-            edit("T2", json!({"project_id": "P2", "section_id": "S1"}))
-                .commands(&state)
-                .is_empty()
-        );
-        // Out of the section to the same project's root is a move.
+        // Out of the section to the project's root.
         assert_eq!(
-            edit("T2", json!({"project_id": "P2", "section_id": ""})).commands(&state),
+            edit("T2", json!({"project_id": "P2", "section_id": ""})).commands(),
             [("item_move", json!({"id": "T2", "project_id": "P2"}))]
         );
-        // A task the cache doesn't have: the move goes to Todoist.
+        // A requested place is sent even when the cache says the task is
+        // there already: the cache may be stale.
         assert_eq!(
-            edit("T7", json!({"project_id": "P1"})).commands(&state),
-            [("item_move", json!({"id": "T7", "project_id": "P1"}))]
+            edit("T2", json!({"project_id": "P2", "section_id": "S1"})).commands(),
+            [("item_move", json!({"id": "T2", "section_id": "S1"}))]
         );
     }
 
