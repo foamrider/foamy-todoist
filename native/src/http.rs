@@ -266,8 +266,9 @@ impl Client {
         }
     }
 
-    #[cfg(test)]
-    fn with_max_bytes(mut self, max_bytes: u64) -> Client {
+    /// A smaller cap on reply bodies than [`MAX_BYTES`], for a reply that
+    /// holds one record.
+    pub fn with_max_bytes(mut self, max_bytes: u64) -> Client {
         self.max_bytes = max_bytes;
         self
     }
@@ -284,8 +285,9 @@ impl Client {
         self.sent.load(Ordering::SeqCst)
     }
 
-    /// POST `body` to `path` with the token as a bearer.
-    pub fn post(&self, path: &str, token: &str, body: Body) -> Result<Reply, Failure> {
+    /// Starts a request: the time it may take, its deadline set and
+    /// `request_sent` cleared.
+    fn start(&self) -> Result<Duration, Failure> {
         if self.base.starts_with("https://") && !tls::cpu_supported() {
             return Err(Failure::coded("TLS_UNSUPPORTED", tls::UNSUPPORTED));
         }
@@ -296,6 +298,27 @@ impl Client {
         }
         self.deadline.set(deadline);
         self.sent.store(false, Ordering::SeqCst);
+        Ok(left)
+    }
+
+    /// GET `path` with the token as a bearer.
+    pub fn get(&self, path: &str, token: &str) -> Result<Reply, Failure> {
+        let left = self.start()?;
+        let response = self
+            .agent
+            .get(format!("{}{path}", self.base))
+            .header("Accept", "application/json")
+            .header("Authorization", format!("Bearer {token}"))
+            .config()
+            .timeout_global(Some(left))
+            .build()
+            .call();
+        self.finish(response)
+    }
+
+    /// POST `body` to `path` with the token as a bearer.
+    pub fn post(&self, path: &str, token: &str, body: Body) -> Result<Reply, Failure> {
+        let left = self.start()?;
         let (content_type, data) = match body {
             Body::Form(fields) => ("application/x-www-form-urlencoded", form(fields)),
             Body::Json(value) => ("application/json", value.to_string()),
@@ -317,6 +340,14 @@ impl Client {
             .timeout_global(Some(left))
             .build()
             .send(data.as_bytes());
+        self.finish(response)
+    }
+
+    /// The reply: status, `Retry-After`, and the body read up to the cap.
+    fn finish(
+        &self,
+        response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> Result<Reply, Failure> {
         let mut response = response.map_err(classify)?;
         let status = response.status().as_u16();
         let retry_after = response

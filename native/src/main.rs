@@ -11,8 +11,9 @@
 //! foamy-todoist-helper token-set    < {"token":"…"}
 //! foamy-todoist-helper token-clear
 //! foamy-todoist-helper sync         < {} | {"full":true}
-//! foamy-todoist-helper apply        < {"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD"}]}
+//! foamy-todoist-helper apply        < {"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD"},{"op":"update","id":…,…}]}
 //! foamy-todoist-helper add          < {"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null}
+//! foamy-todoist-helper task         < {"id":…}
 //! ```
 //!
 //! Every command prints one JSON line, also on failure and panic.
@@ -32,7 +33,8 @@
 //!   "projects":[{"id","name","color","parent_id","child_order","inbox","shared"}],
 //!   "sections":[{"id","project_id","name","section_order"}],
 //!   "tasks":[{"id","content","project_id","section_id","parent_id","priority",
-//!   "due":{"date","is_recurring","string"}|null,"labels","child_order","day_order",
+//!   "due":{"date","is_recurring","string"}|null,"deadline":"YYYY-MM-DD"|null,
+//!   "labels","child_order","day_order",
 //!   "responsible_uid"}],
 //!   "labels":[{"id","name","color","item_order"}],
 //!   "collaborators":[{"id","full_name","email"}],
@@ -46,17 +48,38 @@
 //!   20 000 tasks, 2 000 projects, 5 000 sections, 2 000 labels, 2 000
 //!   collaborators and 20 000 memberships (`truncated` when one was cut).
 //!   `due.date` is Todoist's: `YYYY-MM-DD`, a floating `YYYY-MM-DDTHH:MM:SS`
-//!   or a UTC `…Z`.
+//!   or a UTC `…Z`. `deadline` is the date of Todoist's `deadline` object
+//!   (no time, never recurring); a task whose `due` or `deadline` isn't
+//!   one of these shapes is left out. Descriptions are not kept.
 //! - `sync` merges an incremental Sync (items, projects, sections, labels,
 //!   collaborators, collaborator states, user)
 //!   into the cache; `{"full":true}` forces a full one. When Todoist refuses
 //!   the sync token (HTTP 400 on an incremental request) one full sync
 //!   follows; nothing else is retried.
-//! - `apply` takes 1–100 changes, at most one per task: `close` is
-//!   `item_close` (a recurring task moves to its next date), `due` sets an
-//!   all-day date with `item_update`. They go in one Sync request with the
-//!   incremental read. The snapshot comes with `"results":{"<task id>":"ok"|{"code":…,"error":…}}`
-//!   from Todoist's `sync_status` (`code` its `error_tag`).
+//! - `apply` takes 1–100 changes (at most 512 KiB), at most one per task:
+//!   `close` is `item_close` (a recurring task moves to its next date),
+//!   `due` sets an all-day date with `item_update`, and `update` edits a
+//!   task: `{"op":"update","id",` then at least one of `"content"` (1–500
+//!   characters after trimming, no control characters), `"description"`
+//!   (0–16 383 characters; line breaks and tabs allowed; "" clears it),
+//!   `"priority"` (1–4, Todoist's: 4 is p1), `"labels"` (0–100 names of
+//!   1–60 characters, each once ignoring case; the whole list replaces the
+//!   task's), `"due_string"` (at most 200 characters in words for Todoist
+//!   to parse, sent as `due.string`; "" removes the date), `"deadline"`
+//!   (`YYYY-MM-DD`; "" removes it), `"project_id"` (moves the task to that
+//!   project's root) and `"section_id"` (moves it into that section; ""
+//!   is the root of `project_id`, which it then needs)`}`; any other key is
+//!   `INVALID_ARGUMENT`. The fields go in one `item_update`, a place in one
+//!   `item_move` with only the section (when there is one) or only the
+//!   project, as Todoist takes one destination. A move to where the cached
+//!   task already is (same project, no section; or same section) is left
+//!   out: Todoist would make a subtask a root task. They all go in one Sync
+//!   request with the incremental read. The snapshot comes with
+//!   `"results":{"<task id>":"ok"|{"code":…,"error":…}}` from Todoist's
+//!   `sync_status` (`code` its `error_tag`), one per task: an update whose
+//!   `item_update` or `item_move` failed has that failure (the first), even
+//!   when the other command worked. Changes whose Sync request would pass
+//!   Todoist's 1 MiB are refused before it is sent (`INVALID_ARGUMENT`).
 //! - `add` creates the task with Quick Add (`POST /tasks/quick`: Todoist
 //!   parses dates, #project, @labels and p1–p4 in `text`, 1–500
 //!   characters). Then, in one Sync request with the read: `due_date` is set
@@ -72,12 +95,19 @@
 //!   `"warning_code"` and, for `RATE_LIMITED`, `"retry_after"`.
 //! - `apply` and `add` also report a cache that can't be saved as `warning`:
 //!   the change is made in Todoist and the next sync brings it.
+//! - `task` reads one open task with `GET /tasks/{id}` (for the editor's
+//!   description; the cache isn't read or written, and the lock is held
+//!   only to read the token): `{"ok":true,"task":{"id","description",
+//!   "truncated":bool}}`, the description cut to 16 384 characters ending
+//!   in "…" (`truncated`) when longer. A 404, or a task Todoist marks
+//!   completed or deleted, is `NOT_FOUND`; a reply over 1 MiB, or one for
+//!   another id, is `HTTP`.
 //!
 //! Errors: `{"ok":false,"code":…,"error":…}` with code `INVALID_ARGUMENT`,
 //! `SIGNED_OUT`, `INVALID_TOKEN`, `KEYRING_UNAVAILABLE`, `KEYRING_LOCKED`,
 //! `NETWORK`, `TIMEOUT`, `RATE_LIMITED` (HTTP 429, with `"retry_after"`
 //! seconds when Todoist gives them), `HTTP`, `TLS_UNSUPPORTED`, `BUSY`,
-//! `LOCK_UNAVAILABLE`, `UNKNOWN_OUTCOME` (`add` only: the Quick Add request
+//! `LOCK_UNAVAILABLE`, `NOT_FOUND` (`task` only), `UNKNOWN_OUTCOME` (`add` only: the Quick Add request
 //! went out but no answer came back, a timeout or a lost connection, or a
 //! 2xx answer without a usable task id, so the task may exist; a failure before the request went out stays
 //! `NETWORK`, `TIMEOUT` or `TLS_UNSUPPORTED`) or `INTERNAL`. Every `error`
@@ -123,7 +153,10 @@ use serde_json::Value;
 const RUN_BUDGET: Duration = Duration::from_secs(25);
 const MAX_TOKEN_REQUEST: u64 = 4 << 10;
 const MAX_ADD_REQUEST: u64 = 16 << 10;
-const MAX_APPLY_REQUEST: u64 = 64 << 10;
+/// One update at its longest fits, even with every character escaped as
+/// JSON (a description of 16 383 characters, 100 labels of 60).
+const MAX_APPLY_REQUEST: u64 = 512 << 10;
+const MAX_TASK_REQUEST: u64 = 4 << 10;
 
 fn usage() -> Failure {
     Failure::coded(
@@ -155,6 +188,7 @@ fn run(args: &[String]) -> Result<Value, Failure> {
         "sync" => context.sync(&todoist::read_request(MAX_TOKEN_REQUEST)?),
         "apply" => context.apply(&todoist::read_request(MAX_APPLY_REQUEST)?),
         "add" => context.add(&todoist::read_request(MAX_ADD_REQUEST)?),
+        "task" => context.task(&todoist::read_request(MAX_TASK_REQUEST)?),
         _ => Err(usage()),
     }
 }

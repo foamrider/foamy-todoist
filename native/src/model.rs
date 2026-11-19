@@ -30,9 +30,9 @@ const MAX_LABEL: usize = 100;
 const MAX_LABELS: usize = 50;
 const MAX_DUE_STRING: usize = 200;
 /// 2: labels; 3: collaborators and shared projects; 4: tasks' assignees
-/// (`responsible_uid`). An older cache keeps only its user, so the next
-/// sync is a full one that brings them.
-const CACHE_VERSION: u64 = 4;
+/// (`responsible_uid`); 5: tasks' deadlines. An older cache keeps only its
+/// user, so the next sync is a full one that brings them.
+const CACHE_VERSION: u64 = 5;
 
 /// A Todoist id: 1–64 ASCII letters, digits, `_` or `-`.
 pub fn valid_id(text: &str) -> bool {
@@ -157,6 +157,20 @@ fn due(record: &Value) -> Result<Value, ()> {
     }
 }
 
+/// A deadline: Todoist's `{"date":"YYYY-MM-DD","lang":…}` (no time, never
+/// recurring), or the cache's `"YYYY-MM-DD"`; kept as the date or null.
+fn deadline(record: &Value) -> Result<Value, ()> {
+    match record.get("deadline") {
+        None | Some(Value::Null) => Ok(Value::Null),
+        Some(Value::String(date)) if valid_date(date) => Ok(json!(date)),
+        Some(deadline @ Value::Object(_)) => string(deadline, "date")
+            .filter(|date| valid_date(date))
+            .map(|date| json!(date))
+            .ok_or(()),
+        Some(_) => Err(()),
+    }
+}
+
 fn labels(record: &Value) -> Vec<String> {
     record
         .get("labels")
@@ -189,6 +203,7 @@ pub fn normalize_task(record: &Value) -> Change {
             "parent_id": optional_id(record, "parent_id")?,
             "priority": if (1..=4).contains(&priority) { priority } else { 1 },
             "due": due(record)?,
+            "deadline": deadline(record)?,
             "labels": labels(record),
             "child_order": integer(record, "child_order"),
             "day_order": integer(record, "day_order"),
@@ -385,9 +400,9 @@ impl State {
         let value: Value = serde_json::from_slice(data).ok()?;
         match value.get("version").and_then(Value::as_u64) {
             Some(CACHE_VERSION) => {}
-            // Written before labels or collaborators: only the user is
-            // kept; a full sync follows.
-            Some(1..=3) => {
+            // Written before labels, collaborators, assignees or deadlines:
+            // only the user is kept; a full sync follows.
+            Some(1..=4) => {
                 let mut state = State::empty();
                 state.user = value.get("user").and_then(normalize_user);
                 return Some(state);
@@ -670,6 +685,7 @@ mod tests {
             json!({"id": "T1", "content": "Buy milk", "project_id": "P1", "section_id": null,
                    "parent_id": null, "priority": 4,
                    "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"},
+                   "deadline": null,
                    "labels": ["home"], "child_order": 1, "day_order": -1, "responsible_uid": null})
         );
         // Normalizing the cached shape again changes nothing.
@@ -795,9 +811,9 @@ mod tests {
         for bad in [
             &b"{"[..],
             b"[]",
-            br#"{"version":5,"sync_token":"A"}"#,
+            br#"{"version":6,"sync_token":"A"}"#,
             br#"{"version":0,"sync_token":"A"}"#,
-            br#"{"version":4,"sync_token":5}"#,
+            br#"{"version":5,"sync_token":5}"#,
         ] {
             assert!(
                 State::from_cache(bad).is_none(),
@@ -880,7 +896,7 @@ mod tests {
         assert!(state.is_full(), "the next sync is a full one");
         assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
         assert!(state.tasks.is_empty() && state.projects.is_empty());
-        assert!(State::from_cache(br#"{"version":5,"sync_token":"A"}"#).is_none());
+        assert!(State::from_cache(br#"{"version":6,"sync_token":"A"}"#).is_none());
     }
 
     #[test]
@@ -984,6 +1000,60 @@ mod tests {
     fn a_cache_from_before_assignees_syncs_in_full() {
         // Version 3 tasks have no responsible_uid: a full sync brings it.
         let old = json!({"version": 3, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
+            "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
+            "labels": [], "collaborators": [], "memberships": []});
+        let state = State::from_cache(old.to_string().as_bytes()).unwrap();
+        assert!(state.is_full(), "the next sync is a full one");
+        assert!(state.tasks.is_empty());
+        assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
+    }
+
+    #[test]
+    fn a_task_keeps_its_deadline_date() {
+        let mut due = task("T1", "x");
+        due["deadline"] = json!({"date": "2026-12-01", "lang": "en"});
+        let Change::Keep(_, kept) = normalize_task(&due) else {
+            panic!("dropped")
+        };
+        assert_eq!(kept["deadline"], "2026-12-01");
+        // The cached shape normalizes to itself.
+        assert_eq!(
+            normalize_task(&kept),
+            Change::Keep("T1".into(), kept.clone())
+        );
+        for none in [json!(null), Value::Null] {
+            let mut open = task("T2", "y");
+            open["deadline"] = none;
+            let Change::Keep(_, kept) = normalize_task(&open) else {
+                panic!("dropped")
+            };
+            assert_eq!(kept["deadline"], Value::Null);
+        }
+        // A deadline that isn't a date drops the task, like a broken due.
+        for bad in [
+            json!({"date": "2026-02-30"}),
+            json!({"date": "2026-12-01T10:00:00"}),
+            json!({}),
+            json!("soon"),
+            json!(5),
+            json!({"date": 20261201}),
+        ] {
+            let mut broken = task("T3", "z");
+            broken["deadline"] = bad.clone();
+            assert_eq!(normalize_task(&broken), Change::Drop("T3".into()), "{bad}");
+        }
+        // The cache keeps it.
+        let mut state = State::empty();
+        state
+            .merge(&json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": [due]}), "x")
+            .unwrap();
+        let back = State::from_cache(&state.to_cache()).unwrap();
+        assert_eq!(back.tasks["T1"]["deadline"], "2026-12-01");
+    }
+
+    #[test]
+    fn a_cache_from_before_deadlines_syncs_in_full() {
+        let old = json!({"version": 4, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
             "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
             "labels": [], "collaborators": [], "memberships": []});
         let state = State::from_cache(old.to_string().as_bytes()).unwrap();

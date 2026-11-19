@@ -21,6 +21,7 @@ const TOKEN: &str = "0123456789abcdef0123456789abcdef01234567";
 /// A request the fixture server received.
 #[derive(Debug, Clone)]
 struct Seen {
+    method: String,
     path: String,
     authorization: String,
     /// The body; form fields decoded.
@@ -118,6 +119,7 @@ fn read_request(stream: &TcpStream) -> Seen {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
+    let method = line.split(' ').next().unwrap_or("").to_string();
     let path = line.split(' ').nth(1).unwrap_or("").to_string();
     let mut length = 0;
     let mut authorization = String::new();
@@ -138,6 +140,7 @@ fn read_request(stream: &TcpStream) -> Seen {
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body).unwrap();
     Seen {
+        method,
         path,
         authorization,
         body: String::from_utf8(body).unwrap(),
@@ -971,4 +974,270 @@ fn a_quick_add_answer_without_a_task_id_has_an_unknown_outcome() {
         assert_eq!(reply["code"], "UNKNOWN_OUTCOME", "{body:?}: {reply}");
         assert_eq!(server.seen().len(), 1, "no follow-up for {body:?}");
     }
+}
+
+/// A Sync server for `apply`: answers each command with `status(command)`
+/// (keyed by the UUIDs the helper made) and the incremental `items`.
+fn apply_server(status: fn(&Value) -> Value, items: Value) -> (String, JoinHandle<Seen>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let thread = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let request = read_request(&stream);
+        let statuses: serde_json::Map<String, Value> = decoded_commands(&request)
+            .iter()
+            .map(|command| {
+                (
+                    command["uuid"].as_str().unwrap().to_string(),
+                    status(command),
+                )
+            })
+            .collect();
+        respond(
+            stream,
+            &ok(json!({"sync_token": "S2", "sync_status": statuses, "items": items})),
+        );
+        request
+    });
+    (base, thread)
+}
+
+fn synced(tag: &str) -> Home {
+    let home = Home::signed_in(tag);
+    let mut sync = full_sync();
+    sync["sections"] =
+        json!([{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 1}]);
+    sync["items"][2]["project_id"] = json!("P2");
+    sync["items"][2]["section_id"] = json!("S1");
+    let server = Server::start(vec![ok(sync)], TOKEN);
+    home.run("sync", "", &server.base);
+    assert_eq!(server.seen().len(), 1);
+    home
+}
+
+#[test]
+fn an_update_and_its_move_go_in_one_sync_with_one_result_per_task() {
+    let home = synced("update");
+    let mut edited = task("T1", "Call Bob");
+    edited["project_id"] = json!("P2");
+    edited["priority"] = json!(4);
+    edited["deadline"] = json!({"date": "2026-12-01", "lang": "en"});
+    // T2's update works but its move is refused: T2's result is the refusal.
+    let (base, thread) = apply_server(
+        |command| {
+            if command["type"] == "item_move" && command["args"]["id"] == "T2" {
+                json!({"error_tag": "INVALID_ARGUMENT_VALUE", "error": "Invalid argument value", "http_code": 400})
+            } else {
+                json!("ok")
+            }
+        },
+        json!([edited]),
+    );
+    let input = json!({"commands": [
+        {"op": "update", "id": "T1", "content": " Call Bob ", "priority": 4, "labels": ["phone"],
+         "due_string": "tomorrow 9am", "deadline": "2026-12-01", "description": "Ask about\nthe trip",
+         "project_id": "P2"},
+        {"op": "update", "id": "T2", "deadline": "", "due_string": "", "section_id": "S1"},
+        // T3 is already in S1: only its text changes.
+        {"op": "update", "id": "T3", "content": "three!", "project_id": "P2", "section_id": "S1"},
+        {"op": "close", "id": "T9"}
+    ]});
+    let (reply, _) = home.run("apply", &input.to_string(), &base);
+    let request = thread.join().unwrap();
+    assert_eq!(request.path, "/sync");
+    let commands = decoded_commands(&request);
+    let shapes: Vec<(&str, &Value)> = commands
+        .iter()
+        .map(|c| (c["type"].as_str().unwrap(), &c["args"]))
+        .collect();
+    assert_eq!(
+        shapes,
+        [
+            (
+                "item_update",
+                &json!({"id": "T1", "content": "Call Bob", "priority": 4, "labels": ["phone"],
+                                    "due": {"string": "tomorrow 9am"}, "deadline": {"date": "2026-12-01"},
+                                    "description": "Ask about\nthe trip"})
+            ),
+            ("item_move", &json!({"id": "T1", "project_id": "P2"})),
+            (
+                "item_update",
+                &json!({"id": "T2", "due": null, "deadline": null})
+            ),
+            ("item_move", &json!({"id": "T2", "section_id": "S1"})),
+            ("item_update", &json!({"id": "T3", "content": "three!"})),
+            ("item_close", &json!({"id": "T9"})),
+        ]
+    );
+    let uuids: std::collections::BTreeSet<&str> = commands
+        .iter()
+        .map(|c| c["uuid"].as_str().unwrap())
+        .collect();
+    assert_eq!(uuids.len(), 6, "a UUID per command");
+    assert_eq!(request.field("sync_token").as_deref(), Some("S1"));
+    assert_eq!(
+        reply["results"],
+        json!({"T1": "ok", "T3": "ok", "T9": "ok",
+               "T2": {"code": "INVALID_ARGUMENT_VALUE",
+                      "error": "Todoist didn't accept the change (%1).\u{1f}Invalid argument value"}}),
+        "{reply}"
+    );
+    // The snapshot has the edit and its deadline.
+    let t1 = reply["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "T1")
+        .unwrap();
+    assert_eq!(t1["deadline"], "2026-12-01");
+    assert_eq!(t1["project_id"], "P2");
+    assert!(t1.get("description").is_none(), "descriptions aren't kept");
+    let t2 = reply["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "T2")
+        .unwrap();
+    assert_eq!(t2["deadline"], Value::Null);
+    let cache = fs::read_to_string(home.cache()).unwrap();
+    assert!(
+        !cache.contains("Ask about"),
+        "the description reached the cache"
+    );
+}
+
+#[test]
+fn an_invalid_update_never_reaches_todoist() {
+    let home = synced("update-bad");
+    for (input, message) in [
+        (
+            json!({"commands": [{"op": "update", "id": "T1"}]}),
+            "The change has nothing to update.",
+        ),
+        (
+            json!({"commands": [{"op": "update", "id": "T1", "priority": 9}]}),
+            "Pick a priority from 1 to 4.",
+        ),
+        (
+            json!({"commands": [{"op": "update", "id": "T1", "section_id": ""}]}),
+            "Moving a task out of its section needs the project's id.",
+        ),
+        (
+            json!({"commands": [{"op": "update", "id": "T1", "content": "x"},
+                             {"op": "close", "id": "T1"}]}),
+            "The same task is changed twice.",
+        ),
+    ] {
+        let (reply, _) = home.run("apply", &input.to_string(), &closed());
+        assert_eq!(
+            (reply["code"].as_str(), reply["error"].as_str()),
+            (Some("INVALID_ARGUMENT"), Some(message)),
+            "{input}"
+        );
+    }
+    // The longest single update fits the request limit and goes out.
+    let longest = json!({"commands": [{"op": "update", "id": "T1",
+        "description": "\u{1F600}".repeat(16_383),
+        "labels": (0..100).map(|n| format!("{n:\u{1F600}>60}")).collect::<Vec<_>>()}]});
+    let (base, thread) = apply_server(|_| json!("ok"), json!([]));
+    let (reply, _) = home.run("apply", &longest.to_string(), &base);
+    thread.join().unwrap();
+    assert_eq!(reply["results"]["T1"], "ok", "{reply}");
+}
+
+#[test]
+fn task_reads_one_description_and_writes_nothing() {
+    let home = synced("task");
+    let before = fs::read(home.cache()).unwrap();
+    let mut found = task("T1", "one");
+    found["description"] = json!("Line 1\nLine 2");
+    let server = Server::start(vec![ok(found.clone())], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    assert_eq!(
+        reply,
+        json!({"ok": true, "task": {"id": "T1", "description": "Line 1\nLine 2", "truncated": false}})
+    );
+    let seen = server.seen();
+    assert_eq!(
+        (seen[0].method.as_str(), seen[0].path.as_str()),
+        ("GET", "/tasks/T1")
+    );
+    assert_eq!(seen[0].authorization, format!("Bearer {TOKEN}"));
+    assert_eq!(fs::read(home.cache()).unwrap(), before, "the cache changed");
+    // No description, or null: "".
+    let server = Server::start(vec![ok(task("T1", "one"))], TOKEN);
+    assert_eq!(
+        home.run("task", r#"{"id":"T1"}"#, &server.base).0["task"]["description"],
+        ""
+    );
+    // Longer than 16 384 characters: cut, and said so.
+    let mut long = task("T1", "one");
+    long["description"] = json!("é".repeat(20_000));
+    let server = Server::start(vec![ok(long)], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    let text = reply["task"]["description"].as_str().unwrap();
+    assert_eq!(text.chars().count(), 16_384);
+    assert!(text.ends_with('…'));
+    assert_eq!(reply["task"]["truncated"], true);
+}
+
+#[test]
+fn task_reports_a_missing_oversized_or_wrong_task() {
+    let home = synced("task-bad");
+    let gone = "That task no longer exists in Todoist.";
+    let server = Server::start(vec![status(404, r#"{"error":"Task not found"}"#)], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    assert_eq!(
+        (reply["code"].as_str(), reply["error"].as_str()),
+        (Some("NOT_FOUND"), Some(gone)),
+        "{reply}"
+    );
+    for flag in ["checked", "is_deleted"] {
+        let mut done = task("T1", "one");
+        done[flag] = json!(true);
+        let server = Server::start(vec![ok(done)], TOKEN);
+        let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+        assert_eq!(reply["code"], "NOT_FOUND", "{flag}: {reply}");
+    }
+    // Over 1 MiB: refused while it is read.
+    let mut huge = task("T1", "one");
+    huge["description"] = json!("x".repeat(1 << 20));
+    let server = Server::start(vec![ok(huge)], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    assert_eq!(
+        reply["error"], "Todoist sent an oversized reply.",
+        "{reply}"
+    );
+    // Another task, not JSON, or a description that isn't text.
+    let mut wrong_type = task("T1", "one");
+    wrong_type["description"] = json!(["x"]);
+    for body in [task("T2", "two"), json!("nope"), wrong_type] {
+        let server = Server::start(vec![ok(body.clone())], TOKEN);
+        let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+        assert_eq!(
+            reply["error"], "Todoist sent an unexpected reply.",
+            "{body}: {reply}"
+        );
+    }
+    let server = Server::start(vec![ok(json!({}))], "another-token");
+    assert_eq!(
+        home.run("task", r#"{"id":"T1"}"#, &server.base).0["code"],
+        "INVALID_TOKEN"
+    );
+    // Invalid ids never reach Todoist.
+    for bad in [
+        r#"{"id":"../sync"}"#,
+        r#"{"id":""}"#,
+        r#"{}"#,
+        r#"{"id":5}"#,
+    ] {
+        let (reply, _) = home.run("task", bad, &closed());
+        assert_eq!(
+            reply["error"], "That isn't a Todoist task id.",
+            "{bad}: {reply}"
+        );
+    }
+    // Signed out.
+    let (reply, _) = Home::new("task-out").run("task", r#"{"id":"T1"}"#, &closed());
+    assert_eq!(reply["code"], "SIGNED_OUT", "{reply}");
 }
