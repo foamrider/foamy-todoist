@@ -1395,6 +1395,17 @@ ShellRoot {
       // A reply for an earlier request (another task) changes nothing.
       store.handle({ command: "task", input: "", extra: { describe: "t7", request: store.descriptionRequest - 1 }, generation: store.generation }, 0, JSON.stringify({ ok: true, task: { id: "t7", description: "stale" } }));
       if (!check(store.description.text === "Seven" && view.editor.descriptionField.text === "Seven", "an earlier request's reply is ignored")) return;
+      // A cut description with CRLF line ends never saves itself on leaving.
+      var whole = store.description;
+      store.description = { id: "t7", state: "ready", text: "Line one\r\nLine two", truncated: true };
+      view.editor.commit();
+      if (!check(!view.editor.dirty("description") && Object.keys(view.editor.pending).length === 0, "a cut description is never saved")) return;
+      // Untouched CRLF text is not a change either.
+      store.description = { id: "t7", state: "ready", text: "Line one\r\nLine two", truncated: false };
+      view.editor.descriptionField.text = "Line one\nLine two";
+      if (!check(!view.editor.dirty("description"), "CRLF read back as LF is no change")) return;
+      store.description = whole;
+      view.editor.descriptionField.text = "Seven";
       // A picked choice that Todoist refuses: Retry sends the same pick again.
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(), { results: { t7: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f502" } } })));
       shell.callsBefore = shell.calls("apply").length;

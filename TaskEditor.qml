@@ -130,7 +130,18 @@ FocusScope {
   }
   function dirty(key) {
     var input = inputOf(key)
-    return !!input && !!current() && input.text !== initialOf(key)
+    if (!input || !current())
+      return false
+    if (key !== "description")
+      return input.text !== initialOf(key)
+    // A cut description is read-only: never saved, or it would replace the
+    // whole one. The text area turns CRLF into LF, so compare without it.
+    if (descTruncated())
+      return false
+    return input.text !== initialOf(key).replace(/\r\n?/g, "\n")
+  }
+  function descTruncated() {
+    return !!desc && desc.state === "ready" && desc.truncated === true
   }
   // A text field back to the task's value (and its error gone).
   function revert(key) {
@@ -648,7 +659,7 @@ FocusScope {
           visible: !(editor.desc && editor.desc.state === "ready" && editor.desc.truncated)
           Layout.fillWidth: true
           Layout.preferredHeight: height
-          enabled: !!editor.desc && editor.desc.state === "ready"
+          enabled: !!editor.desc && editor.desc.state === "ready" && !editor.descTruncated()
           placeholderText: !editor.desc || editor.desc.state === "loading" ? FoamyI18n.t("Loading…") : editor.desc.state === "error" ? "" : FoamyI18n.t("Description")
           maximumLength: 32766
           translate: FoamyI18n.t
