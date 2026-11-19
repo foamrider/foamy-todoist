@@ -1427,6 +1427,29 @@ ShellRoot {
       if (!check(!big4.blocked && big4.weekPaneOpen, "Esc: the keys back, the pane stays")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big4.weekPaneOpen && !big4.editor.visible && store.overlayOpen, "Esc: the pane closes")) return;
+      // Overdue with thousands of tasks: only the cards in view are built,
+      // and the keys scroll to the cursor's card.
+      var many = shell.snapshot();
+      for (var m = 0; m < 3000; m++)
+        many.tasks.push(Fixtures.task("o" + m, "Old " + m, "home", { due: Fixtures.due(Fixtures.shift(shell.today, -3 - (m % 30))), child_order: 100 + m }));
+      store.snapshot = many;
+      var overdueList = shell.find(big4.week, "weekColumn-overdue").list;
+      var countCards = function(item) { return item.children.reduce(function(sum, child) { return sum + (child.objectName.indexOf("card-") === 0 ? 1 : 0) + countCards(child); }, 0); };
+      var built = countCards(overdueList.contentItem);
+      if (!check(big4.weekColumns[0].cards.length === 3002 && built > 0 && built < 200, "Overdue builds only what shows (" + built + " of " + big4.weekColumns[0].cards.length + ")")) return;
+      big4.weekPlace(0, 0);
+      big4.goTo(big4.firstRowStop);
+      for (var k = 0; k < 60; k++) ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+      var at = big4.cursorRow();
+      var atCard = shell.find(overdueList.contentItem, "card-" + at.id);
+      var atTop = atCard ? atCard.mapToItem(overdueList, 0, 0).y : -1000;
+      if (!check(big4.weekColumn === 0 && big4.weekCard === 60 && at.id === big4.weekColumns[0].entries[60].id && atCard && atTop >= -1 && atTop + atCard.height <= overdueList.height + 1, "↓ 60 times: the card in view (" + JSON.stringify([big4.weekCard, at.id, atTop]) + ")")) return;
+      // → and ←: the same row where the column has it, else its last card.
+      ev.keyClick(Qt.Key_Right, Qt.NoModifier, -1);
+      if (!check(big4.weekColumn === 1 && big4.weekCard === big4.weekCards(1) - 1, "→: Today's last card (" + big4.weekCard + ")")) return;
+      ev.keyClick(Qt.Key_Left, Qt.NoModifier, -1);
+      if (!check(big4.weekColumn === 0 && big4.weekCard === big4.weekCards(1) - 1, "←: that row in Overdue (" + big4.weekCard + ")")) return;
+      store.snapshot = shell.snapshot();
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!store.overlayOpen, "Esc: the overlay closes")) return;
       break;

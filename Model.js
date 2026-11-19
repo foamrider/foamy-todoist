@@ -873,7 +873,7 @@ function upcomingRows(model, today, options, flat) {
 
 // ---- the Week view (Large) -------------------------------------------------------
 
-// Four columns, [{key, entries}]: "overdue" (oldest first), "today",
+// Four columns, [{key, entries, cards}]: "overdue" (oldest first), "today",
 // "tomorrow" and "later", the seven days after tomorrow, each day under a
 // heading ({kind: "day", key, dayKey}). The tasks are rows as in the list
 // (taskRow, view "week": the project, an overdue task's date, the time),
@@ -904,17 +904,31 @@ function weekColumns(model, today, options) {
     later.push(card(task))
   })
   return [
-    { key: "overdue", entries: dueOn(function (day) {
+    weekColumn("overdue", dueOn(function (day) {
       return day < today
-    }).sort(byOverdue).map(card) },
-    { key: "today", entries: dueOn(function (day) {
+    }).sort(byOverdue).map(card)),
+    weekColumn("today", dueOn(function (day) {
       return day === today
-    }).sort(byDay).map(card) },
-    { key: "tomorrow", entries: dueOn(function (day) {
+    }).sort(byDay).map(card)),
+    weekColumn("tomorrow", dueOn(function (day) {
       return day === tomorrow
-    }).sort(byDay).map(card) },
-    { key: "later", entries: later }
+    }).sort(byDay).map(card)),
+    weekColumn("later", later)
   ]
+}
+// A column's indices, computed once: each card's `card` (its place among
+// the column's tasks, headings left out; -1 on a heading), and `cards`,
+// each card's entry, so the view finds an entry without searching.
+function weekColumn(key, entries) {
+  var cards = []
+  entries.forEach(function (entry, index) {
+    if (entry.kind === "task") {
+      entry.card = cards.length
+      cards.push(index)
+    } else
+      entry.card = -1
+  })
+  return { key: key, entries: entries, cards: cards }
 }
 
 // Ctrl+←/→ in the Week view: the task's day moved by `delta` days, never

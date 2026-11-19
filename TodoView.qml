@@ -121,9 +121,7 @@ PanelKeyCatcher {
     unconfirmed: store.unconfirmed
   }) : []
   readonly property int weekCount: weekColumns.reduce(function (sum, column) {
-    return sum + column.entries.filter(function (entry) {
-      return entry.kind === "task"
-    }).length
+    return sum + column.cards.length
   }, 0)
   // Row index → cursor stop (-1 for headers), and the rows that are stops.
   readonly property var stops: rows.reduce(function (found, row, index) {
@@ -406,15 +404,17 @@ PanelKeyCatcher {
   property int weekColumn: 0
   property int weekCard: 0
   property string weekTask: ""
+  // A column's number of cards, and one card (Model.weekColumns' indices).
   function weekCards(column) {
     var col = weekColumns[column]
-    return col ? col.entries.filter(function (entry) {
-      return entry.kind === "task"
-    }) : []
+    return col ? col.cards.length : 0
+  }
+  function weekCardAt(column, card) {
+    var col = weekColumns[column]
+    return col && col.cards.length ? col.entries[col.cards[Math.max(0, Math.min(card, col.cards.length - 1))]] : null
   }
   function weekCurrent() {
-    var cards = weekCards(weekColumn)
-    return cards.length ? cards[Math.min(weekCard, cards.length - 1)] : null
+    return weekCardAt(weekColumn, weekCard)
   }
   function weekPlace(column, card) {
     weekColumn = column
@@ -425,7 +425,7 @@ PanelKeyCatcher {
   // The first card of the first column that has one.
   function weekHome() {
     for (let i = 0; i < weekColumns.length; i++)
-      if (weekCards(i).length) {
+      if (weekCards(i)) {
         weekPlace(i, 0)
         return
       }
@@ -435,19 +435,19 @@ PanelKeyCatcher {
     if (!weekShown)
       return
     for (let i = 0; i < weekColumns.length; i++) {
-      const cards = weekCards(i)
-      for (let j = 0; j < cards.length; j++)
-        if (cards[j].id === weekTask) {
+      const col = weekColumns[i]
+      for (let j = 0; j < col.cards.length; j++)
+        if (col.entries[col.cards[j]].id === weekTask) {
           weekColumn = i
           weekCard = j
           return
         }
     }
-    const cards = weekCards(weekColumn)
-    if (!cards.length)
+    const count = weekCards(weekColumn)
+    if (!count)
       weekHome()
     else
-      weekPlace(weekColumn, Math.min(weekCard, cards.length - 1))
+      weekPlace(weekColumn, Math.min(weekCard, count - 1))
   }
   // ↑/↓ within a column (↑ on the first card: the rail), ←/→ to the next
   // column with cards (← from the first: the rail).
@@ -458,11 +458,11 @@ PanelKeyCatcher {
         goTo(railStop)
         return
       }
-      if (next < weekCards(weekColumn).length)
+      if (next < weekCards(weekColumn))
         weekPlace(weekColumn, next)
     } else {
       let column = weekColumn + dx
-      while (column >= 0 && column < weekColumns.length && !weekCards(column).length)
+      while (column >= 0 && column < weekColumns.length && !weekCards(column))
         column += dx
       if (column < 0) {
         goTo(railStop)
@@ -470,7 +470,7 @@ PanelKeyCatcher {
       }
       if (column >= weekColumns.length)
         return
-      weekPlace(column, Math.min(weekCard, weekCards(column).length - 1))
+      weekPlace(column, Math.min(weekCard, weekCards(column) - 1))
     }
     weekView.reveal()
     followPane()

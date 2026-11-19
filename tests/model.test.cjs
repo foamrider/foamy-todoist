@@ -852,6 +852,10 @@ test('the Week view: overdue, today, tomorrow and seven days after, by day', () 
   assert.equal(now.struck, true);
   assert.equal(cols[0].entries[0].overdue, true);
   assert.equal(cols[0].entries[0].dateKind, 'weekday');
+  // The indices, computed once: each card's place among the tasks, each card's entry.
+  assert.deepEqual(cols[3].entries.map((e) => e.card), [-1, 0, 1, -1, 2]);
+  assert.deepEqual(cols[3].cards, [1, 2, 4]);
+  assert.deepEqual(cols[0].cards, [0, 1]);
   // Show: someone else's task is in Today too.
   assert.ok(ids(Model.weekColumns(m, TODAY, { hideOthers: false })[1]).includes('theirs'));
 });
