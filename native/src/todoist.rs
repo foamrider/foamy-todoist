@@ -314,21 +314,6 @@ impl Context {
         Ok(json!({"ok": true, "state": "signed_in", "user": state.user}))
     }
 
-    /// The cache's names for the launcher's suggestions, no network: every
-    /// list empty when signed out or before the first sync.
-    pub fn names(&self) -> Result<Value, Failure> {
-        let _lock = self.lock()?;
-        let (state, account) = if self.vault.get()?.is_none() {
-            (State::empty(), "signed_out")
-        } else {
-            (load(&cache_file()?), "signed_in")
-        };
-        let mut out = state.names();
-        out["ok"] = json!(true);
-        out["state"] = json!(account);
-        Ok(out)
-    }
-
     pub fn token_set(&self, request: &Map<String, Value>) -> Result<Value, Failure> {
         let token = request
             .get("token")
@@ -500,12 +485,7 @@ impl Context {
                 Some(message)
             }
         };
-        let mut out = if add.short_reply {
-            let (task, project) = state.added(&id);
-            json!({"ok": true, "task": task, "project": project})
-        } else {
-            reply(&state)
-        };
+        let mut out = reply(&state);
         out["added"] = json!(id);
         if let Some(failure) = follow_up_failed {
             out["stale"] = json!(true);
@@ -611,11 +591,9 @@ pub struct Add {
     pub text: String,
     pub due_date: Option<String>,
     pub project_id: Option<String>,
-    /// `"reply":"task"`: reply with the added task, not the snapshot.
-    pub short_reply: bool,
 }
 
-/// `{"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null,"reply"?:"task"}`.
+/// `{"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null}`.
 pub fn parse_add(request: &Map<String, Value>) -> Result<Add, Failure> {
     let text = request
         .get("text")
@@ -633,11 +611,6 @@ pub fn parse_add(request: &Map<String, Value>) -> Result<Add, Failure> {
                 _ => Err(invalid(error)),
             }
         };
-    let short_reply = match request.get("reply") {
-        None => false,
-        Some(Value::String(reply)) if reply == "task" => true,
-        _ => return Err(invalid("Unknown reply kind.")),
-    };
     Ok(Add {
         text: text.to_string(),
         due_date: optional("due_date", model::valid_date, "Enter a date as YYYY-MM-DD.")?,
@@ -646,7 +619,6 @@ pub fn parse_add(request: &Map<String, Value>) -> Result<Add, Failure> {
             model::valid_id,
             "That isn't a Todoist project id.",
         )?,
-        short_reply,
     })
 }
 
@@ -707,13 +679,7 @@ mod tests {
                 text: "Milk #Shop".into(),
                 due_date: None,
                 project_id: None,
-                short_reply: false
             }
-        );
-        assert!(
-            parse_add(&map(json!({"text": "x", "reply": "task"})))
-                .unwrap()
-                .short_reply
         );
         let full = parse_add(&map(
             json!({"text": "é".repeat(500), "due_date": "2026-11-17", "project_id": "P2"}),
@@ -726,9 +692,6 @@ mod tests {
             json!({"text": "é".repeat(501)}),
             json!({"text": "x", "due_date": "tomorrow"}),
             json!({"text": "x", "project_id": 5}),
-            json!({"text": "x", "reply": "snapshot"}),
-            json!({"text": "x", "reply": null}),
-            json!({"text": "x", "reply": true}),
         ] {
             assert_eq!(
                 parse_add(&map(bad.clone())).unwrap_err().code,

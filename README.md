@@ -191,30 +191,7 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
   Todoist's own retry time when it asks to slow down.
 
 IPC (`omarchy-shell foamy.todoist <function>`): `toggle`, `add` (opens the
-popup with the add field open and the caret in it), `refresh`,
-`openTask <id>` (opens that task in Todoist with the open command, as Enter
-on a task does; an id that isn't a Todoist id is refused and logged) and
-`openInbox` (the Inbox, the same way).
-
-## Other plugins
-
-Foamy Menu adds tasks through this plugin's helper,
-`bin/<arch>/foamy-todoist-helper`, so the token, the cache and the requests
-to Todoist stay here. Every reply has `"contract": 1`, the version of the
-replies other plugins read. The commands they use:
-
-- `names`: the projects, sections, labels and people in the cache, for
-  suggestions, and the open tasks (at most 1 000, dated ones first, each
-  cut to 200 characters and 10 labels), for the launcher's task search. No network; empty lists when signed out or
-  before the first sync.
-- `add` with `"reply": "task"`: adds as the panel does, but replies with the
-  added task and its project instead of every task.
-- `notify`: a desktop notification about an add, through
-  `omarchy-notification-send`, with the texts the caller translated. Its
-  button runs `openTask` or `openInbox` above. The helper waits at most 2
-  seconds for it.
-
-The requests and replies are described at the top of `native/src/main.rs`.
+popup with the add field open and the caret in it) and `refresh`.
 
 ## Privacy
 
@@ -229,11 +206,6 @@ The requests and replies are described at the top of `native/src/main.rs`.
   removes it.
 - The only server contacted is `api.todoist.com`. Opening a task or view
   hands an `https://app.todoist.com/app/…` link to your browser.
-- When Foamy Menu asks for a notification (`notify`), the task's text,
-  project, date and labels, or the text you typed, are in the command line
-  of `omarchy-notification-send` while it runs, so other programs of yours
-  can see them in the process list for that moment. Nothing else the
-  helper runs gets task text on its command line.
 
 ## Languages
 

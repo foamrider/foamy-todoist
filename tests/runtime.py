@@ -840,30 +840,20 @@ ShellRoot {
       break;
     case 39:
       if (!check(!view.footer.statusError && view.footer.status.indexOf("Updated") === 0, "the next success clears it (" + view.footer.status + ")")) return;
-      // IPC openTask and openInbox (Foamy Menu) launch with the open
-      // command, as Enter on a row does; an invalid task id opens nothing.
-      var opener = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.openTask === "function"; });
-      if (!check(opener && typeof opener.openInbox === "function", "the IPC target has openTask and openInbox")) return;
-      opener.openTask("../t2");
-      opener.openTask("");
-      opener.openTask("t2");
-      opener.openInbox();
-      wait.waitFor(function() { return shell.opened().length === 7 && !store.launchRunning && store.launches.length === 0; }, 15000, function(ok) {
-        var seen = shell.opened();
-        if (!check(ok && seen.length === 7, "IPC opened two links, not the invalid ids (" + JSON.stringify(seen) + ")")) return;
-        if (!check(JSON.stringify(seen[5]) === JSON.stringify(["todoist-open", "--new", Model.webUrl("task", "t2")]), "IPC openTask opened the task with the command (" + JSON.stringify(seen[5]) + ")")) return;
-        if (!check(JSON.stringify(seen[6]) === JSON.stringify(["todoist-open", "--new", "https://app.todoist.com/app/inbox"]), "IPC openInbox opened the Inbox (" + JSON.stringify(seen[6]) + ")")) return;
-        // Wide: → on the add row does nothing, ← goes to the rail.
-        view.goTo(view.addStop);
-        view.moveRequested(1, 0);
-        if (!check(view.cursor.index === view.addStop, "→ on the add row stays (wide)")) return;
-        view.moveRequested(-1, 0);
-        if (!check(view.cursor.index === view.railStop, "← on the add row goes to the rail (wide)")) return;
-        one.prefs.save("openCommand", "");
-        one.prefs.save("panelWidth", "standard");
-        one.close();
-        wait.after(100, function() { one.open(); });
-      });
+      // The IPC target keeps only the panel's own functions (Foamy Menu's
+      // openTask and openInbox are gone).
+      var target = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled; });
+      if (!check(target && typeof target.toggle === "function" && typeof target.openTask === "undefined" && typeof target.openInbox === "undefined", "the IPC target has toggle, no openTask or openInbox")) return;
+      // Wide: → on the add row does nothing, ← goes to the rail.
+      view.goTo(view.addStop);
+      view.moveRequested(1, 0);
+      if (!check(view.cursor.index === view.addStop, "→ on the add row stays (wide)")) return;
+      view.moveRequested(-1, 0);
+      if (!check(view.cursor.index === view.railStop, "← on the add row goes to the rail (wide)")) return;
+      one.prefs.save("openCommand", "");
+      one.prefs.save("panelWidth", "standard");
+      one.close();
+      wait.after(100, function() { one.open(); });
       break;
     case 40:
       // Standard: ← and → on the add row do nothing.

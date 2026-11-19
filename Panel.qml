@@ -79,12 +79,6 @@ Ui.Panel {
     function refresh(): void {
       TodoStore.sync()
     }
-    function openTask(id: string): void {
-      TodoStore.openTask(id)
-    }
-    function openInbox(): void {
-      TodoStore.openView("inbox", "")
-    }
   }
 
   // The mark alone when nothing is left today: no "0".
