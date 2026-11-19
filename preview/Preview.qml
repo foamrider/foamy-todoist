@@ -1,19 +1,23 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import qs.Ui
 import "../kit"
 import ".." as Plugin
 import "../Model.js" as Model
 import "Fixtures.js" as Fixtures
 
 // Offscreen previews (foamy-kit preview/render.py): sample data, no helper.
+// The Large states draw the overlay's card centred on the screen (the
+// overlay window itself is a layer surface the harness can't show).
 Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "wide", "wide-add-open", "wide-project", "wide-upcoming", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-error", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-editor", "large", "large-week", "large-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
+  readonly property bool large: previewState.indexOf("large") === 0
   readonly property bool wide: previewState.indexOf("wide") === 0
-  readonly property var popup: previewPopup
+  readonly property var popup: large ? largeHolder : previewPopup
 
   function sample() {
     var reply = Fixtures.snapshot(Model.dayKey(new Date()))
@@ -24,7 +28,7 @@ Item {
   }
   function applyState() {
     var store = Plugin.TodoStore
-    var view = previewPopup.ensureBody()
+    var view = preview.large ? largeView : previewPopup.ensureBody()
     if (!view)
       return
     var signedIn = previewState !== "signed-out" && previewState !== "settings-signed-out"
@@ -36,6 +40,7 @@ Item {
     if (previewState === "truncated")
       data.truncated = true
     store.loadFixture(data, signedIn)
+    store.fixtureDescriptions = Fixtures.descriptions
     // The fixtures assign one task to someone else: show it, as an example.
     store.othersTasks = "show"
     if (previewState === "unconfirmed")
@@ -48,7 +53,7 @@ Item {
     } : ({})
     store.launchError = previewState === "footer-error" ? FoamyI18n.t("Can't open Todoist") : ""
     view.prepare()
-    var next = previewState === "inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : "today"
+    var next = previewState === "inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("large-week") === 0 ? "week" : "today"
     view.setView(next, "work")
     if (previewState === "error")
       store.error = FoamyI18n.t("Can't reach Todoist. Check your connection.")
@@ -58,12 +63,13 @@ Item {
         view.field.text = "the"
         view.query = "the"
       })
+    // The band's field, its Quick Add tokens in colour, the keys in the footer.
     if (previewState === "add-open" || previewState === "wide-add-open")
       Qt.callLater(function () {
         view.openAdd()
-        view.field.text = "Call the plumber tomorrow #Home"
+        view.field.text = "Call the plumber tomorrow #Home p1 @calls"
       })
-    // Quick Add sent, no answer: the whole warning under the field.
+    // Quick Add sent, no answer: the whole warning under the band.
     if (previewState === "add-error")
       Qt.callLater(function () {
         view.openAdd()
@@ -88,6 +94,26 @@ Item {
       Qt.callLater(function () {
         view.goTo(view.firstRowStop + 2)
       })
+    // The editor: the page (Small, Wide), the pane (Large).
+    if (previewState === "editor" || previewState === "wide-editor" || previewState === "editor-error")
+      Qt.callLater(function () {
+        view.openTask(previewState === "wide-editor" ? "t1" : "t4", false)
+        if (previewState === "editor-error")
+          Qt.callLater(function () {
+            view.editor.setError("due", FoamyI18n.t("Todoist answered HTTP %1.", ["500"]))
+          })
+      })
+    if (previewState === "large")
+      Qt.callLater(function () {
+        view.goTo(view.firstRowStop)
+      })
+    if (previewState.indexOf("large-week") === 0)
+      Qt.callLater(function () {
+        view.goTo(view.firstRowStop)
+        view.weekMove(1, 0)
+        if (previewState === "large-week-pane")
+          view.openTask(view.cursorRow().id, false)
+      })
   }
   onPreviewStateChanged: Qt.callLater(applyState)
   Component.onCompleted: {
@@ -98,13 +124,40 @@ Item {
     id: previewPopup
     anchorItem: preview.anchorItem
     bar: preview.bar
-    open: true
+    open: !preview.large
     wide: preview.wide
     body: Component {
       Plugin.TodoView {
         size: preview.wide ? "wide" : "standard"
         onSettingsRequested: editingSettings = true
         onSettingsClosed: editingSettings = false
+      }
+    }
+  }
+  // Large: the overlay's card (TodoOverlay.qml), centred on the screen.
+  Item {
+    id: largeHolder
+    readonly property Item cardItem: largeCard
+    visible: preview.large
+    width: 1920
+    height: 1080
+    BorderSurface {
+      id: largeCard
+      width: 880
+      height: Math.min(largeView.implicitHeight + largeCard.borderTop + largeCard.borderBottom, Math.round(parent.height * 0.7))
+      anchors.centerIn: parent
+      radius: FoamyStyle.radius
+      color: FoamyPalette.background
+      borderSpec: FoamyStyle.popupBorderSpec
+      clip: true
+      Plugin.TodoView {
+        id: largeView
+        x: largeCard.borderLeft
+        y: largeCard.borderTop
+        width: largeCard.width - largeCard.borderLeft - largeCard.borderRight
+        height: largeCard.height - largeCard.borderTop - largeCard.borderBottom
+        size: "large"
+        active: preview.large
       }
     }
   }

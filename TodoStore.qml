@@ -254,6 +254,17 @@ QtObject {
     if (!signedIn || !Model.validId(id))
       return
     var request = ++descriptionRequest
+    // Previews: the sample descriptions, no helper.
+    if (fixtures) {
+      description = {
+        id: id,
+        state: "ready",
+        text: Model.has(fixtureDescriptions, id) ? fixtureDescriptions[id] : "",
+        truncated: false,
+        error: ""
+      }
+      return
+    }
     // Only the newest read waits: one queued for an earlier selection goes.
     queue = queue.filter(function (job) {
       return job.command !== "task"
@@ -847,6 +858,7 @@ QtObject {
 
   // Preview: sample data, and no helper is ever started.
   property bool fixtures: false
+  property var fixtureDescriptions: ({})
   function loadFixture(reply, signedInState) {
     fixtures = true
     queue = []

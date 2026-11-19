@@ -38,7 +38,7 @@ function snapshot(today) {
       { id: "s-ops", project_id: "work", name: "Ops", section_order: 2 }
     ],
     tasks: [
-      task("t1", "Send the quarterly report to [Finance](https://example.com/finance)", "work", { priority: 4, due: due(d(-2)), labels: ["office"], child_order: 1 }),
+      task("t1", "Send the quarterly report to [Finance](https://example.com/finance)", "work", { priority: 4, due: due(d(-2)), deadline: d(3), labels: ["office"], child_order: 1 }),
       task("t2", "Renew the passport", "home", { priority: 3, due: due(d(-1)), child_order: 1 }),
       task("t3", "Stand-up with the platform team", "work", { due: due(d(0, "09:30"), true, "every weekday at 9:30"), section_id: "s-ops", child_order: 1 }),
       task("t4", "Review **pull request** #482", "work", { priority: 2, due: due(d(0, "14:00")), section_id: "s-review", labels: ["code"], child_order: 1 }),
@@ -72,6 +72,13 @@ function snapshot(today) {
   }
 }
 
+// The descriptions the editor reads (the helper's `task` command), by task.
+var descriptions = {
+  t1: "The numbers are in the shared sheet.\nAsk Bo to check the totals first.",
+  t4: "Check that the tests pass on CI, then merge.",
+  t6: "Four people, around seven."
+}
+
 // Tasks further out, for Upcoming's later groups (the rest of the month,
 // next month, the next year).
 function upcomingExtras(today) {
@@ -86,4 +93,4 @@ function upcomingExtras(today) {
 }
 
 if (typeof module !== "undefined")
-  module.exports = { snapshot, upcomingExtras, shift, task, due }
+  module.exports = { snapshot, upcomingExtras, descriptions, shift, task, due }
