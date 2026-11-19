@@ -56,9 +56,9 @@ FocusScope {
   readonly property alias backButton: pageBand.backButton
   readonly property alias labelMenu: labelPicker
 
-  // Saves in flight, {request: {key, typed, before, fields}}: the field,
-  // what it held when sent (a choice: what was picked), the field's
-  // baseline before the send and the `update` fields.
+  // Saves in flight, {request: {key, typed, sent, fields}}: the field,
+  // what it held when sent (a choice: what was picked), the field's value
+  // once Todoist has it (a text field) and the `update` fields.
   // Each reply is matched to its own request, and only the newest request
   // of a field may change that field: an older reply never replaces a newer
   // draft or what a newer request sent.
@@ -68,12 +68,12 @@ FocusScope {
     return editor.pending[request].fields
   })
   property var errors: ({})
-  // Each text field's baseline: what it held when it last followed the
-  // task (shown, saved, or changed in Todoist while untouched) or was last
-  // sent. A field is dirty only when the user's text differs from it, so
-  // text the user never touched is never sent back over a newer value.
-  // Read imperatively (dirty()), never bound, so it is mutated in place.
-  property var baselines: ({})
+  // Each text field's confirmed value: what Todoist held when the field
+  // last followed the task (shown, or changed in Todoist while untouched),
+  // or the newest save of the field that worked. Never an unconfirmed
+  // request's value: baselineOf() adds the saves in flight. Read
+  // imperatively (dirty()), never bound, so it is mutated in place.
+  property var confirmed: ({})
   // What each choice (place, priority, labels) asked for last, for Retry.
   property var attempts: ({})
 
@@ -135,17 +135,29 @@ FocusScope {
   function initialOf(key) {
     return Edit.initial(baseNow(), key, descBase())
   }
-  // A text field set to what the task holds: its baseline moves with it
-  // (read back from the field, which may turn CRLF into LF).
+  // A text field set to what Todoist holds (no save of it in flight): it
+  // is the confirmed value now (read back from the field, which may turn
+  // CRLF into LF).
   function setText(key, value) {
     var input = inputOf(key)
     input.text = value
-    baselines[key] = input.text
+    confirmed[key] = input.text
+  }
+  // What the field is measured against: what its newest save in flight
+  // sent (typing on from it is the next change, typing back to the old
+  // text is one too), else the confirmed value. A refused save thus leaves
+  // the field measured against Todoist's value again, so a draft that
+  // differs from it stays a change.
+  function baselineOf(key) {
+    var request = newest(key)
+    if (request >= 0)
+      return pending[request].typed
+    return Model.has(confirmed, key) ? confirmed[key] : ""
   }
   // The user changed the field since its baseline.
   function touched(key) {
     var input = inputOf(key)
-    var base = Model.has(baselines, key) ? baselines[key] : ""
+    var base = baselineOf(key)
     return key === "description" ? !Edit.sameDescription(input.text, base) : input.text !== base
   }
   function dirty(key) {
@@ -161,10 +173,14 @@ FocusScope {
   function descTruncated() {
     return !!desc && desc.state === "ready" && desc.truncated === true
   }
-  // A text field back to the task's value (and its error gone).
+  // A text field back to its baseline (and its error gone): what its save
+  // in flight sent, else the task's value.
   function revert(key) {
     var input = inputOf(key)
-    if (input && current())
+    var request = newest(key)
+    if (input && request >= 0)
+      input.text = pending[request].typed
+    else if (input && current())
       setText(key, initialOf(key))
     setError(key, "")
   }
@@ -198,8 +214,14 @@ FocusScope {
       return
     }
     setError(key, "")
-    if (!result.fields)
+    if (!result.fields) {
+      // Nothing to send (the text differs only in spaces at its ends or in
+      // line ends): the field shows its baseline again, so it is untouched
+      // and follows Todoist. Not a description that isn't read yet.
+      if (inputOf(key) && (key !== "description" || descBase() !== undefined))
+        revert(key)
       return
+    }
     if (!inputOf(key)) {
       const asked = Object.assign({}, attempts)
       asked[key] = value
@@ -212,14 +234,10 @@ FocusScope {
     next[request] = {
       key: key,
       typed: inputOf(key) ? String(value) : value,
-      before: inputOf(key) && Model.has(baselines, key) ? baselines[key] : "",
+      sent: inputOf(key) ? Edit.initial(Edit.pending(task, [result.fields]), key, result.fields.description) : undefined,
       fields: result.fields
     }
     pending = next
-    // What was sent is the field's baseline: typing on from it is the next
-    // change, typing back to the old text is one too.
-    if (inputOf(key))
-      baselines[key] = String(value)
   }
   // A text field's save (blur, Enter, Ctrl+Enter, leaving the task): only
   // the user's change is sent. Untouched, the field shows the task again.
@@ -249,18 +267,24 @@ FocusScope {
       var rest = Object.assign({}, editor.pending)
       delete rest[request]
       editor.pending = rest
-      if (ok)
+      var input = editor.inputOf(save.key)
+      if (ok) {
         editor.savedOnce = true
+        // Todoist has it, also while a newer save of the field runs: if
+        // that one is refused, the field is measured against this value.
+        // (The store's queue runs one job at a time, so replies come in
+        // order.)
+        if (input)
+          editor.confirmed[save.key] = save.sent
+      }
       // A newer save of the field is in flight: its reply decides what the
       // field shows (it holds this one's change too).
       if (editor.newest(save.key) > request)
         return
-      var input = editor.inputOf(save.key)
       if (!ok) {
-        // The typed text stays, a change again (leaving the task resends
-        // it); the line under the field says why.
-        if (input)
-          editor.baselines[save.key] = save.before
+        // The typed text stays; measured against the confirmed value, a
+        // text that differs from it is a change (leaving the task or Retry
+        // sends it). The line under the field says why.
         editor.setError(save.key, message !== "" ? message : FoamyI18n.t("Todoist didn't accept the change."))
         return
       }
@@ -445,10 +469,17 @@ FocusScope {
   }
   // Focus follow, as FoamySettingsPage: the least scroll that shows the
   // focused control (Tab, focusFirst()), in the page and the pane.
-  function keepVisible(item) {
-    var ancestor = item
-    while (ancestor && ancestor !== scroll.contentItem)
+  function keepVisible(focused) {
+    // In a SafeTextArea the focused item is its inner editor, as tall as
+    // the whole text and moved by the area's own scroll: the area's box is
+    // what shows (the area keeps its caret in view itself).
+    var item = focused
+    var ancestor = focused
+    while (ancestor && ancestor !== scroll.contentItem) {
+      if (item === focused && ancestor instanceof SafeTextArea)
+        item = ancestor
       ancestor = ancestor.parent
+    }
     if (!ancestor)
       return
     var point = item.mapToItem(scroll.contentItem, 0, 0)

@@ -223,6 +223,57 @@ ShellRoot {
       });
     });
   }
+  // A field's baseline comes from what Todoist confirmed and the saves in
+  // flight. t4 holds "One Two" before and after. Then `done`.
+  function baselineSaves(view, done) {
+    var store = Plugin.TodoStore;
+    var editor = view.editor;
+    var from = shell.calls("apply").length;
+    // Only a trailing space added: nothing to send; the field shows the
+    // task's text again and follows Todoist (untouched).
+    editor.contentField.focusInput();
+    editor.contentField.cursorPosition = editor.contentField.text.length;
+    ev.keyClickChar(" ", Qt.NoModifier, -1);
+    editor.deadlineField.focusInput();
+    if (!check(shell.calls("apply").length === from && editor.contentField.text === "One Two" && !editor.touched("content"), "a space at the end is no change; the field shows the task (" + JSON.stringify(editor.contentField.text) + ")")) return;
+    var t4 = { content: "One Two", priority: 4, labels: [] };
+    store.snapshot = shell.snapshotWith({ t4: Object.assign({}, t4, { content: "Renamed elsewhere" }) });
+    if (!check(editor.contentField.text === "Renamed elsewhere", "after the no-op save the field follows Todoist (" + JSON.stringify(editor.contentField.text) + ")")) return;
+    store.snapshot = shell.snapshotWith({ t4: t4 });
+    if (!check(editor.contentField.text === "One Two" && !editor.touched("content"), "and back")) return;
+    // Sent B, then C, edited back to B, both refused: B differs from what
+    // Todoist holds, so it stays a change and the next blur sends it.
+    shell.put("slow-apply", "0.6");
+    shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: t4 }), { results: { t4: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f500" } } })));
+    editor.contentField.focusInput();
+    for (var draft of ["Bee", "Cee", "Bee"]) {
+      editor.contentField.selectAll();
+      for (var c of draft) ev.keyClickChar(c, Qt.NoModifier, -1);
+      if (Object.keys(editor.pending).length < 2) ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+    }
+    if (!check(Object.keys(editor.pending).length === 2, "two saves in flight, a third draft typed")) return;
+    wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy; }, 15000, function(ok) {
+      if (!check(ok && editor.contentField.text === "Bee" && editor.errorOf("content") !== "" && editor.dirty("content"), "both refused: the draft stays a change (" + JSON.stringify([editor.contentField.text, editor.errorOf("content"), editor.dirty("content")]) + ")")) return;
+      shell.put("slow-apply", "");
+      shell.t4Reply(Object.assign({}, t4, { content: "Bee" }));
+      var from2 = shell.calls("apply").length;
+      editor.deadlineField.focusInput();
+      wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy && shell.calls("apply").length === from2 + 1; }, 15000, function(ok2) {
+        var sent = shell.updatesSince(from2).map(function(command) { return command.content; });
+        if (!check(ok2 && JSON.stringify(sent) === JSON.stringify(["Bee"]) && editor.contentField.text === "Bee" && editor.errorOf("content") === "", "the blur sent the kept draft (" + JSON.stringify([sent, editor.contentField.text]) + ")")) return;
+        // Back to "One Two" for the steps after.
+        shell.t4Reply(t4);
+        editor.contentField.focusInput();
+        editor.contentField.selectAll();
+        for (var c2 of "One Two") ev.keyClickChar(c2, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+        wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy; }, 15000, function(ok3) {
+          if (!check(ok3 && store.model.byId.t4.content === "One Two" && editor.contentField.text === "One Two", "t4 is One Two again")) return;
+          done();
+        });
+      });
+    });
+  }
   // Typed in the pane, then the task completed without leaving the field
   // (`how`: the pane's Complete button, or the row's ring): the typed text
   // is saved first, ahead of the completion in the queue. Then `done`.
@@ -1372,6 +1423,7 @@ ShellRoot {
         var sentLabels = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
         if (!check(JSON.stringify(sentLabels) === JSON.stringify({ commands: [{ op: "update", id: "t4", labels: ["code", "calls"] }] }) && shell.find(editor4, "label-calls") !== null, "the whole list was sent (" + JSON.stringify(sentLabels) + ")")) return;
         shell.racingSaves(view, function() {
+        shell.baselineSaves(view, function() {
           // Typed, then Back (no Enter): saved as the page closes.
           var from3 = shell.calls("apply").length;
           shell.t4Reply({ content: "One Two Three", priority: 4, labels: [] });
@@ -1398,6 +1450,7 @@ ShellRoot {
               view.activateRequested();
             });
           });
+        });
         });
       });
       break;
@@ -1527,7 +1580,7 @@ ShellRoot {
       if (!check(big1.paneTask === "t1", "hover doesn't move the pane")) return;
       big1.cursor.index = big1.firstRowStop;
       // The next task has a long description: the pane's form is taller than its view.
-      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: big1.rows[big1.stops[1]].id, description: "Step one\nStep two\nStep three\nStep four\nStep five\nStep six\nStep seven\nStep eight", truncated: false } }));
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: big1.rows[big1.stops[1]].id, description: Array.from({ length: 60 }, function(_, i) { return "Step " + (i + 1); }).join("\n"), truncated: false } }));
       ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
       if (!check(big1.paneTask === big1.rows[big1.stops[1]].id && big1.paneTask !== "t1", "↓ moves the pane (" + big1.paneTask + ")")) return;
       // e: the caret in the pane.
@@ -1550,10 +1603,26 @@ ShellRoot {
       var paneOpen = shell.find(big2.editor, "editOpen");
       for (var tabs = 0; tabs < 30 && !paneOpen.activeFocus; tabs++) {
         ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+        // The description's inner editor is as tall as its text: its box is what shows.
         var focused = big2.editor.Window.window.activeFocusItem;
+        if (focused === descriptionField.editorItem) focused = descriptionField;
         if (!check(focused && inPane(focused), "Tab " + (tabs + 1) + ": the focused control is in view (" + focused + " at " + (focused ? focused.mapToItem(paneScroll, 0, 0).y : "?") + " of " + paneScroll.height + ")")) return;
       }
       if (!check(paneOpen.activeFocus && paneScroll.contentY > 0 && Object.keys(big2.editor.pending).length === 0, "Tab reached Open in Todoist, the pane scrolled, nothing saved (" + paneScroll.contentY + ")")) return;
+      // The description scrolled to its end, then Tab away and Shift+Tab
+      // back: the field and its caret stay in view (the inner editor is as
+      // tall as its text, so it isn't what the pane scrolls to).
+      descriptionField.focusInput();
+      descriptionField.cursorPosition = descriptionField.length;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(paneOpen.activeFocus, "Tab from the description to Open in Todoist")) return;
+      var paneY = paneScroll.contentY;
+      ev.keyClick(Qt.Key_Tab, Qt.ShiftModifier, -1);
+      ev.keyClick(Qt.Key_Tab, Qt.ShiftModifier, -1);
+      var caret = descriptionField.editorItem.cursorRectangle;
+      var caretY = descriptionField.editorItem.mapToItem(paneScroll, caret.x, caret.y).y;
+      if (!check(descriptionField.inputActiveFocus && descriptionField.contentY > 0 && inPane(descriptionField) && caretY >= 0 && caretY + caret.height <= paneScroll.height && paneScroll.contentY === paneY, "Shift+Tab back: the scrolled description and its caret in view, the pane not moved (" + JSON.stringify([descriptionField.contentY, descriptionField.mapToItem(paneScroll, 0, 0).y, caretY, paneScroll.contentY, paneY, paneScroll.height]) + ")")) return;
       big2.editor.focusFirst();
       if (!check(big2.editor.contentField.inputActiveFocus && inPane(big2.editor.contentField) && paneScroll.contentY === 0, "the first field: the caret and the pane at the top (" + paneScroll.contentY + ")")) return;
       // Typed in the pane, then a click on another task (no Enter): the
