@@ -319,7 +319,7 @@ ShellRoot {
     case 77: return [function() { return store.current !== null && store.current.command === "task"; }, 15000, "the slow description read runs"];
     case 78: return [function() { return !store.busy; }, 15000, "the late reply came"];
     case 79: return [function() { return store.description.state === "ready" && store.description.id === "t7"; }, 15000, "t7's description"];
-    case 80: return [function() { return view.wide && one.size === "wide"; }, 10000, "Wide"];
+    case 80: return [function() { return view.wide && one.size === "wide"; }, 20000, "Wide"];
     case 81: return [function() { return one.size === "large"; }, 10000, "Large"];
     case 82: return [function() { var o = shell.overlay(); return store.overlayOpen && o !== null && o.view.active; }, 10000, "the overlay"];
     case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1"; }, 15000, "the pane's description"];
@@ -1266,16 +1266,28 @@ ShellRoot {
       var editor4 = view.editor;
       var sent4 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent4) === JSON.stringify({ commands: [{ op: "update", id: "t4", priority: 4 }] }) && shell.find(editor4, "priority-p1").chosen, "P1 sent alone (" + JSON.stringify(sent4) + ")")) return;
-      // Esc in a field without a change: back to the list, t4 under the cursor.
-      editor4.contentField.focusInput();
-      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      var back4 = view.cursorRow();
-      if (!check(!view.pageShown && back4 && back4.id === "t4" && view.band.visible && !view.blocked, "Esc went back, t4 selected (" + (back4 && back4.id) + ")")) return;
-      if (!check(store.description.id === "", "the description went with the editor")) return;
-      // Enter on the row: the page; a description read that fails says so, with Retry.
-      shell.put("reply-task.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
-      view.returnRequested();
-      view.activateRequested();
+      // + label: the personal labels the task doesn't have; one picked sends the whole list.
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR", priority: 4, labels: ["code", "calls"] } }), { results: { t4: "ok" } })));
+      var plusLabel = shell.find(editor4, "addLabel");
+      ev.mouseClick(plusLabel, plusLabel.width / 2, plusLabel.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      var offered = editor4.labelMenu.entries.map(function(entry) { return entry.text; });
+      if (!check(editor4.labelMenu.opened && JSON.stringify(offered) === JSON.stringify(["calls", "errand", "office", "Waiting on"]), "+ label offers the personal labels the task lacks (" + JSON.stringify(offered) + ")")) return;
+      editor4.labelMenu.activate(0);
+      wait.waitFor(function() { return shell.calls("apply").length === shell.callsBefore + 5 && !store.busy && !editor4.saving; }, 15000, function(ok) {
+        if (!check(ok, "the labels were saved")) return;
+        var sentLabels = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
+        if (!check(JSON.stringify(sentLabels) === JSON.stringify({ commands: [{ op: "update", id: "t4", labels: ["code", "calls"] }] }) && shell.find(editor4, "label-calls") !== null, "the whole list was sent (" + JSON.stringify(sentLabels) + ")")) return;
+        // Esc in a field without a change: back to the list, t4 under the cursor.
+        editor4.contentField.focusInput();
+        ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+        var back4 = view.cursorRow();
+        if (!check(!view.pageShown && back4 && back4.id === "t4" && view.band.visible && !view.blocked, "Esc went back, t4 selected (" + (back4 && back4.id) + ")")) return;
+        if (!check(store.description.id === "", "the description went with the editor")) return;
+        // Enter on the row: the page; a description read that fails says so, with Retry.
+        shell.put("reply-task.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
+        view.returnRequested();
+        view.activateRequested();
+      });
       break;
     case 75:
       var editor5 = view.editor;
@@ -1305,13 +1317,28 @@ ShellRoot {
       // A reply for an earlier request (another task) changes nothing.
       store.handle({ command: "task", input: "", extra: { describe: "t7", request: store.descriptionRequest - 1 }, generation: store.generation }, 0, JSON.stringify({ ok: true, task: { id: "t7", description: "stale" } }));
       if (!check(store.description.text === "Seven" && view.editor.descriptionField.text === "Seven", "an earlier request's reply is ignored")) return;
-      // The task goes from the snapshot: the page says so, Back stays.
-      store.snapshot = shell.snapshot(["t7"]);
-      var gone = shell.find(view.editor, "editorEmpty");
-      if (!check(gone.visible && gone.text === "This task is no longer in Todoist." && view.editor.backButton.visible, "a task that went: said, Back stays")) return;
-      view.editor.back();
-      store.snapshot = shell.snapshot();
-      one.prefs.save("panelWidth", "wide");
+      // A picked choice that Todoist refuses: Retry sends the same pick again.
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(), { results: { t7: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f502" } } })));
+      shell.callsBefore = shell.calls("apply").length;
+      var p2 = shell.find(view.editor, "priority-p2");
+      ev.mouseClick(p2, p2.width / 2, p2.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      var priorityBlock = shell.find(view.editor, "editPriority").parent.parent;
+      wait.waitFor(function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && !view.editor.saving; }, 15000, function(ok) {
+        if (!check(ok && shell.find(priorityBlock, "fieldErrorText").text === "Todoist answered HTTP 502." && shell.find(priorityBlock, "fieldRetry").visible, "the refused pick: why, Retry")) return;
+        shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t7: { priority: 3 } }), { results: { t7: "ok" } })));
+        shell.find(priorityBlock, "fieldRetry").clicked();
+        wait.waitFor(function() { return shell.calls("apply").length === shell.callsBefore + 2 && !store.busy && !view.editor.saving; }, 15000, function(ok2) {
+          var again = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
+          if (!check(ok2 && JSON.stringify(again) === JSON.stringify({ commands: [{ op: "update", id: "t7", priority: 3 }] }) && !shell.find(priorityBlock, "fieldError").visible && shell.find(view.editor, "priority-p2").chosen, "Retry sent the pick again (" + JSON.stringify(again) + ")")) return;
+          // The task goes from the snapshot: the page says so, Back stays.
+          store.snapshot = shell.snapshot(["t7"]);
+          var gone = shell.find(view.editor, "editorEmpty");
+          if (!check(gone.visible && gone.text === "This task is no longer in Todoist." && view.editor.backButton.visible, "a task that went: said, Back stays")) return;
+          view.editor.back();
+          store.snapshot = shell.snapshot();
+          one.prefs.save("panelWidth", "wide");
+        });
+      });
       break;
     case 80:
       // Wide: the form in two columns, Project | Section.

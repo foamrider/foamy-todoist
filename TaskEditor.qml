@@ -52,6 +52,7 @@ FocusScope {
   readonly property alias deadlineField: deadlineInput
   readonly property alias descriptionField: descriptionInput
   readonly property alias backButton: pageBand.backButton
+  readonly property alias labelMenu: labelMenu
 
   // Saves in flight, {request: field key}, and each field's error.
   property var pending: ({})
@@ -59,6 +60,8 @@ FocusScope {
   // What each text field sent last ({key: text}): a reply resets the field
   // only where it still holds that.
   property var sent: ({})
+  // What each choice (place, priority, labels) asked for last, for Retry.
+  property var attempts: ({})
 
   // The task now: a binding may not have caught up with taskId yet when
   // these functions run (onTaskIdChanged).
@@ -108,6 +111,7 @@ FocusScope {
     descriptionInput.text = descNow() && descNow().state === "ready" ? descNow().text : ""
     errors = ({})
     sent = ({})
+    attempts = ({})
   }
   // Fields that don't have the keys follow the snapshot, unless they hold
   // an unsaved change or a failed save's text.
@@ -133,6 +137,11 @@ FocusScope {
     setError(key, "")
     if (!result.fields)
       return
+    if (!inputOf(key)) {
+      const asked = Object.assign({}, attempts)
+      asked[key] = value
+      attempts = asked
+    }
     var request = store.saveTask(current().id, result.fields)
     if (request < 0)
       return
@@ -147,6 +156,14 @@ FocusScope {
   }
   function saveField(key) {
     save(key, inputOf(key).text)
+  }
+  // Retry under a field: a text field sends what it holds, a choice what
+  // was picked last.
+  function retry(key) {
+    if (inputOf(key))
+      saveField(key)
+    else if (Model.has(attempts, key))
+      save(key, attempts[key])
   }
   Connections {
     target: editor.store
@@ -348,7 +365,7 @@ FocusScope {
       FieldBlock {
         label: FoamyI18n.t("Task")
         error: editor.errorOf("content")
-        onRetry: editor.saveField("content")
+        onRetry: editor.retry("content")
         SafeTextField {
           id: contentInput
           objectName: "editContent"
@@ -376,7 +393,7 @@ FocusScope {
           trailing: editor.task ? Model.dueWords(editor.task, editor.formatDate, editor.translate, editor.store.today) : ""
           hint: FoamyI18n.t("Type it as in Todoist; Todoist reads the date.")
           error: editor.errorOf("due")
-          onRetry: editor.saveField("due")
+          onRetry: editor.retry("due")
           SafeTextField {
             id: dueInput
             objectName: "editDue"
@@ -395,7 +412,7 @@ FocusScope {
         FieldBlock {
           label: FoamyI18n.t("Deadline")
           error: editor.errorOf("deadline")
-          onRetry: editor.saveField("deadline")
+          onRetry: editor.retry("deadline")
           SafeTextField {
             id: deadlineInput
             objectName: "editDeadline"
@@ -417,7 +434,7 @@ FocusScope {
         FieldBlock {
           label: editor.columns > 1 ? FoamyI18n.t("Project") : FoamyI18n.t("Project and section")
           error: editor.errorOf("place")
-          onRetry: editor.save("place", placeInput.value)
+          onRetry: editor.retry("place")
           FoamyDropdown {
             id: placeInput
             objectName: "editPlace"
@@ -459,6 +476,7 @@ FocusScope {
         FieldBlock {
           label: FoamyI18n.t("Priority")
           error: editor.errorOf("priority")
+          onRetry: editor.retry("priority")
           Row {
             objectName: "editPriority"
             spacing: FoamyStyle.gapSmall
@@ -515,6 +533,7 @@ FocusScope {
         FieldBlock {
           label: FoamyI18n.t("Labels")
           error: editor.errorOf("labels")
+          onRetry: editor.retry("labels")
           hint: editor.task && editor.task.labelsTruncated ? FoamyI18n.t("This task has more labels than the panel keeps. Change them in Todoist.") : ""
           Flow {
             objectName: "editLabels"
@@ -578,7 +597,7 @@ FocusScope {
         label: FoamyI18n.t("Description")
         error: editor.errorOf("description") !== "" ? editor.errorOf("description") : editor.desc && editor.desc.state === "error" ? editor.desc.error : ""
         hint: editor.desc && editor.desc.state === "ready" && editor.desc.truncated ? FoamyI18n.t("Too long to edit here. Open it in Todoist.") : ""
-        onRetry: editor.desc && editor.desc.state === "error" ? editor.store.loadDescription(editor.taskId) : editor.save("description", descriptionInput.text)
+        onRetry: editor.desc && editor.desc.state === "error" ? editor.store.loadDescription(editor.taskId) : editor.retry("description")
         SafeTextArea {
           id: descriptionInput
           objectName: "editDescription"

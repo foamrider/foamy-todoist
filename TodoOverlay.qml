@@ -43,10 +43,13 @@ OverlayWindow {
   readonly property real shownWidth: Math.min(editingSettings ? FoamyStyle.popupWidth : cardWidth, Math.max(0, width - margin * 2))
   readonly property real maxCardHeight: Math.round(height * 0.7)
 
-  // The host picks the focused monitor (and refreshes Hyprland's) when it
-  // is shown; a bar's own monitor replaces it.
+  // Shown while open, so it goes at once on close while its view closes
+  // behind it. The host picks the focused monitor (and refreshes
+  // Hyprland's) when it is shown; a bar's own monitor replaces it.
   Component.onCompleted: {
-    shown = true
+    shown = Qt.binding(function () {
+      return window.open
+    })
     if (wantedScreen)
       targetScreen = wantedScreen
     if (targetScreen && targetScreen.width < cardWidth + margin * 2)
