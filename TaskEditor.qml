@@ -46,13 +46,13 @@ FocusScope {
   readonly property bool saving: Object.keys(pending).length > 0
   // A save worked since the task was shown (the pane says "Saved").
   property bool savedOnce: false
-  readonly property bool menuOpen: labelMenu.opened
+  readonly property bool menuOpen: labelPicker.opened
   readonly property alias contentField: contentInput
   readonly property alias dueField: dueInput
   readonly property alias deadlineField: deadlineInput
   readonly property alias descriptionField: descriptionInput
   readonly property alias backButton: pageBand.backButton
-  readonly property alias labelMenu: labelMenu
+  readonly property alias labelMenu: labelPicker
 
   // Saves in flight, {request: field key}, and each field's error.
   property var pending: ({})
@@ -218,7 +218,7 @@ FocusScope {
     pending = ({})
     savedOnce = false
     shownId = taskId
-    labelMenu.close()
+    labelPicker.close()
     revertAll()
     descriptionWait.stop()
     if (taskId === "") {
@@ -694,11 +694,11 @@ FocusScope {
         labelName: name
       })
     })
-    labelMenu.items = labelItems
-    labelMenu.open(keyboard)
+    labelPicker.items = labelItems
+    labelPicker.open(keyboard)
   }
   FoamyMenu {
-    id: labelMenu
+    id: labelPicker
     anchorItem: addLabelButton
   }
 
