@@ -958,6 +958,9 @@ function shiftedDay(task, delta, today) {
 var TIMELINE_START = 8
 var TIMELINE_END = 18
 var BLOCK_MINUTES = 60
+// At most this many blocks side by side: a timeline can't show thousands,
+// and a lane keeps room to click (the rest are summed up, todayOverview).
+var MAX_LANES = 3
 
 // Today (the personal tasks due today or before): {kind: "today", left
 // (due today), overdue, untimed (due today without a time), next (the
@@ -996,28 +999,68 @@ function todayOverview(model, today, options) {
       out.next = { id: task.id, text: task.text, time: task.due.time, inMinutes: m - now }
   })
   out.now = now >= out.start * 60 && now <= out.end * 60
-  // Lanes: a block takes the first lane free at its time; a run of blocks
-  // that overlap one another splits the width by its number of lanes.
+  // Lanes: a block takes the lowest lane free at its time; a run of blocks
+  // that overlap one another splits the width by its number of lanes, at
+  // most MAX_LANES. A run that needs more keeps MAX_LANES - 1 lanes of
+  // blocks and sums up the rest in one "+N more" block in the last lane,
+  // from the first of them to the end of the last.
+  // Every block is BLOCK_MINUTES long and they come in time order, so the
+  // run's blocks end in the order they started (a queue), and a block only
+  // looks at the shown lanes: linear after the sort, however many tasks
+  // share a time (the overview is built on the UI thread, each minute).
+  var low = MAX_LANES - 1
   var run = []
-  var laneEnds = []
+  var going = []
+  var head = 0
+  var taken = []
+  var high = 0
+  var lanes = 0
   var close = function () {
+    var more = null
     run.forEach(function (block) {
-      block.lanes = laneEnds.length
+      if (lanes <= MAX_LANES || block.lane < low) {
+        block.lanes = Math.min(lanes, MAX_LANES)
+        out.blocks.push(block)
+        return
+      }
+      if (!more) {
+        more = { id: block.id, text: "", time: block.time, minutes: block.minutes, length: 0, past: false, struck: false, lane: low, lanes: MAX_LANES, more: 0 }
+        out.blocks.push(more)
+      }
+      more.more++
+      more.past = block.past
+      more.length = Math.max(more.length, block.minutes + block.length - more.minutes)
     })
     run = []
-    laneEnds = []
+    going = []
+    head = 0
+    taken = []
+    high = 0
+    lanes = 0
   }
   timed.forEach(function (task) {
     var m = task.due.minutes
-    if (run.length && laneEnds.every(function (end) {
-        return end <= m
-      }))
+    while (head < going.length && going[head].end <= m) {
+      var ended = going[head++]
+      if (ended.lane < low)
+        taken[ended.lane] = false
+      else
+        high--
+    }
+    if (run.length && head === going.length)
       close()
+    // A shown lane, else above them (only the first of those is drawn, in
+    // the last lane, unless the run overflows).
     var lane = 0
-    while (lane < laneEnds.length && laneEnds[lane] > m)
+    while (lane < low && taken[lane])
       lane++
-    laneEnds[lane] = m + BLOCK_MINUTES
-    var block = {
+    if (lane < low)
+      taken[lane] = true
+    else
+      lane = low + high++
+    lanes = Math.max(lanes, lane + 1)
+    going.push({ end: m + BLOCK_MINUTES, lane: lane })
+    run.push({
       id: task.id,
       text: task.text,
       time: task.due.time,
@@ -1026,10 +1069,9 @@ function todayOverview(model, today, options) {
       past: m < now,
       struck: has(struck, task.id) && !!struck[task.id],
       lane: lane,
-      lanes: 1
-    }
-    run.push(block)
-    out.blocks.push(block)
+      lanes: 1,
+      more: 0
+    })
   })
   close()
   return out
@@ -1433,5 +1475,5 @@ if (typeof module !== "undefined")
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
     MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
-    weekEndOf, searchWords, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
+    weekEndOf, searchWords, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
   }

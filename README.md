@@ -156,14 +156,17 @@ to it and Enter) acts on it.
   overdue, **Next** (the next task with a time still ahead today, and how
   far ahead), and **Today's times**: the hours from 08 to 18 (wider when a
   task is outside them), each task with a time as a block at its time, and
-  a red line at now; under it, how many tasks have no time. A block or
-  Next selects that task.
+  a red line at now; under it, how many tasks have no time. Tasks at the
+  same time share the width, three side by side at most: the rest show
+  as one "+N more" block. A block or Next selects that task ("+N more"
+  the first of its tasks, in the list beside the others).
 - **A project**: **Sections** with their task counts ("(No section)" for
   the tasks without one) and its sub-projects: a section scrolls the list
   to it, a sub-project opens it. **When**: one bar of overdue, today, this
   week (to the end of the calendar week), later and no date, with a
   legend. **Labels**: the labels on its tasks, the most used first; a
-  label searches for it (`@label`).
+  label searches for it (`@label`). A long label's name is shortened with
+  "…" (in full when you point at it).
 - **Inbox** and **search**: When and Labels, as for a project.
 - **Upcoming**: the next seven days as columns, a bar each by its number
   of tasks; the day a new task goes to is lit (tomorrow, or the day you

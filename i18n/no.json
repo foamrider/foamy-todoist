@@ -15,6 +15,10 @@
     "one": "%1 forfalt",
     "other": "%1 forfalt"
   },
+  "+%1 more": {
+    "one": "+%1 til",
+    "other": "+%1 til"
+  },
   "%1 tasks": {
     "one": "%1 oppgave",
     "other": "%1 oppgaver"

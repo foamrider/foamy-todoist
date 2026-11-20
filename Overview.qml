@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import qs.Commons as Commons
+import qs.Ui
 import "kit"
 import "Model.js" as Model
 
@@ -38,22 +39,36 @@ FocusScope {
 
   readonly property string kind: summary ? summary.kind : ""
   readonly property alias scroll: scroll
-  implicitHeight: parts.implicitHeight + FoamyStyle.gap * 2
+  // The first caption's top: level with the list's first heading, which
+  // stands at the bottom of its row less a small gap (TaskRow's header,
+  // TodoView.heightOf), below the list's top margin.
+  readonly property real topInset: FoamyStyle.gap + FoamyStyle.rowHeight - 6 - FoamyStyle.gapSmall - captionLine.implicitHeight
+  implicitHeight: topInset + parts.implicitHeight + FoamyStyle.gap
 
   function roleColor(role) {
     return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "success" ? FoamyPalette.success : role === "info" ? FoamyPalette.info : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
   }
   // The first click target, with the keys (Tab from the list); false when
-  // there is none.
+  // there is none. From the top, so the parts above it show when they fit;
+  // then revealed (the keys may already be on it: no focus change to follow).
   function focusFirst() {
     var first = parts.nextItemInFocusChain(true)
     for (let at = first; at && at !== overview; at = at.parent)
       if (at === parts) {
-        first.forceActiveFocus(Qt.TabFocusReason)
         scroll.contentY = 0
+        first.forceActiveFocus(Qt.TabFocusReason)
+        reveal(first)
         return true
       }
     return false
+  }
+  // The least scroll that shows `item` (a part).
+  function reveal(item) {
+    const y = item.mapToItem(scroll.contentItem, 0, 0).y
+    if (y < scroll.contentY)
+      scroll.contentY = Math.max(0, y - FoamyStyle.gap)
+    else if (y + item.height > scroll.contentY + scroll.height)
+      scroll.contentY = Math.min(scroll.contentHeight - scroll.height, y + item.height - scroll.height + FoamyStyle.gap)
   }
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_Escape) {
@@ -68,14 +83,16 @@ FocusScope {
       var item = overview.Window.activeFocusItem
       for (let at = item; at; at = at.parent)
         if (at === parts) {
-          const y = item.mapToItem(scroll.contentItem, 0, 0).y
-          if (y < scroll.contentY)
-            scroll.contentY = Math.max(0, y - FoamyStyle.gap)
-          else if (y + item.height > scroll.contentY + scroll.height)
-            scroll.contentY = Math.min(scroll.contentHeight - scroll.height, y + item.height - scroll.height + FoamyStyle.gap)
+          overview.reveal(item)
           return
         }
     }
+  }
+  // A caption's line height, for the top inset (not shown).
+  Caption {
+    id: captionLine
+    visible: false
+    text: "X"
   }
 
   FoamyWheelScroll {
@@ -86,7 +103,7 @@ FocusScope {
     objectName: "overviewScroll"
     anchors.fill: parent
     contentWidth: width
-    contentHeight: parts.implicitHeight + FoamyStyle.gap * 2
+    contentHeight: overview.implicitHeight
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     Controls.ScrollBar.vertical: Controls.ScrollBar {
@@ -95,10 +112,10 @@ FocusScope {
 
     ColumnLayout {
       id: parts
-      // The editor's insets: the list's top margin above, so the first
-      // part lines up with the list's first row.
+      // The editor's side insets; the first caption level with the list's
+      // first heading.
       x: FoamyStyle.padding - FoamyStyle.gapSmall
-      y: FoamyStyle.gap
+      y: overview.topInset
       width: scroll.width - x * 2
       spacing: FoamyStyle.sectionGap
 
@@ -291,18 +308,23 @@ FocusScope {
         visible: overview.kind === "list" && overview.summary.labels.length > 0
         caption: FoamyI18n.t("Labels")
         Flow {
+          id: labelFlow
           Layout.fillWidth: true
           Layout.leftMargin: FoamyStyle.gap
           Layout.rightMargin: FoamyStyle.gap
           spacing: FoamyStyle.gapSmall
           Repeater {
             model: overview.kind === "list" ? overview.summary.labels : []
-            // The editor's label chip, a click target here.
+            // The editor's label chip, a click target here. At most the
+            // part's width: a long name is elided (in full in the tooltip),
+            // the count stays.
             Target {
               id: chip
               required property var modelData
               objectName: "labelChip-" + modelData.name
-              width: chipRow.implicitWidth + FoamyStyle.gap * 2
+              // A popup, outside the item tree (for the tests).
+              readonly property var tip: chipTip
+              width: Math.min(chipName.implicitWidth + chipRow.spacing + chipCount.implicitWidth + FoamyStyle.gap * 2, labelFlow.width)
               height: FoamyStyle.controlHeight - FoamyStyle.gapSmall
               radius: FoamyStyle.radiusSmall
               rest: FoamyPalette.fieldFill
@@ -315,12 +337,18 @@ FocusScope {
                 anchors.centerIn: parent
                 spacing: FoamyStyle.gapSmall
                 PlainText {
+                  id: chipName
+                  objectName: "chipName"
+                  width: Math.min(implicitWidth, chip.width - FoamyStyle.gap * 2 - chipRow.spacing - chipCount.implicitWidth)
                   text: "@" + chip.modelData.name
                   wrapMode: Text.NoWrap
+                  elide: Text.ElideRight
                   font.pixelSize: FoamyStyle.font.bodySmall
                   color: FoamyPalette.onSurface(FoamyPalette.info)
                 }
                 PlainText {
+                  id: chipCount
+                  objectName: "chipCount"
                   anchors.verticalCenter: parent.verticalCenter
                   text: FoamyI18n.number(chip.modelData.count)
                   wrapMode: Text.NoWrap
@@ -328,6 +356,13 @@ FocusScope {
                   font.pixelSize: FoamyStyle.font.caption
                   color: FoamyPalette.mutedText
                 }
+              }
+              // The full name of an elided label (plain text, as wide as the pane at most).
+              PanelToolTip {
+                id: chipTip
+                visible: chip.hovered && chipName.truncated
+                text: chipName.text
+                implicitWidth: Math.min(implicitContentWidth + leftPadding + rightPadding, overview.width)
               }
             }
           }
@@ -502,7 +537,8 @@ FocusScope {
     id: target
     property bool current: false
     property color rest: "transparent"
-    readonly property bool lit: hover.hovered || activeFocus
+    readonly property bool hovered: hover.hovered
+    readonly property bool lit: hovered || activeFocus
     signal activated
     radius: FoamyStyle.radius
     // A filled target (a block over the hour lines) stays opaque when lit.
@@ -582,12 +618,24 @@ FocusScope {
     readonly property real hourHeight: FoamyStyle.controlHeight * 0.75
     readonly property real labelWidth: FoamyStyle.controlHeight
     readonly property real lanesWidth: width - labelWidth - FoamyStyle.gap
+    // A block stays this big to click and read, however short its time (a
+    // task late in the day is cut at midnight) or narrow its lane (the
+    // model keeps the lanes to Model.MAX_LANES).
+    readonly property real minBlockHeight: FoamyStyle.iconSize + FoamyStyle.gapSmall
+    readonly property real minBlockWidth: FoamyStyle.controlHeight
     readonly property int start: summary ? summary.start : 0
+    readonly property real rangeHeight: summary ? (summary.end - summary.start) * hourHeight : 0
+    function blockHeight(block) {
+      return Math.max(minBlockHeight, block.length / 60 * hourHeight - 2)
+    }
     function yOf(minutes) {
       return (minutes - start * 60) / 60 * hourHeight
     }
     objectName: "timeline"
-    implicitHeight: summary ? (summary.end - summary.start) * hourHeight + FoamyStyle.gapSmall : 0
+    // Room below the range for a block that its least height takes past midnight.
+    implicitHeight: summary ? summary.blocks.reduce(function (bottom, block) {
+      return Math.max(bottom, timeline.yOf(block.minutes) + 1 + timeline.blockHeight(block))
+    }, rangeHeight) + FoamyStyle.gapSmall : 0
     Repeater {
       model: timeline.summary ? timeline.summary.end - timeline.summary.start : 0
       Item {
@@ -620,18 +668,23 @@ FocusScope {
       Target {
         id: block
         required property var modelData
-        objectName: "block-" + modelData.id
+        // A crowded run's last lane sums up the tasks it has no room for:
+        // a click selects the first of them (the list scrolls to it, the
+        // rest follow it there).
+        readonly property bool summed: modelData.more > 0
+        readonly property string label: summed ? FoamyI18n.tn("+%1 more", modelData.more) : modelData.time + " " + modelData.text
+        objectName: (summed ? "more-" : "block-") + modelData.id
         readonly property real laneWidth: timeline.lanesWidth / modelData.lanes
         // Anchored with a margin, so RTL mirrors the lanes too.
         anchors.left: timeline.left
         anchors.leftMargin: timeline.labelWidth + FoamyStyle.gapSmall + modelData.lane * laneWidth
         y: timeline.yOf(modelData.minutes) + 1
-        width: laneWidth - FoamyStyle.gapTiny
-        height: modelData.length / 60 * timeline.hourHeight - 2
+        width: Math.max(timeline.minBlockWidth, laneWidth - FoamyStyle.gapTiny)
+        height: timeline.blockHeight(modelData)
         radius: FoamyStyle.radiusSmall
         // Opaque, over the hour lines; a past block is faded.
         rest: Qt.tint(FoamyPalette.background, modelData.past ? Qt.alpha(FoamyPalette.accent, 0.08) : FoamyPalette.selectedFill)
-        Accessible.name: modelData.time + " " + modelData.text
+        Accessible.name: summed ? modelData.time + " " + label : label
         onActivated: overview.taskPicked(modelData.id)
         Rectangle {
           anchors.left: parent.left
@@ -646,7 +699,7 @@ FocusScope {
           anchors.right: parent.right
           anchors.rightMargin: FoamyStyle.gapSmall
           anchors.verticalCenter: parent.verticalCenter
-          text: block.modelData.time + " " + block.modelData.text
+          text: block.label
           wrapMode: Text.NoWrap
           elide: Text.ElideRight
           font.pixelSize: FoamyStyle.font.caption

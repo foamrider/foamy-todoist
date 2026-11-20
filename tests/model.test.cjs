@@ -959,6 +959,53 @@ test('overview, Today: the range stretches to tasks outside 08–18; overlapping
   assert.deepEqual([night.start, night.end, night.blocks[0].length], [8, 24, 30], 'the block is cut at midnight');
 });
 
+test('overview, Today: a crowded run keeps MAX_LANES lanes and sums up the rest', () => {
+  const at = (id, time) => task(id, id, 'p', { due: due(`${TODAY}T${time}:00`) });
+  // Five at 10:00 and one at 10:30 overlap; 13:00 starts a new run.
+  const m = model(snapshotWith([at('a', '10:00'), at('b', '10:00'), at('c', '10:00'), at('d', '10:00'), at('e', '10:00'), at('f', '10:30'), at('g', '13:00')]));
+  const o = Model.overview(m, 'today', TODAY, NOW_TODAY(10 * 60 + 15));
+  assert.equal(Model.MAX_LANES, 3);
+  assert.deepEqual(
+    o.blocks.map((b) => [b.id, b.lane, b.lanes, b.more, b.minutes, b.length, b.past]),
+    [
+      ['a', 0, 3, 0, 600, 60, true],
+      ['b', 1, 3, 0, 600, 60, true],
+      // c, d, e (10:00) and f (10:30): one block from 10:00 to 11:30, f still ahead.
+      ['c', 2, 3, 4, 600, 90, false],
+      ['g', 0, 1, 0, 780, 60, false],
+    ],
+  );
+  assert.equal(o.blocks[2].text, '');
+  // Three at once still fit: no summary.
+  const three = Model.overview(model(snapshotWith([at('a', '10:00'), at('b', '10:00'), at('c', '10:00')])), 'today', TODAY, NOW_TODAY(0));
+  assert.deepEqual(three.blocks.map((b) => `${b.id}:${b.lane}/${b.lanes}/${b.more}`), ['a:0/3/0', 'b:1/3/0', 'c:2/3/0']);
+  // A freed shown lane is taken again before the summary grows.
+  const freed = Model.overview(model(snapshotWith([at('a', '09:00'), at('b', '09:30'), at('c', '09:40'), at('d', '09:50'), at('e', '10:05')])), 'today', TODAY, NOW_TODAY(0));
+  assert.deepEqual(freed.blocks.map((b) => `${b.id}:${b.lane}/${b.more}`), ['a:0/0', 'b:1/0', 'c:2/2', 'e:0/0']);
+});
+
+test('overview, Today: 20 000 tasks at one time stay fast and bounded', () => {
+  const tasks = [];
+  for (let i = 0; i < 20000; i++) tasks.push(task(`x${String(i).padStart(5, '0')}`, `Task ${i}`, 'p', { due: due(`${TODAY}T09:00:00`), child_order: i }));
+  const m = model(snapshotWith(tasks));
+  // The fastest of three runs, in CPU time, against a generous ceiling: the
+  // quadratic lane scan took about 80 ms here (seconds in QML), this about 10.
+  let best = Infinity;
+  let o = null;
+  for (let i = 0; i < 3; i++) {
+    const start = process.cpuUsage();
+    o = Model.overview(m, 'today', TODAY, NOW_TODAY(8 * 60));
+    const used = process.cpuUsage(start);
+    best = Math.min(best, (used.user + used.system) / 1000);
+  }
+  assert.ok(best < 50, `the overview took ${best} ms`);
+  assert.equal(o.left, 20000);
+  assert.deepEqual(
+    o.blocks.map((b) => [b.id, b.lane, b.lanes, b.more]),
+    [['x00000', 0, 3, 0], ['x00001', 1, 3, 0], ['x00002', 2, 3, 19998]],
+  );
+});
+
 test('overview, Today: an empty day is the zeroes', () => {
   const o = Model.overview(model(snapshotWith([task('n', 'N', 'p')])), 'today', TODAY, NOW_TODAY(600));
   assert.deepEqual([o.left, o.overdue, o.untimed, o.next, o.blocks.length], [0, 0, 0, null, 0]);

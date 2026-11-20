@@ -128,6 +128,8 @@ ShellRoot {
   readonly property string out: Quickshell.env("FOAMY_OUT")
   // A fixed Wednesday: Upcoming's groups depend on the weekday.
   readonly property string today: "2026-11-18"
+  // A label as long as Todoist allows (60 characters).
+  readonly property string longLabel: "a-label-name-long-enough-to-overflow-the-overview-chips-0060"
   TestEvent { id: ev }
   FoamyWait { id: wait }
   FileView { id: writer; blockWrites: true; printErrors: false }
@@ -676,6 +678,8 @@ ShellRoot {
     var wideStill = function() { return one.cardWidth === 880 && one.popup.contentWidth === 880; };
     // Whether `texts` holds `wanted` in this order.
     var inOrder = function(texts, wanted) { var at = 0; for (var text of texts) if (text === wanted[at]) at++; return at === wanted.length; };
+    // The project stage's snapshot (more tasks than fit), for the later stages.
+    var many = null;
     // The list's header at its top (after a part scrolled it there).
     var headerOnTop = function(test) {
       var header = shell.builtHeaders(view).find(function(h) { return test(h.entry); });
@@ -689,10 +693,11 @@ ShellRoot {
       // Today: the date, the figures, Next, the timeline, the untimed count.
       var todayTexts = shell.visibleTexts(pane);
       if (!check(pane.visible && pane.summary.kind === "today" && inOrder(todayTexts, ["Wednesday 18 November", "4", "left today", "2", "overdue", "Next", "Review pull request #482", "14:00 · in 2 h", "Today's times", "09:30 Stand-up with the platform team", "14:00 Review pull request #482", "2 tasks without a time"]) && todayTexts.indexOf("with a time") < 0, "Today's overview (" + JSON.stringify(todayTexts) + ")")) return false;
-      // The first part at the list's top margin, as the editor's title.
+      // The first line level with the list's first heading (Overdue).
       var dateTop = part("overviewDate").mapToItem(view, 0, 0).y;
-      var listTop = view.list.mapToItem(view, 0, 0).y;
-      if (!check(Math.abs(dateTop - listTop) <= 1, "the date at the list's top (" + JSON.stringify([dateTop, listTop]) + ")")) return false;
+      var firstHeading = shell.find(shell.builtHeaders(view)[0], "headerTitle");
+      var headingTop = firstHeading.mapToItem(view, 0, 0).y;
+      if (!check(firstHeading.text === "Overdue" && Math.abs(dateTop - headingTop) <= 1, "the date level with the list's first heading (" + JSON.stringify([dateTop, headingTop]) + ")")) return false;
       var block3 = part("block-t3");
       var block4 = part("block-t4");
       var nowLine = part("nowLine");
@@ -704,7 +709,57 @@ ShellRoot {
       click(block3);
       if (!check(view.paneTask === "t3" && view.editor.visible && !pane.visible && view.cursorRow() && view.cursorRow().id === "t3" && wideStill(), "a timeline block selected its task (" + JSON.stringify([view.paneTask, view.cursorRow() && view.cursorRow().id]) + ")")) return false;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      return check(view.paneTask === "" && pane.visible && wideStill(), "Esc: the overview again");
+      if (!check(view.paneTask === "" && pane.visible && wideStill(), "Esc: the overview again")) return false;
+      // A crowded hour (t3 at 09:30 and a hundred at 10:00) and a task at
+      // 23:59 (its hour cut at midnight).
+      var crowded = shell.snapshot();
+      for (var c = 0; c < 100; c++)
+        crowded.tasks.push(Fixtures.task("c" + (c < 10 ? "0" : "") + c, "Crowd " + c, "home", { due: Fixtures.due(shell.today + "T10:00:00") }));
+      crowded.tasks.push(Fixtures.task("late", "Last call", "home", { due: Fixtures.due(shell.today + "T23:59:00") }));
+      store.snapshot = crowded;
+      return settled;
+    }, function() {
+      // Every drawn block is big enough to click, inside the timeline; the
+      // crowd keeps three lanes, the rest summed up in the last.
+      var timeline = part("timeline");
+      var drawn = timeline.children.filter(function(item) { return /^(block|more)-/.test(item.objectName); });
+      var sizes = drawn.map(function(item) { return [item.objectName, Math.round(item.width), Math.round(item.height)]; });
+      if (!check(JSON.stringify(drawn.map(function(item) { return item.objectName; })) === JSON.stringify(["block-t3", "block-c00", "more-c01", "block-t4", "block-late"]), "the crowd in three lanes (" + JSON.stringify(sizes) + ")")) return false;
+      if (!check(drawn.every(function(item) { return item.width >= Kit.FoamyStyle.controlHeight && item.height >= Kit.FoamyStyle.iconSize + Kit.FoamyStyle.gapSmall && item.y + item.height <= timeline.height && item.x >= 0 && item.x + item.width <= timeline.width + 1; }), "each block big enough to click (" + JSON.stringify(sizes) + ")")) return false;
+      var more = part("more-c01");
+      if (!check(shell.visibleTexts(more).indexOf("+99 more") >= 0 && more.Accessible.name === "10:00 +99 more", "the rest summed up: +99 more (" + JSON.stringify(shell.visibleTexts(more)) + ")")) return false;
+      // 23:59, scrolled into view: a click selects it.
+      var late = part("block-late");
+      pane.reveal(late);
+      click(late);
+      if (!check(view.paneTask === "late" && view.editor.visible && view.cursorRow() && view.cursorRow().id === "late", "a click on the 23:59 block selected it (" + view.paneTask + ")")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      return check(view.paneTask === "" && pane.visible, "Esc: the overview again");
+    }, function() {
+      // "+99 more": its first task selected, the list at it.
+      var more = part("more-c01");
+      pane.reveal(more);
+      click(more);
+      if (!check(view.paneTask === "c01" && view.cursorRow() && view.cursorRow().id === "c01", "a click on +99 more selected its first task (" + view.paneTask + ")")) return false;
+      view.clearSelection();
+      // A short pane, today's timed tasks past (no Next): the first block
+      // is far down.
+      store.snapshot = shell.snapshot(["t4"]);
+      pane.height = Kit.FoamyStyle.rowHeight * 4;
+      view.focusList();
+      return true;
+    }, function() {
+      if (!check(!shown("overviewNext") && pane.scroll.contentHeight > pane.scroll.height * 1.5, "a short pane with no Next (" + JSON.stringify([pane.scroll.contentHeight, pane.scroll.height]) + ")")) return false;
+      // Tab: the keys on the first block, and it shows.
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      var first = part("block-t3");
+      var top = first.mapToItem(pane.scroll, 0, 0).y;
+      if (!check(first.activeFocus && top >= 0 && top + first.height <= pane.scroll.height, "Tab: the first block has the keys, inside the view (" + JSON.stringify([top, first.height, pane.scroll.height, pane.scroll.contentY]) + ")")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      pane.height = Qt.binding(function() { return view.editor.height; });
+      store.snapshot = shell.snapshot();
+      pane.scroll.contentY = 0;
+      return check(!pane.activeFocus && Math.abs(pane.height - view.editor.height) < 1, "Esc: the keys back to the list, the pane's height again");
     }, function() {
       // Tab: the keys on Next (the first stop), then the timeline; Esc gives
       // them back; Enter on Next selects its task.
@@ -719,7 +774,7 @@ ShellRoot {
       if (!check(view.paneTask === "t4" && view.editor.visible && !view.blocked && view.cursorRow().id === "t4", "Enter on Next selected t4, the keys with the list")) return false;
       view.clearSelection();
       // A project (with more tasks than fit, so the list can scroll).
-      var many = shell.snapshot();
+      many = shell.snapshot();
       for (var i = 0; i < 30; i++) {
         many.tasks.push(Fixtures.task("w" + i, "Work item " + i, "work", { section_id: "s-review", child_order: 100 + i }));
         many.tasks.push(Fixtures.task("m" + i, "Later item " + i, "home", { due: Fixtures.due(Fixtures.shift(shell.today, 3)), child_order: 100 + i }));
@@ -745,6 +800,33 @@ ShellRoot {
       // The Inbox: no Sections part.
       view.setView("inbox");
       if (!check(pane.visible && !shown("overviewSections") && shown("overviewWhen") && shown("labelChip-errand"), "the Inbox's overview")) return false;
+      // A label of 60 characters.
+      var longLabel = store.snapshot;
+      longLabel = JSON.parse(JSON.stringify(longLabel));
+      longLabel.tasks.push(Fixtures.task("lng", "Long label", "inbox", { labels: [shell.longLabel] }));
+      store.snapshot = longLabel;
+      return true;
+    }, function() {
+      // Its chip at most the part's width: the name elided, the count
+      // shown, the full name as the tooltip and the accessible name.
+      var chip = part("labelChip-" + shell.longLabel);
+      var name = shell.find(chip, "chipName");
+      var count = shell.find(chip, "chipCount");
+      var tip = chip.tip;
+      var flow = chip.parent;
+      var countEnd = count.mapToItem(chip, 0, 0).x + count.width;
+      if (!check(chip.visible && chip.width <= flow.width && chip.x >= 0 && chip.x + chip.width <= flow.width + 1 && name.truncated && count.visible && count.text === "1" && countEnd <= chip.width && count.mapToItem(chip, 0, 0).x >= name.mapToItem(chip, 0, 0).x + name.width, "the long label's chip fits, its count shows (" + JSON.stringify([chip.width, flow.width, name.width, countEnd]) + ")")) return false;
+      if (!check(chip.Accessible.name === "@" + shell.longLabel && tip.text === "@" + shell.longLabel && !tip.visible, "the full name as the accessible name and the tooltip")) return false;
+      ev.mouseMove(chip, chip.width / 2, chip.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      // The tooltip shows after its delay.
+      return [function() { return chip.hovered && tip.visible; }, "hover shows the tooltip"];
+    }, function() {
+      // A short name: whole, no tooltip.
+      var errand = part("labelChip-errand");
+      ev.mouseMove(errand, errand.width / 2, errand.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      if (!check(!shell.find(errand, "chipName").truncated && !errand.tip.visible, "a short label: whole, no tooltip")) return false;
+      ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+      store.snapshot = many;
       view.setView("upcoming");
       return true;
     }, function() {
@@ -776,11 +858,21 @@ ShellRoot {
       ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
       return check(pane.visible && wideStill(), "Today's overview again, 880 throughout");
     }];
+    // A stage returns true to go on, or [condition, what] to go on once
+    // the condition holds.
     var run = function() {
       if (!stages.length) { done(); return; }
       var stage = stages.shift();
-      shell.afterFrame(view, function() { if (stage()) run(); });
+      shell.afterFrame(view, function() {
+        var next = stage();
+        if (Array.isArray(next))
+          wait.waitFor(next[0], 5000, function(ok) { if (check(ok, next[1])) run(); });
+        else if (next)
+          run();
+      });
     };
+    // The card grows or shrinks to new content in an animation.
+    var settled = [function() { return Math.abs(one.popup.drawnHeight - one.popup.contentHeight) < 1; }, "the card's height settled"];
     run();
   }
   function builtRows(view) {

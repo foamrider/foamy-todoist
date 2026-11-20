@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-task", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-task", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -44,6 +44,21 @@ Item {
       })
     if (previewState === "truncated")
       data.truncated = true
+    // Today's timeline crowded at 10:00 (three lanes, the rest summed up)
+    // and a task at 23:59; the Inbox with a label as long as Todoist allows.
+    if (previewState === "wide-crowded") {
+      for (let i = 0; i < 20; i++)
+        data.tasks.push(Fixtures.task("c" + i, "Crowd " + i, "home", {
+          due: Fixtures.due(Model.dayKey(new Date()) + "T10:00:00")
+        }))
+      data.tasks.push(Fixtures.task("late", "Last call", "home", {
+        due: Fixtures.due(Model.dayKey(new Date()) + "T23:59:00")
+      }))
+    }
+    if (previewState === "wide-long-label")
+      data.tasks.push(Fixtures.task("long", "Plan the move", "inbox", {
+        labels: ["waiting-for-the-landlord-to-confirm-the-moving-date-in-march"]
+      }))
     store.loadFixture(data, signedIn)
     store.fixtureDescriptions = Fixtures.descriptions
     // The fixtures assign one task to someone else: show it, as an example.
@@ -58,7 +73,7 @@ Item {
     } : ({})
     store.launchError = previewState === "footer-error" ? FoamyI18n.t("Can't open Todoist") : ""
     view.prepare()
-    var next = previewState === "inbox" || previewState === "wide-inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
+    var next = previewState === "inbox" || previewState === "wide-inbox" || previewState === "wide-long-label" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
     view.setView(next, "work")
     if (previewState === "error")
       store.error = FoamyI18n.t("Can't reach Todoist. Check your connection.")
