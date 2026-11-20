@@ -37,7 +37,7 @@ function validDate(text) {
   return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3])
 }
 
-// A place in the place dropdown: "<project id>/<section id>" ("" section:
+// A place in the project menu: "<project id>/<section id>" ("" section:
 // the project's root).
 function placeValue(projectId, sectionId) {
   return projectId + "/" + (sectionId || "")
@@ -204,12 +204,12 @@ function request(id, fields) {
   return { commands: [command] }
 }
 
-// The place dropdown's entries: each project (the Inbox first, then the
+// The project menu's entries: each project (the Inbox first, then the
 // rail's order), each followed by its sections as "Project › Section".
 // `projects` is Model.railProjects-like [{id, name}], `sections` the
-// model's sections map. With `sectionsOf`, only that project's sections
-// and "No section" (the separate Section dropdown); `noSection` is its label.
-function placeOptions(model, projects, sectionsOf, noSection) {
+// model's sections map. Each entry: {value (placeValue), label, projectId,
+// section (true for a section)}.
+function placeOptions(model, projects) {
   var sectionsIn = function (projectId) {
     return Object.keys(model.sections).map(function (id) {
       return model.sections[id]
@@ -219,15 +219,11 @@ function placeOptions(model, projects, sectionsOf, noSection) {
       return a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
     })
   }
-  if (sectionsOf !== undefined && sectionsOf !== null)
-    return [{ value: placeValue(sectionsOf, ""), label: noSection }].concat(sectionsIn(sectionsOf).map(function (section) {
-      return { value: placeValue(sectionsOf, section.id), label: section.name }
-    }))
   var out = []
   projects.forEach(function (project) {
-    out.push({ value: placeValue(project.id, ""), label: project.name })
+    out.push({ value: placeValue(project.id, ""), label: project.name, projectId: project.id, section: false })
     sectionsIn(project.id).forEach(function (section) {
-      out.push({ value: placeValue(project.id, section.id), label: project.name + " › " + section.name })
+      out.push({ value: placeValue(project.id, section.id), label: project.name + " › " + section.name, projectId: project.id, section: true })
     })
   })
   return out

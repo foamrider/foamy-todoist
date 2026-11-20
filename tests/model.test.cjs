@@ -820,6 +820,19 @@ test('the editor date in the panel words', () => {
   assert.equal(Model.dueWords(m.byId.t7, format, t, TODAY), '');
 });
 
+test('a deadline in the same words, and the date colours as Todoist has them', () => {
+  const t = (key) => key;
+  const format = (date, pattern) => (pattern === 'dddd' ? 'Thursday' : `${pattern}:${date.getDate()}`);
+  assert.equal(Model.dayWords(TODAY, format, t, TODAY), 'Today');
+  assert.equal(Model.dayWords(Model.addDays(TODAY, 1), format, t, TODAY), 'Tomorrow');
+  assert.equal(Model.dayWords('', format, t, TODAY), '');
+  assert.equal(Model.dayWords('2026-02-30', format, t, TODAY), '');
+  const role = (offset) => Model.dayRole(Model.addDays(TODAY, offset), TODAY);
+  assert.deepEqual([-30, -1, 0, 1, 2, 6, 7, 40].map(role), ['error', 'error', 'success', 'warning', 'accent', 'accent', 'muted', 'muted']);
+  assert.equal(Model.dayRole('', TODAY), 'muted');
+  assert.equal(Model.dayRole(null, TODAY), 'muted');
+});
+
 test('the Week view: overdue, today, tomorrow and seven days after, by day', () => {
   const m = model(
     snapshotWith([

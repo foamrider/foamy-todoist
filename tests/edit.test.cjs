@@ -98,7 +98,7 @@ test('line ends alone are no change to a description', () => {
   assert.deepEqual(change('description', 'Line one\nLine 2', 'Line one\r\nLine two').fields, { description: 'Line one\nLine 2' });
 });
 
-test('the place dropdown: projects in order, each with its sections; or one project\'s sections', () => {
+test('the project menu: projects in order, each with its sections', () => {
   const projects = [{ id: 'inbox', name: 'Inbox' }].concat(Model.railProjects(model, {}));
   const all = Edit.placeOptions(model, projects);
   assert.deepEqual(all.slice(0, 4).map((o) => [o.value, o.label]), [
@@ -107,7 +107,12 @@ test('the place dropdown: projects in order, each with its sections; or one proj
     ['work/s-review', 'Work › Review'],
     ['work/s-ops', 'Work › Ops'],
   ]);
-  assert.deepEqual(Edit.placeOptions(model, projects, 'work', 'No section').map((o) => o.label), ['No section', 'Review', 'Ops']);
+  assert.deepEqual(all.slice(0, 4).map((o) => [o.projectId, o.section]), [
+    ['inbox', false],
+    ['work', false],
+    ['work', true],
+    ['work', true],
+  ]);
   assert.deepEqual(Edit.parsePlace('work/s-ops'), { projectId: 'work', sectionId: 's-ops' });
 });
 

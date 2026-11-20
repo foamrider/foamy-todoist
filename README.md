@@ -144,42 +144,51 @@ started before it, the caret at its end; without one, the field closes.
 **Editing**: a click on a task, Enter or `e` opens it in the editor. In
 Small and Wide the editor takes the panel's place, like the settings page:
 **Back** (or Esc, or ← on Back) returns to the list with the task under the
-cursor; in Wide its fields sit in two columns. In Large it is the details
-pane on the right, which always shows the selected task (the one the
-keys or a click moved to; pointing at a row doesn't change it): `e` or a
-click on a field puts the caret there, Tab moves through the fields, and
-Esc gives the keys back to the list. Its caption says "Saving…" or
-"Saved".
+cursor. In Large it is the details pane on the right, which always shows
+the selected task (the one the keys or a click moved to; pointing at a row
+doesn't change it): `e` or a click on a part puts the caret there, Tab
+moves through the parts, and Esc gives the keys back to the list. Its top
+says "Saving…" or "Saved".
 
-- **Task**, **Date** and **Deadline** are text fields. The date is written
-  as in Todoist ("tomorrow 9am", "every Monday") and Todoist reads it; the
-  field starts with Todoist's own words for the date (a repeating task's
-  rule), and the panel's words for it show beside its label. An empty
-  date or deadline removes it; a deadline is `YYYY-MM-DD`.
-- **Project and section** (one list in Small and Large, two in Wide),
-  **Priority** (P1 to P4, in the rows' colours) and **Labels** (× takes
-  one off, **+ label** adds one of your personal labels) save when you
-  pick.
-- **Description**: read from Todoist when the editor opens the task
-  ("Loading…" meanwhile; a failed read says why, with **Retry**). One that
-  is longer than the editor takes (16 384 characters) is shown, not
-  edited: open it in Todoist.
+The editor reads like the task, as Todoist's task view does: the ring and
+the title, the description under it, then the task's **Project**, **Date**,
+**Deadline**, **Priority** and **Labels**, each under a small caption. In
+Wide these sit in a column of their own on the right. Each part is edited
+where it is:
+
+- The **title** and the **description** look like text; a click (or Tab)
+  makes them fields. The description is read from Todoist when the editor
+  opens the task ("Loading…" meanwhile; a failed read says why, with
+  **Retry**). One that is longer than the editor takes (16 384 characters)
+  is shown, not edited: open it in Todoist.
+- **Date** and **Deadline**: a click on the value (or Enter on it) opens a
+  one-line field. The date is written as in Todoist ("tomorrow 9am",
+  "every Monday") and Todoist reads it; the field starts with Todoist's
+  own words for the date (a repeating task's rule). A deadline is
+  `YYYY-MM-DD`. Enter saves, Esc cancels; an empty field removes the date
+  or deadline. Without one, the caption has a **+** that opens the field.
+  The calendar icon has the date's colour (overdue, today, tomorrow, this
+  week).
+- **Project** (and section), **Priority** (P1 to P4, flags in the rows'
+  colours) and **Labels** (× takes one off, **+** at the caption adds one
+  of your personal labels) open a menu and save when you pick.
 - A text field saves when it loses the keys, or on Enter (Ctrl+Enter in
   the description); Esc in it drops what you typed there. Each save sends
-  only the field that changed. Leaving the task (another task, Back, another
+  only the part that changed. Leaving the task (another task, Back, another
   view or size, closing the panel) saves what you typed first; a change
   that can't be sent then, such as a deadline that isn't a day, is said on
-  the list's error line. A save Todoist refuses shows why under the
-  field, with **Retry**, and keeps your text. Only what you typed is
-  sent: a field you haven't changed follows the task when it changes in
-  Todoist (also while it has the caret); one you changed keeps your text,
-  and saving it replaces Todoist's.
+  the list's error line. A save Todoist refuses shows why under the part,
+  with **Retry**, and keeps your text. Only what you typed is sent: a field
+  you haven't changed follows the task when it changes in Todoist (also
+  while it has the caret); one you changed keeps your text, and saving it
+  replaces Todoist's.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
-- **Complete** and **Open in Todoist** (in the details pane: **Todoist**)
-  are at the bottom. Completing the task (here, or with its row's ring or
-  Space) saves what you typed first. A task completed or deleted elsewhere
-  meanwhile: the page says it is no longer in Todoist.
+- The **ring** beside the title completes the task. **Open in Todoist** is
+  the icon at the top (in the band of the page, at the top of the pane).
+  Completing the task (here, or with its row's ring or Space) saves what
+  you typed first. A task completed or deleted elsewhere meanwhile: the
+  page says it is no longer in Todoist.
 
 Ctrl+O on a task opens it in Todoist.
 
@@ -231,7 +240,8 @@ project's view moves the task there only when the text names no project: a
 | ↑ ↓, Enter | the rail (Wide, Large) | pick a view or project; ← from the list goes to the rail |
 | ↑ ↓ ← → | the Week view | move in a column, across columns |
 | Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
-| Esc | the editor's field | drop the change; with none, back to the list |
+| Enter, Space | a value in the editor | change it (a menu, or the date field) |
+| Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
 | Tab | the list (Large) | into the details pane |
 | r, s | the list | refresh, Settings |
 | Esc | the list | close (Week view: close the details first) |

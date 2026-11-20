@@ -1567,7 +1567,7 @@ PanelKeyCatcher {
     visible: root.large ? root.paneShown : root.pageShown
     z: 5
     mode: root.large ? "pane" : "page"
-    columns: root.size === "wide" ? 2 : 1
+    split: root.size === "wide"
     projects: root.placeProjects
     taskId: root.large ? (root.paneShown ? root.paneTask : "") : root.pageShown ? root.editingTask : ""
     x: root.large ? root.width - root.paneWidth : 0

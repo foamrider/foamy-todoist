@@ -999,8 +999,23 @@ function detailDate(row, format, t, today) {
 function dueWords(task, format, t, today) {
   if (!task || !task.due)
     return ""
-  var day = detailDate({ dueDay: task.due.day, dateKind: dayKind(task.due.day, today) }, format, t, today)
+  var day = dayWords(task.due.day, format, t, today)
   return task.due.time ? day + " " + task.due.time : day
+}
+
+// A day ("YYYY-MM-DD", a deadline) in the same words; "" without one.
+function dayWords(day, format, t, today) {
+  return validDate(day) ? detailDate({ dueDay: day, dateKind: dayKind(day, today) }, format, t, today) : ""
+}
+
+// A day's colour role, as Todoist colours dates: past days "error", today
+// "success", tomorrow "warning", the rest of the coming week "accent",
+// later (or no day) "muted".
+function dayRole(day, today) {
+  if (!validDate(day))
+    return "muted"
+  var days = daysBetween(today, day)
+  return days < 0 ? "error" : days === 0 ? "success" : days === 1 ? "warning" : days < 7 ? "accent" : "muted"
 }
 
 // A task row's day before its time in Upcoming's later groups: the short
@@ -1164,5 +1179,5 @@ if (typeof module !== "undefined")
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
-    MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, weekColumns, shiftedDay, capitalized, dayDate
+    MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate
   }

@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-error", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-editor", "large", "large-week", "large-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-editor", "large", "large-week", "large-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool large: previewState.indexOf("large") === 0
   readonly property bool wide: previewState.indexOf("wide") === 0
@@ -93,13 +93,18 @@ Item {
       Qt.callLater(function () {
         view.goTo(view.firstRowStop + 2)
       })
-    // The editor: the page (Small, Wide), the pane (Large).
-    if (previewState === "editor" || previewState === "wide-editor" || previewState === "editor-error")
+    // The editor: the page (Small, Wide), the pane (Large); the Date
+    // field open, a refused save under the date.
+    if (previewState === "editor" || previewState === "wide-editor" || previewState === "editor-error" || previewState === "editor-date-open")
       Qt.callLater(function () {
         view.openTask(previewState === "wide-editor" ? "t1" : "t4", false)
         if (previewState === "editor-error")
           Qt.callLater(function () {
             view.editor.setError("due", FoamyI18n.t("Todoist answered HTTP %1.", ["500"]))
+          })
+        if (previewState === "editor-date-open")
+          Qt.callLater(function () {
+            view.editor.openField("due")
           })
       })
     if (previewState === "large")

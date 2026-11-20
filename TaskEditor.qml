@@ -9,17 +9,24 @@ import "Edit.js" as Edit
 
 // The task editor, one component used two ways. `mode` "page" (Small and
 // Wide): a sub-view in place of the list, built like the settings page
-// (the compact band with Back, the task as the title, "Saving…"); Esc or
-// Back returns. "pane" (Large): the details pane beside the list, always
-// showing the selected task under a "Task" caption; Esc gives the keys
-// back to the list (`keysReturned`).
+// (the compact band with Back, the task as the title, "Saving…", Open in
+// Todoist); Esc or Back returns. "pane" (Large): the details pane beside
+// the list, always showing the selected task; Esc gives the keys back to
+// the list (`keysReturned`).
 //
-// Each field saves on its own: when it loses the keys, on Enter (one-line
-// fields) or Ctrl+Enter (the description). A save is one helper `update`
-// holding only what changed (Edit.js), through the store's queue. Esc in
-// a field drops its unsaved change; a failed save shows under the field
-// with Retry and keeps what was typed. Choices (place, priority, labels)
-// save when picked.
+// It reads like the task, after Todoist's task view: the completion ring
+// and the title, the description under it, then the properties (Project,
+// Date, Deadline, Priority, Labels) as captioned value rows. Every part is
+// edited where it is: the title and description are quiet fields; a value
+// row opens its menu, or (Date, Deadline) a one-line field in its place.
+// In the Wide page the properties sit in a column of their own (`split`).
+//
+// Each part saves on its own: a text field when it loses the keys, on
+// Enter (the title, Date, Deadline) or Ctrl+Enter (the description). A save is one
+// helper `update` holding only what changed (Edit.js), through the store's
+// queue. Esc in a field drops its unsaved change; a failed save shows under
+// its part with Retry and keeps what was typed. Choices (place, priority,
+// labels) save when picked.
 //
 // The description isn't in the snapshot: the store fetches the shown
 // task's (`TodoStore.description`, one at a time); the pane waits until
@@ -29,10 +36,10 @@ FocusScope {
   id: editor
   property string taskId: ""
   property string mode: "page"
-  // The form's columns: 2 in the Wide page (Date | Deadline, Project |
-  // Section, Priority | Labels), else 1 (one place dropdown, "Project › Section").
-  property int columns: 1
-  // The rail's project list, for the place dropdowns: [{id, name}].
+  // Todoist's split (the Wide page): the title and description on the
+  // left, the properties in a column on a tinted surface on the right.
+  property bool split: false
+  // The rail's project list, for the project menu: [{id, name}].
   property var projects: []
   signal back
   signal keysReturned
@@ -48,13 +55,19 @@ FocusScope {
   readonly property bool saving: Object.keys(pending).length > 0
   // A save worked since the task was shown (the pane says "Saved").
   property bool savedOnce: false
-  readonly property bool menuOpen: labelPicker.opened
+  readonly property bool menuOpen: picker.opened
   readonly property alias contentField: contentInput
   readonly property alias dueField: dueInput
   readonly property alias deadlineField: deadlineInput
   readonly property alias descriptionField: descriptionInput
   readonly property alias backButton: pageBand.backButton
-  readonly property alias labelMenu: labelPicker
+  // The one menu (project, priority or labels; one at a time).
+  readonly property alias menu: picker
+  readonly property alias ring: ringBox
+  // Open in Todoist: in the page's band, or at the top of the pane.
+  readonly property Item openButton: pane ? paneOpen : pageOpen
+  // Date and Deadline: the key whose one-line field is open ("" none).
+  property string opened: ""
 
   // Saves in flight, {request: {key, typed, sent, fields}}: the field,
   // what it held when sent (a choice: what was picked), the field's value
@@ -326,7 +339,8 @@ FocusScope {
     pending = ({})
     savedOnce = false
     shownId = taskId
-    labelPicker.close()
+    picker.close()
+    opened = ""
     revertAll()
     descriptionWait.stop()
     if (taskId === "") {
@@ -390,6 +404,69 @@ FocusScope {
       event.accepted = true
     }
   }
+
+  // ---- Date and Deadline: a one-line field in place of the value row ----------
+  function rowOf(key) {
+    return key === "due" ? dueSection : deadlineSection
+  }
+  // The value row (or the caption's +) opens the field, the caret at its end.
+  function openField(key) {
+    if (!task)
+      return
+    opened = key
+    var input = inputOf(key)
+    input.focusInput()
+    input.cursorPosition = input.text.length
+  }
+  // The field closes (losing the keys, it saves what it holds:
+  // onEditingFinished); `refocus` gives the keys to its row (Enter, Esc).
+  function closeField(key, refocus) {
+    if (opened === key)
+      opened = ""
+    if (refocus)
+      rowOf(key).focusRow()
+  }
+  // Enter saves and closes (a text that can't be sent keeps the field open,
+  // with why); Esc drops the change and closes.
+  function dateKey(key, event) {
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      event.accepted = true
+      saveField(key)
+      if (errorOf(key) === "")
+        closeField(key, true)
+    } else if (event.key === Qt.Key_Escape) {
+      event.accepted = true
+      revert(key)
+      closeField(key, true)
+    }
+  }
+  // What a closed Date or Deadline row shows: a kept draft (a failed
+  // save's), else the text of the save in flight, else Todoist's value in
+  // the panel's words ("" when there is none).
+  function draftOf(key) {
+    if (errorOf(key) !== "")
+      return inputOf(key).text
+    var request = newest(key)
+    return request >= 0 ? String(pending[request].typed) : null
+  }
+  readonly property string dueLabel: {
+    var draft = draftOf("due")
+    if (draft !== null)
+      return draft.trim()
+    return task ? Model.dueWords(task, formatDate, translate, store.today) : ""
+  }
+  readonly property string deadlineLabel: {
+    var draft = draftOf("deadline")
+    var day = draft !== null ? draft.trim() : task ? task.deadline || "" : ""
+    return Model.dayWords(day, formatDate, translate, store.today) || day
+  }
+  function roleColor(role) {
+    return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "success" ? FoamyPalette.success : role === "info" ? FoamyPalette.info : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
+  }
+  // A day's colour as Todoist shows it; a draft or a save in flight: muted.
+  function dayColor(key, day) {
+    return draftOf(key) !== null ? FoamyPalette.mutedText : roleColor(Model.dayRole(day, store.today))
+  }
   Keys.onPressed: function (event) {
     if (event.key === Qt.Key_Escape) {
       event.accepted = true
@@ -405,9 +482,14 @@ FocusScope {
   }
 
   // ---- layout -------------------------------------------------------------------
-  implicitHeight: (pane ? paneCaption.height : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
+  // The ring's column: the title's and the description's text line up after it.
+  readonly property real ringSize: FoamyStyle.font.iconLarge
+  readonly property real gutter: ringSize + FoamyStyle.gapSmall
+  // The Wide page's property column, tinted edge to edge.
+  readonly property real sideWidth: Commons.Style.space(240)
+  implicitHeight: (pane ? paneTop.height : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
 
-  // The page's band: Back, the task, "Saving…".
+  // The page's band: Back, the task, "Saving…", Open in Todoist.
   FoamyHeroBand {
     id: pageBand
     objectName: "editorBand"
@@ -417,35 +499,48 @@ FocusScope {
     compactTitle: editor.task ? editor.task.text : ""
     saving: editor.saving
     onBack: editor.back()
+    compactTrailing: [
+      FoamyAction {
+        id: pageOpen
+        objectName: "editOpen"
+        visible: editor.task !== null
+        focusable: true
+        iconName: "external-link"
+        foreground: FoamyPalette.secondaryText
+        tooltipText: FoamyI18n.t("Open in Todoist")
+        onClicked: editor.store.openView("task", editor.taskId)
+      }
+    ]
   }
-  // The pane's caption: "Task", and "Saving…" or "Saved".
+  // The pane's top: "Saving…" or "Saved", and Open in Todoist.
   Item {
-    id: paneCaption
+    id: paneTop
     visible: editor.pane
     width: parent.width
-    height: editor.pane ? FoamyStyle.rowHeight + FoamyStyle.gap : 0
-    PlainText {
-      anchors.left: parent.left
-      anchors.leftMargin: FoamyStyle.padding
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: FoamyStyle.gapSmall
-      text: FoamyI18n.t("Task")
-      wrapMode: Text.NoWrap
-      font.pixelSize: FoamyStyle.font.bodySmall
-      font.weight: Font.DemiBold
-      color: FoamyPalette.secondaryText
-    }
+    height: editor.pane ? FoamyStyle.actionSize + FoamyStyle.gap * 2 : 0
     PlainText {
       objectName: "paneStatus"
       visible: editor.task !== null && text !== ""
-      anchors.right: parent.right
-      anchors.rightMargin: FoamyStyle.padding
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: FoamyStyle.gapSmall
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.padding
+      anchors.verticalCenter: parent.verticalCenter
       text: editor.saving ? FoamyI18n.t("Saving…") : editor.savedOnce ? FoamyI18n.t("Saved") : ""
       wrapMode: Text.NoWrap
       font.pixelSize: FoamyStyle.font.bodySmall
       color: FoamyPalette.mutedText
+    }
+    FoamyAction {
+      id: paneOpen
+      objectName: "paneOpen"
+      visible: editor.task !== null
+      anchors.right: parent.right
+      anchors.rightMargin: FoamyStyle.padding - FoamyStyle.gapSmall
+      anchors.verticalCenter: parent.verticalCenter
+      focusable: true
+      iconName: "external-link"
+      foreground: FoamyPalette.secondaryText
+      tooltipText: FoamyI18n.t("Open in Todoist")
+      onClicked: editor.store.openView("task", editor.taskId)
     }
   }
 
@@ -453,14 +548,26 @@ FocusScope {
   PlainText {
     objectName: "editorEmpty"
     visible: editor.task === null
-    anchors.top: editor.pane ? paneCaption.bottom : pageBand.bottom
-    anchors.topMargin: FoamyStyle.gapLarge
+    anchors.top: editor.pane ? paneTop.bottom : pageBand.bottom
+    anchors.topMargin: editor.pane ? 0 : FoamyStyle.gapLarge
     x: FoamyStyle.padding
     width: parent.width - FoamyStyle.padding * 2
     horizontalAlignment: editor.pane ? Text.AlignLeft : Text.AlignHCenter
     text: editor.gone ? FoamyI18n.t("This task is no longer in Todoist.") : FoamyI18n.t("No task selected")
     font.pixelSize: FoamyStyle.font.bodySmall
     color: FoamyPalette.mutedText
+  }
+
+  // The Wide page's property column: a slightly different surface, from
+  // the band to the bottom (it doesn't scroll; the properties do).
+  Rectangle {
+    objectName: "editorSide"
+    visible: editor.split && editor.task !== null
+    anchors.right: parent.right
+    anchors.top: pageBand.bottom
+    anchors.bottom: parent.bottom
+    width: editor.sideWidth
+    color: FoamyPalette.noteFill
   }
 
   FoamyWheelScroll {
@@ -500,7 +607,7 @@ FocusScope {
     id: scroll
     objectName: "editorScroll"
     visible: editor.task !== null
-    anchors.top: editor.pane ? paneCaption.bottom : pageBand.bottom
+    anchors.top: editor.pane ? paneTop.bottom : pageBand.bottom
     anchors.bottom: parent.bottom
     width: parent.width
     contentWidth: width
@@ -511,70 +618,314 @@ FocusScope {
       policy: Controls.ScrollBar.AsNeeded
     }
 
-    ColumnLayout {
+    // One column (the title and description, then the properties), or
+    // Todoist's split: two columns side by side.
+    GridLayout {
       id: form
-      x: FoamyStyle.padding
-      width: scroll.width - FoamyStyle.padding * 2
-      spacing: FoamyStyle.gapLarge
-      // A top and bottom margin inside the scroll.
-      Item {
-        Layout.preferredHeight: editor.pane ? 0 : FoamyStyle.gapSmall
-      }
+      width: scroll.width
+      columns: editor.split ? 2 : 1
+      columnSpacing: 0
+      rowSpacing: 0
 
-      FieldBlock {
-        label: FoamyI18n.t("Task")
-        error: editor.errorOf("content")
-        onRetry: editor.retry("content")
-        SafeTextField {
-          id: contentInput
-          objectName: "editContent"
+      // ---- the title and the description ----
+      ColumnLayout {
+        id: head
+        objectName: "editorHead"
+        Layout.fillWidth: true
+        Layout.alignment: Qt.AlignTop
+        Layout.leftMargin: FoamyStyle.padding - FoamyStyle.gapSmall
+        Layout.rightMargin: FoamyStyle.padding - FoamyStyle.gapSmall
+        Layout.topMargin: editor.pane ? 0 : FoamyStyle.gapLarge
+        Layout.bottomMargin: editor.split ? FoamyStyle.padding : FoamyStyle.gap
+        spacing: FoamyStyle.gapSmall
+
+        RowLayout {
           Layout.fillWidth: true
-          Layout.preferredHeight: FoamyStyle.controlHeight
-          maximumLength: 1000
-          translate: FoamyI18n.t
-          Accessible.name: FoamyI18n.t("Task")
-          onTextEdited: editor.setError("content", "")
-          onEditingFinished: editor.saveField("content")
-          onKeyPressed: function (event) {
-            editor.fieldKey("content", event)
+          spacing: 0
+          // The ring completes, as on the list's rows: the priority's
+          // colour, the check on hover or with the keys.
+          Item {
+            id: ringBox
+            objectName: "editRing"
+            readonly property color tone: editor.base ? editor.roleColor(Model.priorityRole(editor.base.priority)) : FoamyPalette.mutedText
+            readonly property bool lit: ringMouse.containsMouse || activeFocus
+            // As tall as the title's first line, so the ring centres on it.
+            Layout.preferredWidth: editor.gutter
+            Layout.preferredHeight: contentInput.topPadding + contentInput.bottomPadding + titleLine.height
+            Layout.alignment: Qt.AlignTop
+            activeFocusOnTab: true
+            Accessible.role: Accessible.CheckBox
+            Accessible.checked: false
+            Accessible.name: FoamyI18n.t("Complete")
+            Accessible.onPressAction: editor.completeTask()
+            Keys.onPressed: function (event) {
+              if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                event.accepted = true
+                editor.completeTask()
+              }
+            }
+            FontMetrics {
+              id: titleLine
+              font: contentInput.font
+            }
+            Rectangle {
+              objectName: "editRingMark"
+              anchors.centerIn: parent
+              width: editor.ringSize
+              height: width
+              radius: width / 2
+              border.width: 1.5
+              border.color: ringBox.tone
+              color: Qt.alpha(ringBox.tone, ringBox.lit ? 0.28 : 0.12)
+              FoamyIcon {
+                visible: ringBox.lit
+                anchors.centerIn: parent
+                width: FoamyStyle.font.bodySmall
+                height: width
+                name: "check"
+                color: ringBox.tone
+              }
+            }
+            // The keys' ring around it.
+            Rectangle {
+              visible: ringBox.activeFocus
+              anchors.centerIn: parent
+              width: editor.ringSize + FoamyStyle.gapSmall * 2
+              height: width
+              radius: width / 2
+              color: "transparent"
+              border.width: 1
+              border.color: Commons.Color.accent
+            }
+            MouseArea {
+              id: ringMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: editor.completeTask()
+            }
           }
+          // The title wraps, as in Todoist; it is one line of text all the
+          // same: Enter saves instead of breaking it (a pasted line break is
+          // refused with why, as Todoist refuses it).
+          SafeTextArea {
+            id: contentInput
+            objectName: "editContent"
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
+            quiet: true
+            minimumHeight: 0
+            maximumHeight: FoamyStyle.controlHeight * 4
+            font.pixelSize: FoamyStyle.font.heading
+            font.weight: Font.DemiBold
+            maximumLength: 1000
+            translate: FoamyI18n.t
+            Accessible.name: FoamyI18n.t("Task")
+            onTextEdited: editor.setError("content", "")
+            onEditingFinished: editor.saveField("content")
+            onKeyPressed: function (event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                event.accepted = true
+                editor.saveField("content")
+              } else
+                editor.fieldKey("content", event)
+            }
+          }
+        }
+        ErrorLine {
+          objectName: "contentError"
+          Layout.leftMargin: editor.gutter
+          error: editor.errorOf("content")
+          onRetry: editor.retry("content")
+        }
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: 0
+          // The description's mark, on its first line.
+          Item {
+            Layout.preferredWidth: editor.gutter
+            Layout.preferredHeight: descriptionInput.topPadding + descriptionInput.bottomPadding + descriptionLine.height
+            Layout.alignment: Qt.AlignTop
+            FontMetrics {
+              id: descriptionLine
+              font: descriptionInput.font
+            }
+            FoamyIcon {
+              anchors.centerIn: parent
+              width: FoamyStyle.iconSize
+              height: width
+              name: "text"
+              color: FoamyPalette.mutedText
+            }
+          }
+          ColumnLayout {
+            Layout.fillWidth: true
+            spacing: FoamyStyle.gapSmall
+            SafeTextArea {
+              id: descriptionInput
+              objectName: "editDescription"
+              visible: !(editor.desc && editor.desc.state === "ready" && editor.desc.truncated)
+              Layout.fillWidth: true
+              quiet: true
+              minimumHeight: 0
+              color: FoamyPalette.secondaryText
+              enabled: !!editor.desc && editor.desc.state === "ready" && !editor.descTruncated()
+              placeholderText: !editor.desc || editor.desc.state === "loading" ? FoamyI18n.t("Loading…") : editor.desc.state === "error" ? "" : FoamyI18n.t("Description")
+              maximumLength: 32766
+              translate: FoamyI18n.t
+              Accessible.name: FoamyI18n.t("Description")
+              onTextEdited: editor.setError("description", "")
+              onEditingFinished: if (enabled)
+                editor.saveField("description")
+              onKeyPressed: function (event) {
+                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
+                  editor.saveField("description")
+                  event.accepted = true
+                } else
+                  editor.fieldKey("description", event)
+              }
+            }
+            // Cut by the helper: read here, edited in Todoist.
+            PlainText {
+              objectName: "descriptionReadOnly"
+              visible: !descriptionInput.visible
+              Layout.fillWidth: true
+              Layout.topMargin: FoamyStyle.controlPaddingY
+              leftPadding: FoamyStyle.controlPaddingX
+              text: editor.desc ? editor.desc.text : ""
+              maximumLineCount: 8
+              elide: Text.ElideRight
+              color: FoamyPalette.secondaryText
+            }
+            PlainText {
+              objectName: "descriptionNote"
+              visible: !descriptionInput.visible
+              Layout.fillWidth: true
+              leftPadding: FoamyStyle.controlPaddingX
+              text: FoamyI18n.t("Too long to edit here. Open it in Todoist.")
+              font.pixelSize: FoamyStyle.font.bodySmall
+              color: FoamyPalette.mutedText
+            }
+          }
+        }
+        ErrorLine {
+          objectName: "descriptionError"
+          Layout.leftMargin: editor.gutter
+          error: editor.errorOf("description") !== "" ? editor.errorOf("description") : editor.desc && editor.desc.state === "error" ? editor.desc.error : ""
+          onRetry: editor.desc && editor.desc.state === "error" ? editor.store.loadDescription(editor.taskId) : editor.retry("description")
         }
       }
 
-      GridLayout {
-        Layout.fillWidth: true
-        columns: editor.columns
-        columnSpacing: FoamyStyle.gapLarge
-        rowSpacing: FoamyStyle.gapLarge
+      // ---- the properties ----
+      // Captioned sections with hairlines between them; the value rows'
+      // icons line up with the ring (one column) or the column's inset.
+      ColumnLayout {
+        id: props
+        objectName: "editorProperties"
+        readonly property real inset: editor.split ? FoamyStyle.gapLarge : FoamyStyle.padding - FoamyStyle.gap
+        Layout.fillWidth: !editor.split
+        Layout.preferredWidth: editor.split ? editor.sideWidth - inset * 2 : -1
+        Layout.alignment: Qt.AlignTop
+        Layout.leftMargin: inset
+        Layout.rightMargin: inset
+        Layout.topMargin: editor.split ? FoamyStyle.gapLarge : 0
+        Layout.bottomMargin: FoamyStyle.padding - FoamyStyle.gap
+        spacing: 0
 
-        FieldBlock {
-          label: FoamyI18n.t("Date")
-          trailing: editor.task ? Model.dueWords(editor.task, editor.formatDate, editor.translate, editor.store.today) : ""
-          hint: FoamyI18n.t("Type it as in Todoist; Todoist reads the date.")
+        Section {
+          id: placeSection
+          objectName: "section-place"
+          caption: FoamyI18n.t("Project")
+          error: editor.errorOf("place")
+          onRetry: editor.retry("place")
+          ValueRow {
+            id: placeRow
+            objectName: "editPlace"
+            readonly property var project: editor.base ? editor.store.model.projects[editor.base.projectId] : null
+            readonly property var section: editor.base && editor.base.sectionId ? editor.store.model.sections[editor.base.sectionId] : null
+            iconName: "hash"
+            iconColor: editor.roleColor(project ? Model.colorRole(project.color) : "muted")
+            text: (project ? project.name : "") + (section ? " › " + section.name : "")
+            accessibleName: FoamyI18n.t("Project") + ": " + text
+            onActivated: function (keyboard) {
+              editor.openPlaceMenu(keyboard)
+            }
+          }
+        }
+        Divider {}
+
+        // Date: Todoist's own words for it (due.string) in a one-line field.
+        Section {
+          id: dueSection
+          objectName: "section-due"
+          caption: FoamyI18n.t("Date")
+          canAdd: editor.dueLabel === "" && editor.opened !== "due"
+          addTip: FoamyI18n.t("Add date")
           error: editor.errorOf("due")
+          onAdd: editor.openField("due")
           onRetry: editor.retry("due")
+          function focusRow() {
+            (dueRow.visible ? dueRow : addButton).forceActiveFocus()
+          }
+          ValueRow {
+            id: dueRow
+            objectName: "dueRow"
+            visible: editor.dueLabel !== "" && editor.opened !== "due"
+            iconName: "calendar"
+            iconColor: editor.dayColor("due", editor.task && editor.task.due ? editor.task.due.day : "")
+            text: editor.dueLabel
+            accessibleName: FoamyI18n.t("Date") + ": " + text
+            onActivated: editor.openField("due")
+          }
           SafeTextField {
             id: dueInput
             objectName: "editDue"
+            visible: editor.opened === "due"
             Layout.fillWidth: true
             Layout.preferredHeight: FoamyStyle.controlHeight
+            placeholderText: FoamyI18n.t("Type a date")
             maximumLength: 400
             translate: FoamyI18n.t
             Accessible.name: FoamyI18n.t("Date")
             onTextEdited: editor.setError("due", "")
-            onEditingFinished: editor.saveField("due")
+            onEditingFinished: {
+              editor.saveField("due")
+              editor.closeField("due", false)
+            }
             onKeyPressed: function (event) {
-              editor.fieldKey("due", event)
+              editor.dateKey("due", event)
             }
           }
         }
-        FieldBlock {
-          label: FoamyI18n.t("Deadline")
+        Divider {}
+
+        Section {
+          id: deadlineSection
+          objectName: "section-deadline"
+          caption: FoamyI18n.t("Deadline")
+          canAdd: editor.deadlineLabel === "" && editor.opened !== "deadline"
+          addTip: FoamyI18n.t("Add deadline")
           error: editor.errorOf("deadline")
+          onAdd: editor.openField("deadline")
           onRetry: editor.retry("deadline")
+          function focusRow() {
+            (deadlineRow.visible ? deadlineRow : addButton).forceActiveFocus()
+          }
+          ValueRow {
+            id: deadlineRow
+            objectName: "deadlineRow"
+            visible: editor.deadlineLabel !== "" && editor.opened !== "deadline"
+            iconName: "target"
+            iconColor: editor.dayColor("deadline", editor.task ? editor.task.deadline : "")
+            text: editor.deadlineLabel
+            accessibleName: FoamyI18n.t("Deadline") + ": " + text
+            onActivated: editor.openField("deadline")
+          }
           SafeTextField {
             id: deadlineInput
             objectName: "editDeadline"
+            visible: editor.opened === "deadline"
             Layout.fillWidth: true
             Layout.preferredHeight: FoamyStyle.controlHeight
             placeholderText: "YYYY-MM-DD"
@@ -582,121 +933,57 @@ FocusScope {
             translate: FoamyI18n.t
             Accessible.name: FoamyI18n.t("Deadline")
             onTextEdited: editor.setError("deadline", "")
-            onEditingFinished: editor.saveField("deadline")
+            onEditingFinished: {
+              editor.saveField("deadline")
+              editor.closeField("deadline", false)
+            }
             onKeyPressed: function (event) {
-              editor.fieldKey("deadline", event)
+              editor.dateKey("deadline", event)
             }
           }
         }
+        Divider {}
 
-        // One column: one dropdown of "Project › Section"; two: Project | Section.
-        FieldBlock {
-          label: editor.columns > 1 ? FoamyI18n.t("Project") : FoamyI18n.t("Project and section")
-          error: editor.errorOf("place")
-          onRetry: editor.retry("place")
-          FoamyDropdown {
-            id: placeInput
-            objectName: "editPlace"
-            Layout.fillWidth: true
-            showLabel: false
-            Accessible.name: FoamyI18n.t("Project")
-            value: editor.base ? (editor.columns > 1 ? Edit.placeValue(editor.base.projectId, "") : Edit.placeValue(editor.base.projectId, editor.base.sectionId)) : ""
-            options: editor.base ? (editor.columns > 1 ? editor.projects.map(function (project) {
-                return {
-                  value: Edit.placeValue(project.id, ""),
-                  label: project.name
-                }
-              }) : Edit.placeOptions(editor.store.model, editor.projects)) : []
-            onChanged: function (value) {
-              // Two columns: another project goes to its root; the same
-              // one keeps its section (that is the Section dropdown's).
-              if (editor.columns > 1 && editor.base && Edit.parsePlace(value).projectId === editor.base.projectId)
-                return
-              editor.save("place", value)
-            }
-          }
-        }
-        FieldBlock {
-          visible: editor.columns > 1
-          label: FoamyI18n.t("Section")
-          FoamyDropdown {
-            objectName: "editSection"
-            Layout.fillWidth: true
-            showLabel: false
-            Accessible.name: FoamyI18n.t("Section")
-            value: editor.base ? Edit.placeValue(editor.base.projectId, editor.base.sectionId) : ""
-            options: editor.base && editor.columns > 1 ? Edit.placeOptions(editor.store.model, editor.projects, editor.base.projectId, FoamyI18n.t("No section")) : []
-            onChanged: function (value) {
-              editor.save("place", value)
-            }
-          }
-        }
-
-        FieldBlock {
-          label: FoamyI18n.t("Priority")
+        Section {
+          id: prioritySection
+          objectName: "section-priority"
+          caption: FoamyI18n.t("Priority")
           error: editor.errorOf("priority")
           onRetry: editor.retry("priority")
-          Row {
+          ValueRow {
+            id: priorityRow
             objectName: "editPriority"
-            spacing: FoamyStyle.gapSmall
-            Repeater {
-              // P1 is the API's 4.
-              model: [4, 3, 2, 1]
-              Rectangle {
-                id: chip
-                required property int modelData
-                required property int index
-                readonly property bool chosen: editor.base !== null && editor.base.priority === modelData
-                readonly property color tone: chip.roleColor(Model.priorityRole(modelData))
-                function roleColor(role) {
-                  return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
-                }
-                objectName: "priority-p" + (index + 1)
-                width: FoamyStyle.controlHeight + FoamyStyle.gap
-                height: FoamyStyle.controlHeight - FoamyStyle.gapSmall
-                radius: FoamyStyle.radiusSmall
-                color: chosen ? Qt.alpha(tone, 0.22) : chipMouse.containsMouse || activeFocus ? FoamyPalette.hoverFill : "transparent"
-                border.width: FoamyStyle.borderWidth
-                border.color: chosen || activeFocus ? tone : FoamyPalette.border
-                activeFocusOnTab: true
-                Accessible.role: Accessible.RadioButton
-                Accessible.checked: chosen
-                Accessible.name: "P" + (index + 1)
-                Keys.onPressed: function (event) {
-                  if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    editor.save("priority", chip.modelData)
-                    event.accepted = true
-                  }
-                }
-                PlainText {
-                  anchors.centerIn: parent
-                  text: "P" + (chip.index + 1)
-                  wrapMode: Text.NoWrap
-                  font.family: FoamyStyle.monoFamily
-                  font.pixelSize: FoamyStyle.font.bodySmall
-                  font.weight: chip.chosen ? Font.DemiBold : Font.Normal
-                  color: FoamyPalette.onSurface(chip.tone)
-                }
-                MouseArea {
-                  id: chipMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: editor.save("priority", chip.modelData)
-                }
-              }
+            // P1 is the API's 4.
+            readonly property int level: editor.base ? 5 - editor.base.priority : 4
+            iconName: "flag"
+            iconColor: editor.roleColor(Model.priorityRole(5 - level))
+            text: "P" + level
+            accessibleName: FoamyI18n.t("Priority") + ": " + text
+            onActivated: function (keyboard) {
+              editor.openPriorityMenu(keyboard)
             }
           }
         }
+        Divider {}
 
-        FieldBlock {
-          label: FoamyI18n.t("Labels")
+        Section {
+          id: labelsSection
+          objectName: "section-labels"
+          caption: FoamyI18n.t("Labels")
+          canAdd: editor.task !== null && !editor.task.labelsTruncated && editor.freeLabels.length > 0
+          addTip: FoamyI18n.t("Add label")
+          addName: "addLabel"
           error: editor.errorOf("labels")
+          onAdd: function (keyboard) {
+            editor.openLabelMenu(keyboard)
+          }
           onRetry: editor.retry("labels")
-          hint: editor.task && editor.task.labelsTruncated ? FoamyI18n.t("This task has more labels than the panel keeps. Change them in Todoist.") : ""
           Flow {
             objectName: "editLabels"
+            visible: editor.base !== null && editor.base.labels.length > 0
             Layout.fillWidth: true
+            Layout.leftMargin: FoamyStyle.gap
+            Layout.rightMargin: FoamyStyle.gap
             spacing: FoamyStyle.gapSmall
             Repeater {
               model: editor.base ? editor.base.labels : []
@@ -721,10 +1008,12 @@ FocusScope {
                     font.pixelSize: FoamyStyle.font.bodySmall
                     color: FoamyPalette.onSurface(FoamyPalette.info)
                   }
-                  // ×: the label off (not while the list is cut).
+                  // ×: the label off (not while the list is cut); on the
+                  // Tab path, Enter removes it.
                   FoamyAction {
                     objectName: "removeLabel"
                     visible: editor.task !== null && !editor.task.labelsTruncated
+                    focusable: true
                     anchors.verticalCenter: parent.verticalCenter
                     width: FoamyStyle.iconSize + FoamyStyle.gapSmall
                     height: width
@@ -737,90 +1026,84 @@ FocusScope {
                 }
               }
             }
-            FoamyButton {
-              id: addLabelButton
-              objectName: "addLabel"
-              visible: editor.task !== null && !editor.task.labelsTruncated && editor.freeLabels.length > 0
-              height: FoamyStyle.controlHeight - FoamyStyle.gapSmall
-              focusable: true
-              text: FoamyI18n.t("+ label")
-              onClicked: editor.openLabelMenu(activeFocus)
-            }
+          }
+          PlainText {
+            objectName: "labelsNote"
+            visible: editor.task !== null && editor.task.labelsTruncated
+            Layout.fillWidth: true
+            Layout.leftMargin: FoamyStyle.gap
+            text: FoamyI18n.t("This task has more labels than the panel keeps. Change them in Todoist.")
+            font.pixelSize: FoamyStyle.font.bodySmall
+            color: FoamyPalette.mutedText
           }
         }
-      }
-
-      FieldBlock {
-        label: FoamyI18n.t("Description")
-        error: editor.errorOf("description") !== "" ? editor.errorOf("description") : editor.desc && editor.desc.state === "error" ? editor.desc.error : ""
-        hint: editor.desc && editor.desc.state === "ready" && editor.desc.truncated ? FoamyI18n.t("Too long to edit here. Open it in Todoist.") : ""
-        onRetry: editor.desc && editor.desc.state === "error" ? editor.store.loadDescription(editor.taskId) : editor.retry("description")
-        SafeTextArea {
-          id: descriptionInput
-          objectName: "editDescription"
-          visible: !(editor.desc && editor.desc.state === "ready" && editor.desc.truncated)
-          Layout.fillWidth: true
-          enabled: !!editor.desc && editor.desc.state === "ready" && !editor.descTruncated()
-          placeholderText: !editor.desc || editor.desc.state === "loading" ? FoamyI18n.t("Loading…") : editor.desc.state === "error" ? "" : FoamyI18n.t("Description")
-          maximumLength: 32766
-          translate: FoamyI18n.t
-          Accessible.name: FoamyI18n.t("Description")
-          onTextEdited: editor.setError("description", "")
-          onEditingFinished: if (enabled)
-            editor.saveField("description")
-          onKeyPressed: function (event) {
-            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-              editor.saveField("description")
-              event.accepted = true
-            } else
-              editor.fieldKey("description", event)
-          }
-        }
-        // Cut by the helper: read here, edited in Todoist.
-        PlainText {
-          objectName: "descriptionReadOnly"
-          visible: !descriptionInput.visible
-          Layout.fillWidth: true
-          text: editor.desc ? editor.desc.text : ""
-          maximumLineCount: 8
-          elide: Text.ElideRight
-          font.pixelSize: FoamyStyle.font.bodySmall
-          color: FoamyPalette.secondaryText
-        }
-      }
-
-      // The pane is too narrow for "Open in Todoist" beside Complete: there
-      // the button says "Todoist" (the footer's word), with the whole name
-      // in its tooltip and for screen readers.
-      Flow {
-        objectName: "editButtons"
-        Layout.fillWidth: true
-        spacing: FoamyStyle.gap
-        FoamyButton {
-          objectName: "editComplete"
-          focusable: true
-          text: FoamyI18n.t("Complete")
-          iconName: "check"
-          onClicked: editor.completeTask()
-        }
-        FoamyButton {
-          objectName: "editOpen"
-          focusable: true
-          text: editor.pane ? FoamyI18n.t("Todoist") : FoamyI18n.t("Open in Todoist")
-          tooltipText: editor.pane ? FoamyI18n.t("Open in Todoist") : ""
-          Accessible.name: FoamyI18n.t("Open in Todoist")
-          iconName: "external-link"
-          onClicked: editor.store.openView("task", editor.taskId)
-        }
-      }
-      Item {
-        Layout.preferredHeight: FoamyStyle.padding - FoamyStyle.gapLarge
       }
     }
   }
 
+  // ---- menus ----------------------------------------------------------------------
+  // One menu at a time, filled when it opens: the project (and section),
+  // the priority, or a label to add. A pick saves at once.
+  property var menuItems: []
+  Component {
+    id: menuEntry
+    FoamyMenuItem {
+      property var pick: null
+      onTriggered: if (pick)
+        pick()
+    }
+  }
+  function openMenu(anchor, entries, keyboard) {
+    menuItems.forEach(function (item) {
+      item.destroy()
+    })
+    menuItems = entries.map(function (entry) {
+      return menuEntry.createObject(editor, entry)
+    })
+    picker.anchorItem = anchor
+    picker.items = menuItems
+    picker.open(keyboard)
+  }
+  FoamyMenu {
+    id: picker
+  }
+  // Each project, then its sections ("Project › Section"), the task's checked.
+  function openPlaceMenu(keyboard) {
+    if (!base)
+      return
+    var here = Edit.placeValue(base.projectId, base.sectionId)
+    openMenu(placeRow, Edit.placeOptions(store.model, projects).map(function (option) {
+      var project = editor.store.model.projects[option.projectId]
+      return {
+        text: option.label,
+        iconName: "hash",
+        iconColor: editor.roleColor(project ? Model.colorRole(project.color) : "muted"),
+        checked: option.value === here,
+        pick: function () {
+          editor.save("place", option.value)
+        }
+      }
+    }), keyboard)
+  }
+  // P1…P4 (the API's 4…1), each with its flag.
+  function openPriorityMenu(keyboard) {
+    if (!base)
+      return
+    openMenu(priorityRow, [4, 3, 2, 1].map(function (priority) {
+      return {
+        text: "P" + (5 - priority),
+        iconName: "flag",
+        iconColor: editor.roleColor(Model.priorityRole(priority)),
+        checked: editor.base.priority === priority,
+        pick: function () {
+          editor.save("priority", priority)
+        }
+      }
+    }), keyboard)
+  }
+
   // ---- labels ---------------------------------------------------------------------
-  // "+ label": the personal labels the task doesn't have, in a menu.
+  // +: the personal labels the task doesn't have, in the menu.
   readonly property var freeLabels: {
     if (!base)
       return []
@@ -846,96 +1129,161 @@ FocusScope {
     if (task)
       save("labels", task.labels.concat([name]))
   }
-  property var labelItems: []
-  Component {
-    id: labelItem
-    FoamyMenuItem {
-      property string labelName: ""
-      text: labelName
-      iconName: "plus"
-      onTriggered: editor.addLabel(labelName)
-    }
-  }
   function openLabelMenu(keyboard) {
-    labelItems.forEach(function (item) {
-      item.destroy()
-    })
-    labelItems = freeLabels.map(function (name) {
-      return labelItem.createObject(editor, {
-        labelName: name
-      })
-    })
-    labelPicker.items = labelItems
-    labelPicker.open(keyboard)
-  }
-  FoamyMenu {
-    id: labelPicker
-    anchorItem: addLabelButton
+    openMenu(labelsSection.addButton, freeLabels.map(function (name) {
+      return {
+        text: name,
+        iconName: "plus",
+        pick: function () {
+          editor.addLabel(name)
+        }
+      }
+    }), keyboard)
   }
 
-  // One field: its label (and, on the end, the panel's words for its
-  // value), the control, a hint, and a failed save's error with Retry.
-  component FieldBlock: ColumnLayout {
-    id: block
-    property string label: ""
-    property string trailing: ""
-    property string hint: ""
+  // One property: its caption (with + at its end, to add a first value),
+  // the value, and a failed save's error with Retry.
+  component Section: ColumnLayout {
+    id: section
+    property string caption: ""
+    property bool canAdd: false
+    property string addTip: ""
+    property string addName: ""
     property string error: ""
-    default property alias control: slot.data
+    readonly property alias addButton: plus
+    default property alias content: slot.data
+    signal add(bool keyboard)
     signal retry
     Layout.fillWidth: true
-    Layout.alignment: Qt.AlignTop
     spacing: FoamyStyle.gapSmall
-    RowLayout {
+    Item {
       Layout.fillWidth: true
-      spacing: FoamyStyle.gap
+      Layout.topMargin: FoamyStyle.gap
+      implicitHeight: FoamyStyle.actionSize
       PlainText {
-        Layout.fillWidth: true
-        text: block.label
+        objectName: "sectionCaption"
+        anchors.left: parent.left
+        anchors.leftMargin: FoamyStyle.gap
+        anchors.right: plus.visible ? plus.left : parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        text: section.caption
         wrapMode: Text.NoWrap
         elide: Text.ElideRight
         font.pixelSize: FoamyStyle.font.bodySmall
+        font.weight: Font.DemiBold
         color: FoamyPalette.secondaryText
       }
-      PlainText {
-        objectName: "fieldWords"
-        visible: text !== ""
-        text: block.trailing
-        wrapMode: Text.NoWrap
-        font.pixelSize: FoamyStyle.font.bodySmall
-        color: FoamyPalette.mutedText
+      FoamyAction {
+        id: plus
+        objectName: section.addName !== "" ? section.addName : "sectionAdd"
+        visible: section.canAdd
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        focusable: true
+        iconName: "plus"
+        foreground: FoamyPalette.secondaryText
+        tooltipText: section.addTip
+        onClicked: section.add(activeFocus)
       }
     }
     ColumnLayout {
       id: slot
       Layout.fillWidth: true
-      spacing: 0
+      Layout.bottomMargin: FoamyStyle.gap
+      spacing: FoamyStyle.gapSmall
+    }
+    ErrorLine {
+      Layout.leftMargin: FoamyStyle.gap
+      Layout.bottomMargin: FoamyStyle.gap
+      error: section.error
+      onRetry: section.retry()
+    }
+  }
+
+  // A property's value: its icon and words; a click, Enter or Space
+  // changes it (a menu, or the one-line field).
+  component ValueRow: Rectangle {
+    id: valueRow
+    property string iconName: ""
+    property color iconColor: FoamyPalette.secondaryText
+    property string text: ""
+    property string accessibleName: ""
+    signal activated(bool keyboard)
+    Layout.fillWidth: true
+    implicitHeight: FoamyStyle.actionSize
+    radius: FoamyStyle.radius
+    color: valueMouse.containsMouse || activeFocus ? FoamyPalette.hoverFill : "transparent"
+    border.width: activeFocus ? 1 : 0
+    border.color: Commons.Color.accent
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: accessibleName
+    Accessible.onPressAction: valueRow.activated(false)
+    Keys.onPressed: function (event) {
+      if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        event.accepted = true
+        valueRow.activated(true)
+      }
+    }
+    FoamyIcon {
+      id: valueIcon
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.gap
+      anchors.verticalCenter: parent.verticalCenter
+      width: FoamyStyle.iconSize
+      height: width
+      name: valueRow.iconName
+      color: valueRow.iconColor
     }
     PlainText {
-      visible: block.hint !== ""
-      Layout.fillWidth: true
-      text: block.hint
-      font.pixelSize: FoamyStyle.font.caption
-      color: FoamyPalette.mutedText
+      objectName: "valueText"
+      anchors.left: valueIcon.right
+      anchors.leftMargin: FoamyStyle.gap
+      anchors.right: parent.right
+      anchors.rightMargin: FoamyStyle.gap
+      anchors.verticalCenter: parent.verticalCenter
+      text: valueRow.text
+      wrapMode: Text.NoWrap
+      elide: Text.ElideRight
+      color: FoamyPalette.text
     }
-    RowLayout {
-      objectName: "fieldError"
-      visible: block.error !== ""
+    MouseArea {
+      id: valueMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: valueRow.activated(false)
+    }
+  }
+
+  // A hairline between two properties.
+  component Divider: Rectangle {
+    Layout.fillWidth: true
+    implicitHeight: 1
+    color: FoamyPalette.divider
+  }
+
+  // A failed save (or read): why, and Retry.
+  component ErrorLine: RowLayout {
+    id: line
+    property string error: ""
+    signal retry
+    objectName: "fieldError"
+    visible: error !== ""
+    Layout.fillWidth: true
+    spacing: FoamyStyle.gap
+    PlainText {
+      objectName: "fieldErrorText"
       Layout.fillWidth: true
-      spacing: FoamyStyle.gap
-      PlainText {
-        objectName: "fieldErrorText"
-        Layout.fillWidth: true
-        text: block.error
-        font.pixelSize: FoamyStyle.font.caption
-        color: Commons.Color.urgent
-        Accessible.role: Accessible.AlertMessage
-      }
-      FoamyButton {
-        objectName: "fieldRetry"
-        text: FoamyI18n.t("Retry")
-        onClicked: block.retry()
-      }
+      text: line.error
+      font.pixelSize: FoamyStyle.font.caption
+      color: Commons.Color.urgent
+      Accessible.role: Accessible.AlertMessage
+    }
+    FoamyButton {
+      objectName: "fieldRetry"
+      text: FoamyI18n.t("Retry")
+      onClicked: line.retry()
     }
   }
 }
