@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 b9947a5d1d1f8cce34b04f45de966c4ee43d88674a81f486e330864739ac256e — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 a393e0e7d2d4e9e6b33012ed998910d41234a29115ba7de3e91f1937d6cb8cda — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.Commons
@@ -385,6 +385,8 @@ Flickable {
 
   FoamyWheelScroll {
     target: root
+    // The field is the Flickable: a click in it is the field's own.
+    clickAway: false
     // A notch scrolls the platform's wheel lines of this field's text.
     notch: Math.max(1, Application.styleHints.wheelScrollLines) * Math.max(1, editor.cursorRectangle.height)
   }
