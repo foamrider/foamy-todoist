@@ -488,6 +488,71 @@ ShellRoot {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
     return ok;
   }
+  // Every visible item under `item` named `name`.
+  function findAll(item, name) {
+    var out = [];
+    var walk = function(at) {
+      if (!at.visible) return;
+      if (at.objectName === name) out.push(at);
+      for (var child of at.children) walk(child);
+    };
+    if (item) walk(item);
+    return out;
+  }
+  // Wide, mirrored (right to left): "" when the rail is at the card's right
+  // edge with its labels and rows readable in it (text right-aligned, left
+  // of its icon), the list beside it as wide as the rest (less the pane)
+  // with its task rows inside it (text left of the ring), the pane on the
+  // far left and the Week columns from the right in reading order; else
+  // what is off. Call it with the card's width settled.
+  function rtlLayout(view) {
+    var off = [];
+    var box = function(item) { var at = item.mapToItem(view, 0, 0); return { left: at.x, right: at.x + item.width, width: item.width }; };
+    var inside = function(inner, outer) { return inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5; };
+    var border = Kit.FoamyStyle.borderWidth;
+    if (!view.LayoutMirroring.enabled) off.push("not mirrored");
+    var card = { left: 0, right: view.width };
+    var rail = shell.find(view, "rail");
+    var area = shell.find(view, "listArea");
+    var railBox = box(rail);
+    var areaBox = box(area);
+    if (!rail.visible || Math.abs(railBox.right - card.right) > 0.5) off.push("rail " + JSON.stringify(railBox) + " not at the right edge of " + card.right);
+    if (Math.abs(areaBox.right - (railBox.left - border)) > 0.5) off.push("list " + JSON.stringify(areaBox) + " not beside the rail");
+    var paneSpace = view.paneShown && !view.weekShown ? view.paneWidth + border : 0;
+    if (Math.abs(areaBox.width - (card.right - railBox.width - border - paneSpace)) > 0.5) off.push("list width " + areaBox.width + " in " + card.right);
+    if (!inside(areaBox, card)) off.push("list " + JSON.stringify(areaBox) + " outside the card");
+    var labels = shell.findAll(rail, "railLabel");
+    var texts = shell.findAll(rail, "railText");
+    if (labels.length < 1 || texts.length < 5) off.push(labels.length + " rail labels, " + texts.length + " rail rows");
+    for (var label of labels) {
+      var lb = box(label);
+      if (!inside(lb, railBox) || lb.left < railBox.left + railBox.width / 2) off.push("rail label " + label.text + " at " + JSON.stringify(lb));
+    }
+    for (var text of texts) {
+      var tb = box(text);
+      var ib = box(shell.find(text.parent, "railIcon"));
+      if (tb.width < 20 || !inside(tb, railBox) || tb.right > ib.left + 0.5 || text.effectiveHorizontalAlignment !== Text.AlignRight) off.push("rail row " + text.text + " at " + JSON.stringify([tb, ib.left, text.effectiveHorizontalAlignment]));
+    }
+    if (!view.weekShown) {
+      var list = shell.find(view, "taskList");
+      var rows = shell.findAll(list.contentItem, "taskText").filter(function(item) { var y = item.mapToItem(list, 0, 0).y; return y >= 0 && y + item.height <= list.height; });
+      if (rows.length < 3) off.push(rows.length + " task rows in view");
+      for (var row of rows) {
+        var rb = box(row);
+        var ring = box(shell.find(row.parent.parent, "ringMark"));
+        if (rb.width < 20 || !inside(rb, areaBox) || !inside(ring, areaBox) || rb.right > ring.left + 0.5 || row.effectiveHorizontalAlignment !== Text.AlignRight) off.push("task row " + row.text + " at " + JSON.stringify([rb, ring.left]));
+      }
+    } else {
+      var keys = ["overdue", "today", "tomorrow", "later"].map(function(key) { return box(shell.find(view, "weekColumn-" + key)); });
+      for (var k = 0; k < keys.length; k++)
+        if (!inside(keys[k], areaBox) || (k > 0 && keys[k].right > keys[k - 1].left + 0.5)) off.push("Week columns " + JSON.stringify(keys));
+    }
+    if (view.paneShown) {
+      var pane = box(view.editor);
+      if (!inside(pane, card) || pane.left > 0.5 || (!view.weekShown && Math.abs(pane.right + border - areaBox.left) > 0.5)) off.push("pane " + JSON.stringify(pane) + " not on the far left");
+    }
+    return off.join("; ");
+  }
   function find(item, name) {
     if (!item) return null;
     if (item.objectName === name) return item;
@@ -733,12 +798,16 @@ ShellRoot {
     case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Wide popup closed"];
     case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Wide again, in Norwegian"];
     case 91: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && Kit.FoamyI18n.language === "en"; }, 15000, "the pane's text saved as the popup closed"];
-    case 92: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && v.size === "wide"; }, 10000, "the Wide popup"];
-    case 93: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "wide" && Math.abs(l.popup.cardItem.width - l.narrowWidth) < 1; }, 10000, "the Wide popup from IPC"];
-    case 94: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
-    case 95: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
-    case 96: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 97: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 92: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.rightToLeft && v.size === "wide" && v.rows.length > 0 && one.popup.contentWidth === 609; }, 15000, "Wide in Arabic, narrow"];
+    case 93: return [function() { return one.cardWidth === 880 && one.popup.contentWidth === 880; }, 10000, "Arabic: the card grown"];
+    case 94: return [function() { return one.cardWidth === 720 && one.popup.contentWidth === 720; }, 10000, "Arabic: the card narrowed to the room"];
+    case 95: return [function() { return !one.popup.visible && Kit.FoamyI18n.language === "en" && !Kit.FoamyI18n.rightToLeft; }, 10000, "the Arabic popup closed, English again"];
+    case 96: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && v.size === "wide"; }, 10000, "the Wide popup"];
+    case 97: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "wide" && Math.abs(l.popup.cardItem.width - l.narrowWidth) < 1; }, 10000, "the Wide popup from IPC"];
+    case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
+    case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
+    case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
+    case 101: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -2239,6 +2308,43 @@ ShellRoot {
     case 91:
       var closeSent = shell.updatesSince(shell.callsBefore);
       if (!check(JSON.stringify(closeSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]), "closing saved the typed text (" + JSON.stringify(closeSent) + ")")) return;
+      // Wide in Arabic (right to left).
+      shell.pickLanguage("ar");
+      ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      break;
+    case 92:
+      // Narrow, mirrored: the rail on the right, the list beside it.
+      if (!check(shell.rtlLayout(view) === "", "Arabic, narrow: " + shell.rtlLayout(view))) return;
+      var rtlArea = shell.find(view, "listArea");
+      shell.listBox = [rtlArea.width, view.width - rtlArea.mapToItem(view, 0, 0).x];
+      view.goTo(view.firstRowStop);
+      // Growing: laid out at the width to come from the right edge, so the
+      // list keeps its width and place; the pane is uncovered on the left.
+      var rtlLeft = rtlArea.mapToItem(view, 0, 0).x;
+      if (!check(view.paneShown && one.cardWidth === 880 && one.popup.contentWidth < 880 && view.clip && Math.abs(rtlArea.width - shell.listBox[0]) < 0.5 && Math.abs(view.width - rtlLeft - shell.listBox[1]) < 0.5 && Math.abs(view.editor.mapToItem(view, 0, 0).x + view.paneWidth + Kit.FoamyStyle.borderWidth - rtlLeft) < 0.5, "Arabic, growing: the list as it was, the pane to its left (" + JSON.stringify([one.popup.contentWidth, rtlArea.width, rtlLeft, shell.listBox, view.editor.mapToItem(view, 0, 0).x]) + ")")) return;
+      break;
+    case 93:
+      var rtlGrown = shell.find(view, "listArea");
+      if (!check(!view.clip && shell.popupPlacement(one, 880) === "" && Math.abs(rtlGrown.width - shell.listBox[0]) < 0.5 && Math.abs(view.width - rtlGrown.mapToItem(view, 0, 0).x - shell.listBox[1]) < 0.5, "Arabic, grown to 880: the list where it was (" + JSON.stringify([shell.popupPlacement(one, 880), rtlGrown.width, shell.listBox]) + ")")) return;
+      if (!check(shell.rtlLayout(view) === "", "Arabic, a task in the pane: " + shell.rtlLayout(view))) return;
+      // The room shrinks while it is open (another margin): the card is
+      // clamped to 720 and the list narrows with it, beside the rail.
+      shell.savedMargin = one.popup.margin;
+      one.popup.margin = 600;
+      break;
+    case 94:
+      // (The test's huge margin pushes the card down; only its width counts here.)
+      if (!check(Math.abs(one.popup.cardItem.width - 720) < 1 && shell.rtlLayout(view) === "", "Arabic, clamped to 720: " + JSON.stringify([one.popup.cardItem.width]) + " " + shell.rtlLayout(view))) return;
+      view.setView("week");
+      wait.waitFor(function() { return view.weekShown && view.weekColumns.length === 4; }, 5000, function(shown) {
+        if (!check(shown && shell.rtlLayout(view) === "", "Arabic, the Week view at 720: " + shell.rtlLayout(view))) return;
+        view.setView("today");
+        one.close();
+        one.popup.margin = shell.savedMargin;
+        shell.pickLanguage("en");
+      });
+      break;
+    case 95:
       // Wide needs room for its narrow width (609) on the bar's screen; with
       // less, Small. The full width is clamped to the room there.
       shell.savedMargin = one.popup.margin;
@@ -2249,7 +2355,7 @@ ShellRoot {
       one.popup.margin = 600;
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       break;
-    case 92:
+    case 96:
       // (The test's huge margin pushes the card down; only its width counts here.)
       if (!check(view.size === "wide" && one.popup.contentWidth === 609 && Math.abs(one.popup.cardItem.width - 609) < 1, "the popup is Wide, narrow (" + view.size + ", " + one.popup.contentWidth + ")")) return;
       view.goTo(view.firstRowStop);
@@ -2266,14 +2372,14 @@ ShellRoot {
         wait.waitFor(function() { return !one.popup.visible; }, 5000, function() { ipc.toggle(); });
       });
       break;
-    case 93:
+    case 97:
       var lead = shell.leader();
       if (!check(shell.popupPlacement(lead, 609) === "", "IPC toggle: the leader's popup, 609 wide under its button (" + shell.popupPlacement(lead, 609) + ")")) return;
       // IPC add while Wide is open: the caret in the band's field.
       var ipcAdd = lead.data.find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.add === "function"; });
       ipcAdd.add();
       break;
-    case 94:
+    case 98:
       var lead2 = shell.leader();
       var leadView = lead2.popup.bodyItem;
       if (!check(lead2.opened && leadView.fieldOpen && !leadView.searching && leadView.size === "wide", "IPC add: the add field in the Wide popup")) return;
@@ -2293,13 +2399,13 @@ ShellRoot {
       one.prefs.save("openOn", "last");
       one.prefs.save("panelWidth", "standard");
       break;
-    case 95:
+    case 99:
       var lead3 = shell.leader();
       if (!check(lead3.popup.bodyItem.view === "today" && lead3.popup.bodyItem.size === "standard", "another size: the Week view became Today (" + lead3.popup.bodyItem.view + ")")) return;
       lead3.close();
       one.open();
       break;
-    case 96:
+    case 100:
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
       one.close();
       one.prefs.save("openOn", "today");
@@ -2310,7 +2416,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 97:
+    case 101:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();
@@ -2375,6 +2481,12 @@ try:
     refused = run.host_commands()
     if refused:
         print("FAIL: the plugin ran host commands:", *refused, sep="\n  ")
+        sys.exit(1)
+    # A binding loop is a layout that depends on itself (RTL's mirrored
+    # anchors once made the list's width depend on its own x).
+    loops = [line for line in run.log.splitlines() if "Binding loop" in line]
+    if loops:
+        print("FAIL: binding loops:", *loops, sep="\n  ")
         sys.exit(1)
     # FOAMY_TEST_VERBOSE=1 prints the shell's log on success too.
     print(run.log if not run.ok or os.environ.get("FOAMY_TEST_VERBOSE") else "PASS: real plugin runtime interactions")

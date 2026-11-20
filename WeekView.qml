@@ -193,7 +193,8 @@ Item {
           MouseArea {
             id: ringArea
             objectName: "weekRing"
-            x: FoamyStyle.gapSmall
+            anchors.left: parent.left
+            anchors.leftMargin: FoamyStyle.gapSmall
             y: FoamyStyle.gapSmall
             width: FoamyStyle.iconSize + FoamyStyle.gap
             height: FoamyStyle.iconSize + FoamyStyle.gap

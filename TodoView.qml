@@ -1118,8 +1118,12 @@ PanelKeyCatcher {
       maximumLength: 500
       // Quick Add's tokens in colour, only while adding.
       runs: root.adding ? Model.quickAddRuns(text, root.tokenColors) : []
-      leftPadding: FoamyStyle.iconSize + FoamyStyle.gap * 2
-      rightPadding: spinner.visible ? FoamyStyle.iconSize + FoamyStyle.gap * 2 : FoamyStyle.gap
+      // The icon at the reading start, the spinner at the end: padding
+      // isn't mirrored, so RTL swaps the sides.
+      readonly property real startPadding: FoamyStyle.iconSize + FoamyStyle.gap * 2
+      readonly property real endPadding: spinner.visible ? FoamyStyle.iconSize + FoamyStyle.gap * 2 : FoamyStyle.gap
+      leftPadding: LayoutMirroring.enabled ? endPadding : startPadding
+      rightPadding: LayoutMirroring.enabled ? startPadding : endPadding
       Accessible.name: fieldBox.placeholder
       onTextEdited: {
         root.store.addError = ""
@@ -1135,7 +1139,8 @@ PanelKeyCatcher {
     }
     FoamyIcon {
       anchors.verticalCenter: parent.verticalCenter
-      x: FoamyStyle.gap + 2
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.gap + 2
       width: FoamyStyle.iconSize
       height: width
       name: root.searching ? "search" : "plus"
@@ -1213,13 +1218,18 @@ PanelKeyCatcher {
     visible: !root.editingSettings && !root.pageShown
     anchors.top: tabsBox.visible ? tabsBox.bottom : heroBand.bottom
     anchors.bottom: panelFooter.visible ? panelFooter.top : parent.bottom
-    width: parent.width
+    // Laid out at the width to come (layoutWidth) from the reading start:
+    // anchored, not placed by x, so RTL puts the rail on the right and the
+    // part still to be uncovered (the pane) past the left edge.
+    anchors.left: parent.left
+    width: root.layoutWidth
 
     // The rail (Wide): views, then the projects.
     Flickable {
       id: rail
       objectName: "rail"
       visible: root.wide && root.store.signedIn && root.store.loaded
+      anchors.left: parent.left
       width: visible ? 156 : 0
       height: parent.height
       contentHeight: railColumn.implicitHeight + FoamyStyle.gap * 2
@@ -1246,10 +1256,12 @@ PanelKeyCatcher {
             height: modelData.kind === "label" ? FoamyStyle.rowHeight - 4 : FoamyStyle.rowHeight - 6
             readonly property bool selected: (modelData.kind === "view" && root.view === modelData.value && !root.searching) || (modelData.kind === "project" && root.view === "project" && root.projectId === modelData.value && !root.searching)
             PlainText {
+              objectName: "railLabel"
               visible: railRow.modelData.kind === "label"
               anchors.bottom: parent.bottom
               anchors.bottomMargin: FoamyStyle.gapSmall
-              x: FoamyStyle.gap
+              anchors.left: parent.left
+              anchors.leftMargin: FoamyStyle.gap
               text: railRow.modelData.text
               wrapMode: Text.NoWrap
               font.pixelSize: FoamyStyle.font.caption
@@ -1273,14 +1285,17 @@ PanelKeyCatcher {
               Accessible.name: railRow.modelData.text
               FoamyIcon {
                 id: railIcon
+                objectName: "railIcon"
                 anchors.verticalCenter: parent.verticalCenter
-                x: FoamyStyle.gap + (railRow.modelData.depth || 0) * FoamyStyle.gapLarge
+                anchors.left: parent.left
+                anchors.leftMargin: FoamyStyle.gap + (railRow.modelData.depth || 0) * FoamyStyle.gapLarge
                 width: FoamyStyle.iconSize
                 height: width
                 name: railRow.modelData.iconName || "hash"
                 color: railRow.modelData.kind === "project" ? railColors.of(railRow.modelData.role) : FoamyPalette.secondaryText
               }
               PlainText {
+                objectName: "railText"
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: railIcon.right
                 anchors.leftMargin: FoamyStyle.gap
@@ -1327,9 +1342,9 @@ PanelKeyCatcher {
       objectName: "listArea"
       anchors.left: rail.visible ? rail.right : parent.left
       anchors.leftMargin: rail.visible ? FoamyStyle.borderWidth : 0
-      // Laid out at the width to come (layoutWidth); the details pane on
-      // the right (over the Week view, which keeps its width).
-      width: root.layoutWidth - x - (root.paneShown && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0)
+      // Beside it, the details pane at the reading end (over the Week
+      // view, which keeps its width).
+      width: content.width - (rail.visible ? rail.width + FoamyStyle.borderWidth : 0) - (root.paneShown && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0)
       height: parent.height
 
       // The list's space that isn't a row (the margins, the error lines,
@@ -1347,9 +1362,11 @@ PanelKeyCatcher {
         readonly property string message: root.addError !== "" ? root.addError : root.store.loaded ? root.store.error : ""
         readonly property bool truncated: root.store.model.truncated && (root.rows.length > 0 || root.weekCount > 0)
         visible: root.store.signedIn && (message !== "" || truncated)
-        x: FoamyStyle.gapLarge + FoamyStyle.rowPadding
+        anchors.left: parent.left
+        anchors.leftMargin: FoamyStyle.gapLarge + FoamyStyle.rowPadding
+        anchors.right: parent.right
+        anchors.rightMargin: FoamyStyle.gapLarge
         y: FoamyStyle.gap
-        width: parent.width - x - FoamyStyle.gapLarge
         height: visible ? implicitHeight : 0
         spacing: FoamyStyle.gapTiny
         PlainText {
@@ -1623,16 +1640,18 @@ PanelKeyCatcher {
   // ---- the editor (the page in Small, the pane in Wide) --------------------------------
   // Panel.qml's narrowWidth leaves this out (the list keeps its width).
   readonly property real paneWidth: Commons.Style.space(270)
-  // The pane's surface: over the Week view it covers the right part.
+  // The pane's surface at the body's reading end: over the Week view it
+  // covers that part. Anchored, so RTL puts it on the left.
   Rectangle {
     visible: root.paneShown
-    x: root.layoutWidth - root.paneWidth - FoamyStyle.borderWidth
-    y: content.y
+    anchors.right: content.right
+    anchors.top: content.top
     width: root.paneWidth + FoamyStyle.borderWidth
     height: content.height
     z: 4
     color: FoamyPalette.background
     Rectangle {
+      anchors.left: parent.left
       width: FoamyStyle.borderWidth
       height: parent.height
       color: FoamyPalette.divider
@@ -1646,7 +1665,8 @@ PanelKeyCatcher {
     mode: root.wide ? "pane" : "page"
     projects: root.placeProjects
     taskId: root.wide ? (root.paneShown ? root.paneTask : "") : root.pageShown ? root.editingTask : ""
-    x: root.wide ? root.layoutWidth - root.paneWidth : 0
+    // Wide: on the pane's surface (anchored, as it); Small: the whole card.
+    anchors.right: root.wide ? content.right : parent.right
     y: root.wide ? content.y : 0
     width: root.wide ? root.paneWidth : root.width
     height: root.wide ? content.height : root.height

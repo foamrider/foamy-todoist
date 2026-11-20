@@ -146,7 +146,8 @@ Item {
     Accessible.name: FoamyI18n.tn("%1 overdue", row.entry && row.entry.count ? row.entry.count : 0)
     Row {
       anchors.verticalCenter: parent.verticalCenter
-      x: FoamyStyle.rowPadding
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.rowPadding
       spacing: FoamyStyle.gap
       FoamyIcon {
         anchors.verticalCenter: parent.verticalCenter
@@ -180,8 +181,11 @@ Item {
     visible: row.isTask
     // Dimmed while its completion's outcome is unknown (it can't be acted on).
     opacity: row.isTask && row.entry.unconfirmed ? FoamyStyle.disabledOpacity : 1
-    x: FoamyStyle.gapLarge + row.indent
-    width: parent.width - FoamyStyle.gapLarge * 2 - row.indent
+    // Anchored, not placed by x, so RTL mirrors it (the indent on the right).
+    anchors.left: parent.left
+    anchors.leftMargin: FoamyStyle.gapLarge + row.indent
+    anchors.right: parent.right
+    anchors.rightMargin: FoamyStyle.gapLarge
     height: parent.height
     hasCursor: row.hasCursor
     current: row.isTask && row.selected
@@ -196,7 +200,8 @@ Item {
     MouseArea {
       id: ringArea
       objectName: "ring"
-      x: FoamyStyle.rowPadding - FoamyStyle.gapSmall
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.rowPadding - FoamyStyle.gapSmall
       width: FoamyStyle.iconSize + 1 + FoamyStyle.gap
       height: parent.height
       cursorShape: Qt.PointingHandCursor
@@ -209,7 +214,8 @@ Item {
       Rectangle {
         id: ring
         objectName: "ringMark"
-        x: FoamyStyle.gapSmall
+        anchors.left: parent.left
+        anchors.leftMargin: FoamyStyle.gapSmall
         // Centred on the text block, which is centred in the row.
         y: (parent.height - height) / 2
         width: 16
