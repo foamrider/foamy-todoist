@@ -8,41 +8,18 @@
 //!
 //! ```text
 //! foamy-todoist-helper status
-//! foamy-todoist-helper names
 //! foamy-todoist-helper token-set    < {"token":"…"}
 //! foamy-todoist-helper token-clear
 //! foamy-todoist-helper sync         < {} | {"full":true}
-//! foamy-todoist-helper apply        < {"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD"}]}
-//! foamy-todoist-helper add          < {"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null,"reply"?:"task"}
-//! foamy-todoist-helper notify       < {"kind":…,"title":…,"detail":…,"open_label":…,"text":…,"task":{…}|null}
+//! foamy-todoist-helper apply        < {"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD"},{"op":"update","id":…,…}]}
+//! foamy-todoist-helper add          < {"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null}
+//! foamy-todoist-helper task         < {"id":…}
 //! ```
 //!
-//! Every command prints one JSON line, also on failure and panic. Every
-//! reply, error or not, has `"contract":1`: the version of these replies
-//! that other plugins (Foamy Menu) build against. It goes up only when a
-//! reply they read changes incompatibly.
+//! Every command prints one JSON line, also on failure and panic.
 //!
 //! - `status` (no network): `{"ok":true,"state":"signed_in"|"signed_out","user":{…}|null}`,
 //!   the user from the cache (null until a sync or `token-set` brought one).
-//! - `names` (no network, for the launcher's suggestions): from the cache,
-//!   `{"ok":true,"state":…,"inbox_project_id":…|null,
-//!   "projects":[{"id","name","parent_id","child_order","inbox","shared"}],
-//!   "sections":[{"id","project_id","name","section_order"}],"labels":["name",…],
-//!   "collaborators":[…],"project_collaborators":{…},
-//!   "tasks":[{"id","content","project_id","section_id","priority","labels",
-//!   "due":{"date","is_recurring","string"}|null}],"truncated":bool}`
-//!   (the same records and bounds as the snapshot below). `labels` are the
-//!   personal labels in `item_order`, then the other names on open tasks
-//!   (shared labels) by name, each once ignoring case, at most 2 000
-//!   names in all. `tasks` are the open tasks the panel lists (assigned to
-//!   others too), for the launcher's task search: dated ones by `due.date`
-//!   (earliest, so overdue, first; compared as Todoist's text), then
-//!   undated ones; ties by project (the Inbox, then the panel's project
-//!   tree), then `child_order`; at most 1 000, each with its text cut to
-//!   200 characters and at most 10 labels. The whole reply stays under
-//!   14 MiB of JSON: past that the tasks, then sections, people, labels and
-//!   projects are halved. `truncated` when one of these lists was cut.
-//!   Signed out, or before the first sync, every list is empty.
 //! - `token-set` reads at most 4 KiB; the token is 1–256 printable ASCII
 //!   characters without whitespace. The cache directory is checked first,
 //!   then the token with a Sync request for the user (401/403:
@@ -56,7 +33,9 @@
 //!   "projects":[{"id","name","color","parent_id","child_order","inbox","shared"}],
 //!   "sections":[{"id","project_id","name","section_order"}],
 //!   "tasks":[{"id","content","project_id","section_id","parent_id","priority",
-//!   "due":{"date","is_recurring","string"}|null,"labels","child_order","day_order",
+//!   "due":{"date","is_recurring","string"}|null,"deadline":"YYYY-MM-DD"|null,
+//!   "labels" (at most 50; "labels_truncated":true only when more were cut),
+//!   "child_order","day_order",
 //!   "responsible_uid"}],
 //!   "labels":[{"id","name","color","item_order"}],
 //!   "collaborators":[{"id","full_name","email"}],
@@ -70,17 +49,39 @@
 //!   20 000 tasks, 2 000 projects, 5 000 sections, 2 000 labels, 2 000
 //!   collaborators and 20 000 memberships (`truncated` when one was cut).
 //!   `due.date` is Todoist's: `YYYY-MM-DD`, a floating `YYYY-MM-DDTHH:MM:SS`
-//!   or a UTC `…Z`.
+//!   or a UTC `…Z`. `deadline` is the date of Todoist's `deadline` object
+//!   (no time, never recurring); a task whose `due` or `deadline` isn't
+//!   one of these shapes is left out. Descriptions are not kept.
 //! - `sync` merges an incremental Sync (items, projects, sections, labels,
 //!   collaborators, collaborator states, user)
 //!   into the cache; `{"full":true}` forces a full one. When Todoist refuses
 //!   the sync token (HTTP 400 on an incremental request) one full sync
 //!   follows; nothing else is retried.
-//! - `apply` takes 1–100 changes, at most one per task: `close` is
-//!   `item_close` (a recurring task moves to its next date), `due` sets an
-//!   all-day date with `item_update`. They go in one Sync request with the
-//!   incremental read. The snapshot comes with `"results":{"<task id>":"ok"|{"code":…,"error":…}}`
-//!   from Todoist's `sync_status` (`code` its `error_tag`).
+//! - `apply` takes 1–100 changes (at most 512 KiB), at most one per task:
+//!   `close` is `item_close` (a recurring task moves to its next date),
+//!   `due` sets an all-day date with `item_update`, and `update` edits a
+//!   task: `{"op":"update","id",` then at least one of `"content"` (1–500
+//!   characters after trimming, no control characters), `"description"`
+//!   (0–16 383 characters; line breaks and tabs allowed; "" clears it),
+//!   `"priority"` (1–4, Todoist's: 4 is p1), `"labels"` (0–50 names of
+//!   1–60 characters, each once ignoring case; the whole list replaces the
+//!   task's), `"due_string"` (at most 200 characters in words for Todoist
+//!   to parse, sent as `due.string`; "" removes the date), `"deadline"`
+//!   (`YYYY-MM-DD`; "" removes it), `"project_id"` (moves the task to that
+//!   project's root) and `"section_id"` (moves it into that section; ""
+//!   is the root of `project_id`, which it then needs)`}`; any other key is
+//!   `INVALID_ARGUMENT`. The fields go in one `item_update`, a place in one
+//!   `item_move` with only the section (when there is one) or only the
+//!   project, as Todoist takes one destination. A requested place is always
+//!   sent (a subtask moved this way becomes a root task), so an editor sends
+//!   `project_id`/`section_id` only when the user changes them. They all go
+//!   in one Sync request with the incremental read, at most 100 commands
+//!   (an update with a move counts two). The snapshot comes with
+//!   `"results":{"<task id>":"ok"|{"code":…,"error":…}}` from Todoist's
+//!   `sync_status` (`code` its `error_tag`), one per task: an update whose
+//!   `item_update` or `item_move` failed has that failure (the first), even
+//!   when the other command worked. Changes whose Sync request would pass
+//!   Todoist's 1 MiB are refused before it is sent (`INVALID_ARGUMENT`).
 //! - `add` creates the task with Quick Add (`POST /tasks/quick`: Todoist
 //!   parses dates, #project, @labels and p1–p4 in `text`, 1–500
 //!   characters). Then, in one Sync request with the read: `due_date` is set
@@ -93,42 +94,22 @@
 //!   on a successful reply, never an error: adding again would duplicate it.
 //!   When the follow-up Sync failed, the reply also has `"stale":true`
 //!   (the snapshot is the cache plus the new task, not a fresh read),
-//!   `"warning_code"` and, for `RATE_LIMITED`, `"retry_after"`. With
-//!   `"reply":"task"` (any other `reply` is `INVALID_ARGUMENT`) the
-//!   snapshot is left out: `{"ok":true,"added":…,"task":{"id","content",
-//!   "project_id","section_id","priority","labels","due"}|null,
-//!   "project":{"id","name","inbox"}|null}` plus the same `warning`,
-//!   `warning_code`, `retry_after` and `stale`; `task` is null only when
-//!   the snapshot doesn't list it (cut by a bound).
+//!   `"warning_code"` and, for `RATE_LIMITED`, `"retry_after"`.
 //! - `apply` and `add` also report a cache that can't be saved as `warning`:
 //!   the change is made in Todoist and the next sync brings it.
-//! - `notify` (no network, no lock, no keyring) shows a desktop
-//!   notification about an add the launcher made, through
-//!   `omarchy-notification-send` from `PATH` (an argv, never a shell), app
-//!   name "Todoist", and waits at most 2 seconds for it (then kills its
-//!   process group). The request (at most 16 KiB) carries the translated
-//!   texts: `title` (1–200 characters, the headline), `detail` (0–1000),
-//!   `open_label` (1–100, the button), `text` (0–500, what was typed), and
-//!   for `kind` `added` a `task` `{"id","content","project","due","labels"}`
-//!   (content 1–500, project and due 0–200, at most 50 labels of 1–100).
-//!   `added` shows the task in bold, then `#project · due · @labels`, and
-//!   its button runs `omarchy-shell foamy.todoist openTask <id>`; `failed`
-//!   and `unknown` show `text` in bold, then `detail`, and the button runs
-//!   `omarchy-shell foamy.todoist openInbox`. Control characters are
-//!   removed from every text, and `&`, `<`, `>` escaped in the body, with
-//!   an invisible WORD JOINER after `&` and `<`: Omarchy's renderer decodes
-//!   entities again and would turn an escaped `<a href>` in a task into a
-//!   link (the headline and the button are plain text); a `title` or `detail` that
-//!   starts with `-` is refused (the sender could read it as an option).
-//!   The texts are in the sender's argv for that moment. Reply
-//!   `{"ok":true}`, else `INVALID_ARGUMENT` or `NOTIFY_FAILED` (the sender
-//!   is missing, fails or doesn't finish in time).
+//! - `task` reads one open task with `GET /tasks/{id}` (for the editor's
+//!   description; the cache isn't read or written, and the lock is held
+//!   only to read the token): `{"ok":true,"task":{"id","description",
+//!   "truncated":bool}}`, the description cut to 16 384 characters ending
+//!   in "…" (`truncated`) when longer. A 404, or a task Todoist marks
+//!   completed or deleted, is `NOT_FOUND`; a reply over 1 MiB, or one for
+//!   another id, is `HTTP`.
 //!
 //! Errors: `{"ok":false,"code":…,"error":…}` with code `INVALID_ARGUMENT`,
 //! `SIGNED_OUT`, `INVALID_TOKEN`, `KEYRING_UNAVAILABLE`, `KEYRING_LOCKED`,
 //! `NETWORK`, `TIMEOUT`, `RATE_LIMITED` (HTTP 429, with `"retry_after"`
 //! seconds when Todoist gives them), `HTTP`, `TLS_UNSUPPORTED`, `BUSY`,
-//! `LOCK_UNAVAILABLE`, `NOTIFY_FAILED` (`notify` only), `UNKNOWN_OUTCOME` (`add` only: the Quick Add request
+//! `LOCK_UNAVAILABLE`, `NOT_FOUND` (`task` only), `UNKNOWN_OUTCOME` (`add` only: the Quick Add request
 //! went out but no answer came back, a timeout or a lost connection, or a
 //! 2xx answer without a usable task id, so the task may exist; a failure before the request went out stays
 //! `NETWORK`, `TIMEOUT` or `TLS_UNSUPPORTED`) or `INTERNAL`. Every `error`
@@ -141,7 +122,7 @@
 //! up to 16 MiB and refused beyond, before parsing; request bodies stay
 //! under Todoist's 1 MiB.
 //!
-//! Every command but `notify` holds an exclusive lock on
+//! Every command holds an exclusive lock on
 //! `$XDG_RUNTIME_DIR/foamy-todoist/state.lock` while it reads or writes the
 //! keyring or the cache, waiting up to 15 seconds (`BUSY`); without a usable
 //! runtime directory it is `LOCK_UNAVAILABLE`. A sync reads the token under
@@ -159,7 +140,6 @@
 
 mod http;
 mod model;
-mod notify;
 mod text;
 mod todoist;
 mod vault;
@@ -175,10 +155,10 @@ use serde_json::Value;
 const RUN_BUDGET: Duration = Duration::from_secs(25);
 const MAX_TOKEN_REQUEST: u64 = 4 << 10;
 const MAX_ADD_REQUEST: u64 = 16 << 10;
-const MAX_APPLY_REQUEST: u64 = 64 << 10;
-const MAX_NOTIFY_REQUEST: u64 = 16 << 10;
-/// The `contract` number every reply carries (see the top of this file).
-const CONTRACT: u64 = 1;
+/// One update at its longest fits, even with every character escaped as
+/// JSON (a description of 16 383 characters, 50 labels of 60).
+const MAX_APPLY_REQUEST: u64 = 512 << 10;
+const MAX_TASK_REQUEST: u64 = 4 << 10;
 
 fn usage() -> Failure {
     Failure::coded(
@@ -205,33 +185,27 @@ fn run(args: &[String]) -> Result<Value, Failure> {
     };
     match command.as_str() {
         "status" => context.status(),
-        "names" => context.names(),
         "token-set" => context.token_set(&todoist::read_request(MAX_TOKEN_REQUEST)?),
         "token-clear" => context.token_clear(),
         "sync" => context.sync(&todoist::read_request(MAX_TOKEN_REQUEST)?),
         "apply" => context.apply(&todoist::read_request(MAX_APPLY_REQUEST)?),
         "add" => context.add(&todoist::read_request(MAX_ADD_REQUEST)?),
-        "notify" => notify::send(&todoist::read_request(MAX_NOTIFY_REQUEST)?),
+        "task" => context.task(&todoist::read_request(MAX_TASK_REQUEST)?),
         _ => Err(usage()),
     }
 }
 
-fn with_contract(mut reply: Value) -> Value {
-    reply["contract"] = CONTRACT.into();
-    reply
-}
-
 /// The kit's error reply, plus `retry_after` for `RATE_LIMITED` (the seconds
-/// are the message's detail) and `contract`. Also the reply after a panic.
+/// are the message's detail). Also the reply after a panic.
 fn render(failure: &Failure) -> Value {
     let mut reply = json::error_reply(failure);
     if let Some(seconds) = todoist::retry_seconds(failure) {
         reply["retry_after"] = seconds.into();
     }
-    with_contract(reply)
+    reply
 }
 
 fn main() -> ExitCode {
     foamy_helper::process::set_run_budget(RUN_BUDGET);
-    json::run(|| run(&args()?).map(with_contract), render)
+    json::run(|| run(&args()?), render)
 }

@@ -9,6 +9,13 @@ import "Preferences.js" as Schema
 // One bar instance (4.5 draws one per monitor). Todoist lives in the
 // TodoStore singleton; every instance pushes the saved settings into it,
 // the leader owns the IPC target, and any instance can save settings.
+//
+// Sizes: both are this bar's popup under the Todoist button. Small is 420
+// with tabs. Wide (the rail, the list and the details pane) is 880, with or
+// without a task in the pane, in the Week view and on its settings page, so
+// the popup never changes width while open; it is capped at 70% of the
+// screen's height. Where the popup has no room for 880 on this bar's
+// screen, Small.
 Ui.Panel {
   id: root
   ipcTarget: "foamy.todoist"
@@ -25,7 +32,8 @@ Ui.Panel {
     bar: root.bar
     moduleName: root.moduleName
     fields: Schema.fields
-    settings: root.settings
+    // A saved "large" reads as "wide" (the next save of a setting writes it so).
+    settings: Schema.current(root.settings)
   }
   FoamyMember {
     id: member
@@ -45,8 +53,17 @@ Ui.Panel {
   }
   Component.onCompleted: pushSettings()
 
-  // Wide only where the screen has room for it (the bar window spans the screen).
-  readonly property bool wide: prefsQueue.value("panelWidth") === "wide" && (!button.Window.window || button.Window.window.width >= FoamyStyle.popupWidthWide + FoamyStyle.padding * 2)
+  // The size setting, and what the popup has room for on this bar's
+  // screen (the host's width there: the screen minus its margins).
+  readonly property string sizeSetting: prefsQueue.value("panelWidth")
+  readonly property int wideWidth: Style.space(880)
+  readonly property real room: panelPopup.availableCardWidth
+  // What a click on this bar opens: "wide" or "standard".
+  readonly property string size: sizeSetting === "wide" && room >= wideWidth ? "wide" : "standard"
+  readonly property bool wide: size === "wide"
+  // The card's width, never wider than the popup's room (the host clamps
+  // it and keeps it under the button).
+  readonly property int cardWidth: panelPopup.fittedContentWidth(wide ? wideWidth : FoamyStyle.popupWidth)
 
   // The next open puts the caret in the add field whatever the setting says (IPC `add`).
   property bool addOnOpen: false
@@ -54,7 +71,7 @@ Ui.Panel {
     if (root.opened) {
       const view = panelPopup.ensureBody()
       if (view)
-        view.openField()
+        view.openAdd()
       return
     }
     addOnOpen = true
@@ -64,9 +81,7 @@ Ui.Panel {
     id: settingsState
     panel: root
   }
-  function openSettings() {
-    settingsState.show()
-  }
+  // IPC (the leader's popup).
   FoamyIpc {
     enabled: member.isLeader
     target: "foamy.todoist"
@@ -78,12 +93,6 @@ Ui.Panel {
     }
     function refresh(): void {
       TodoStore.sync()
-    }
-    function openTask(id: string): void {
-      TodoStore.openTask(id)
-    }
-    function openInbox(): void {
-      TodoStore.openView("inbox", "")
     }
   }
 
@@ -101,7 +110,7 @@ Ui.Panel {
     tooltipText: !TodoStore.signedIn ? FoamyI18n.t("Todoist: not signed in") : !TodoStore.loaded ? "Todoist" : FoamyI18n.t("Todoist: %1, %2", [FoamyI18n.tn("%1 left today", TodoStore.counts.today), FoamyI18n.tn("%1 overdue", TodoStore.counts.overdue)])
     onPressed: function (pressedButton) {
       if (pressedButton === Qt.RightButton)
-        root.openSettings()
+        settingsState.show()
       else
         root.toggle()
     }
@@ -141,11 +150,13 @@ Ui.Panel {
     bar: root.bar
     owner: root
     open: root.opened
-    wide: root.wide
+    contentWidth: root.cardWidth
+    maxHeight: root.wide ? Math.round(panelPopup.screenH * 0.7) : 0
     body: Component {
       TodoView {
         active: root.opened
-        wide: root.wide
+        shown: panelPopup.visible
+        size: root.size
         preferences: prefsQueue.effectiveSettings
         saving: prefsQueue.busy
         settingsError: prefsQueue.error !== "" ? FoamyI18n.t(prefsQueue.error) : ""

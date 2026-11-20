@@ -25,7 +25,8 @@ test('values are checked; missing ones take the defaults', () => {
   const ok = (key, value) => Prefs.valid(Schema.fields, key, value);
   const table = [
     ['barCount', 'today', true], ['barCount', 'none', true], ['barCount', 'all', false],
-    ['panelWidth', 'wide', true], ['panelWidth', 'huge', false],
+    ['panelWidth', 'standard', true], ['panelWidth', 'wide', true], ['panelWidth', 'large', false], ['panelWidth', 'huge', false],
+    ['afterAdd', 'close', true], ['afterAdd', 'keep', true], ['afterAdd', 'stay', false],
     ['openOn', 'last', true], ['openOn', 'project', false],
     ['othersTasks', 'hide', true], ['othersTasks', 'show', true], ['othersTasks', 'all', false],
     ['refreshSeconds', 60, true], ['refreshSeconds', 1800, true], ['refreshSeconds', 30, false],
@@ -34,9 +35,31 @@ test('values are checked; missing ones take the defaults', () => {
   for (const [key, value, expected] of table) assert.equal(ok(key, value), expected, `${key}=${JSON.stringify(value)}`);
   assert.equal(Prefs.value(Schema.fields, {}, 'refreshSeconds'), 300);
   assert.equal(Prefs.value(Schema.fields, {}, 'othersTasks'), 'hide');
+  assert.equal(Prefs.value(Schema.fields, {}, 'afterAdd'), 'close');
+  // A size saved before this schema still reads as it was.
+  assert.equal(Prefs.value(Schema.fields, { panelWidth: 'wide' }, 'panelWidth'), 'wide');
   assert.equal(Prefs.value(Schema.fields, { refreshSeconds: 5 }, 'refreshSeconds'), 300);
   // Every refresh choice the settings page offers is a valid value.
   for (const seconds of Schema.refreshChoices) assert.ok(ok('refreshSeconds', seconds), seconds);
+});
+
+test('a saved "large" (the size Wide took over) reads as Wide, quietly', () => {
+  const read = (settings) => Prefs.value(Schema.fields, Schema.current(settings), 'panelWidth');
+  assert.equal(read({ panelWidth: 'large' }), 'wide');
+  // Nothing in it reads as invalid, so nothing warns about it.
+  assert.equal(JSON.stringify(Prefs.storedProblems(Schema.fields, Schema.current({ panelWidth: 'large', barCount: 'none' }))), '{}');
+  // Without current() it would: the schema no longer lists "large".
+  assert.equal(Prefs.storedProblem(Schema.fields, { panelWidth: 'large' }, 'panelWidth'), Prefs.NOT_ALLOWED);
+  // The other settings and the other sizes are left as they are.
+  assert.equal(Prefs.value(Schema.fields, Schema.current({ panelWidth: 'large', barCount: 'none' }), 'barCount'), 'none');
+  assert.equal(read({ panelWidth: 'standard' }), 'standard');
+  assert.equal(read({ panelWidth: 'wide' }), 'wide');
+  assert.equal(read({ panelWidth: 'huge' }), 'standard');
+  assert.equal(read({}), 'standard');
+  // The stored entry itself isn't changed.
+  const stored = { panelWidth: 'large' };
+  Schema.current(stored);
+  assert.equal(stored.panelWidth, 'large');
 });
 
 test('the open command: a bare command name or an absolute path, no shell, no control characters', () => {

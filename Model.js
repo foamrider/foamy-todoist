@@ -87,6 +87,13 @@ function addDays(key, days) {
   return dayKey(date)
 }
 
+// A real calendar day as "YYYY-MM-DD" (no 30 February).
+function validDate(text) {
+  if (typeof text !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(text))
+    return false
+  return dayKey(dayDate(text)) === text
+}
+
 // Whole days from `from` to `to` (both keys).
 function daysBetween(from, to) {
   return Math.round((dayDate(to) - dayDate(from)) / 86400000)
@@ -201,7 +208,14 @@ function index(snapshot) {
       }),
       order: Number(raw.child_order) || 0,
       dayOrder: Number(raw.day_order) || 0,
-      responsible: validId(raw.responsible_uid) ? raw.responsible_uid : ""
+      responsible: validId(raw.responsible_uid) ? raw.responsible_uid : "",
+      // For the editor: the content as Todoist has it (Markdown and all),
+      // the date in Todoist's words, the deadline, and whether the helper
+      // cut the labels (then they can't be edited here).
+      content: raw.content,
+      dueString: raw.due && typeof raw.due.string === "string" ? raw.due.string : "",
+      deadline: validDate(raw.deadline) ? raw.deadline : "",
+      labelsTruncated: raw.labels_truncated === true
     }
     tasks.push(task)
     byId[task.id] = task
@@ -292,6 +306,12 @@ function labelList(personal, tasks) {
 
 var MAX_SUGGESTIONS = 6
 
+// Whether text[at] is whitespace that ends a Quick Add word: a space
+// escaped as `\ ` belongs to the word (`#My\ Project` is one name).
+function breaksWord(text, at) {
+  return /\s/.test(text.charAt(at)) && text.charAt(at - 1) !== "\\"
+}
+
 // The word at the caret when it is a Quick Add `#project` or `@label`: the
 // trigger at the start or after whitespace, then up to the caret (an
 // escaped space, `\ `, belongs to the word). {kind, start, end, query,
@@ -301,18 +321,15 @@ var MAX_SUGGESTIONS = 6
 function suggestions(model, text, caret) {
   if (typeof text !== "string" || !(caret > 0) || caret > text.length)
     return null
-  var unescapedSpace = function (at) {
-    return /\s/.test(text.charAt(at)) && text.charAt(at - 1) !== "\\"
-  }
   var start = caret
-  while (start > 0 && !unescapedSpace(start - 1))
+  while (start > 0 && !breaksWord(text, start - 1))
     start--
   var trigger = text.charAt(start)
   var kind = { "#": "project", "@": "label", "/": "section", "+": "assignee" }[trigger]
   if (!kind)
     return null
   var end = caret
-  while (end < text.length && !unescapedSpace(end))
+  while (end < text.length && !breaksWord(text, end))
     end++
   var query = text.slice(start + 1, caret).replace(/\\ /g, " ")
   var pool
@@ -397,6 +414,107 @@ function applySuggestion(text, start, end, item) {
   var rest = text.slice(end)
   var spaced = /^\s/.test(rest) ? rest : " " + rest
   return { text: text.slice(0, start) + token + spaced, caret: start + token.length + 1 }
+}
+
+// ---- Quick Add tokens (the add field's colours) ---------------------------------
+// The rules are Foamy Menu's (core/TodoistInput.js, tokens and runs), with
+// this file's word rule. Dates are Todoist's to read, in the account's
+// language, so they are never coloured here.
+
+// Todoist's limit; over it nothing is coloured, so a long paste can't
+// build thousands of runs on the UI thread.
+var MAX_TEXT = 500
+
+// Where " // description" starts: `//` at the start or after whitespace,
+// followed by whitespace or the end; -1 without one.
+function descriptionStart(text) {
+  var found = /(^|\s)\/\/(?=\s|$)/.exec(text)
+  return found ? found.index + found[1].length : -1
+}
+
+// The Quick Add tokens in `text`, in order: {kind, start, end}. Kinds:
+// project (#name), section (/name), label (@name), assignee (+name, only
+// after a #project), priority (p1–p3; p4 is the default and stays plain),
+// reminder (!text), deadline ({text}, braces closed) and description
+// (" // text" to the end). A token starts at the start or after whitespace.
+function quickAddTokens(text) {
+  var s = String(text || "")
+  var out = []
+  if (s.length > MAX_TEXT)
+    return out
+  var description = descriptionStart(s)
+  var limit = description >= 0 ? description : s.length
+  var projectSeen = false
+  var i = 0
+  while (i < limit) {
+    if (/\s/.test(s.charAt(i))) {
+      i++
+      continue
+    }
+    var end = i
+    while (end < limit && !breaksWord(s, end))
+      end++
+    var word = s.slice(i, end)
+    var first = word.charAt(0)
+    if (first === "{") {
+      var close = s.indexOf("}", i + 1)
+      if (close > i + 1 && close < limit) {
+        out.push({ kind: "deadline", start: i, end: close + 1 })
+        i = close + 1
+        continue
+      }
+    } else if (word.length > 1 && (first === "#" || first === "/" || first === "@" || (first === "+" && projectSeen))) {
+      var kind = { "#": "project", "/": "section", "@": "label", "+": "assignee" }[first]
+      out.push({ kind: kind, start: i, end: end })
+      if (kind === "project")
+        projectSeen = true
+    } else if (/^p[1-3]$/.test(word)) {
+      out.push({ kind: "priority", start: i, end: end })
+    } else if (word.length > 1 && first === "!") {
+      out.push({ kind: "reminder", start: i, end: end })
+    }
+    i = end
+  }
+  if (description >= 0)
+    out.push({ kind: "description", start: description, end: s.length })
+  return out
+}
+
+// The text as SafeTextField runs, [{text, color}]: each token in
+// `colors[kind]`, the text between them plain (no colour: the field's
+// own). [] without tokens, so the field draws plain text.
+function quickAddRuns(text, colors) {
+  var s = String(text || "")
+  var list = quickAddTokens(s)
+  if (!list.length)
+    return []
+  var out = []
+  var at = 0
+  list.forEach(function (token) {
+    if (token.start > at)
+      out.push({ text: s.slice(at, token.start) })
+    out.push({ text: s.slice(token.start, token.end), color: colors ? colors[token.kind] : undefined })
+    at = token.end
+  })
+  if (at < s.length)
+    out.push({ text: s.slice(at) })
+  return out
+}
+
+// The add field's placeholder: where the task goes (the view's project or
+// date applies when the text names none). `format` is the locale's date
+// formatting, `t` the catalog.
+var PLACEHOLDER_KEYS = ["Add a task to the Inbox…", "Add a task for today…", "Add a task for %1…", "Add a task to %1…"]
+function addPlaceholder(view, day, today, projectName, format, t) {
+  if (view === "project" && projectName)
+    return t("Add a task to %1…", [projectName])
+  if (day && day === today)
+    return t("Add a task for today…")
+  if (day) {
+    var date = dayDate(day)
+    return t("Add a task for %1…", [format(date, "dddd") + " " + format(date, t("d MMMM"))])
+  }
+  return t("Add a task to the Inbox…")
 }
 
 // ---- ordering -----------------------------------------------------------------
@@ -679,9 +797,7 @@ function rows(model, view, today, options) {
 // calendar week, "later" for the rest of this month after that (key:
 // "YYYY-MM"), then one "month" per month (key: "YYYY-MM").
 function upcomingGroup(day, today, weekStart) {
-  var start = ((Number(weekStart) % 7) + 7) % 7
-  var sinceStart = (dayDate(today).getDay() - start + 7) % 7
-  var weekEnd = addDays(today, 6 - sinceStart)
+  var weekEnd = weekEndOf(today, weekStart)
   // Tomorrow is always a day of its own, also on the week's last day.
   if (day <= weekEnd || day === addDays(today, 1))
     return { group: "day", key: day }
@@ -690,6 +806,13 @@ function upcomingGroup(day, today, weekStart) {
   if (day.slice(0, 7) === today.slice(0, 7))
     return { group: "later", key: day.slice(0, 7) }
   return { group: "month", key: day.slice(0, 7) }
+}
+
+// The last day of the calendar week `today` is in, for the locale's first
+// day of the week (`weekStart`, 0 = Sunday).
+function weekEndOf(today, weekStart) {
+  var start = ((Number(weekStart) % 7) + 7) % 7
+  return addDays(today, 6 - (dayDate(today).getDay() - start + 7) % 7)
 }
 
 // Upcoming: the folded Overdue row, then the groups in order, each with a
@@ -725,7 +848,7 @@ function upcomingRows(model, today, options, flat) {
   order.sort(function (a, b) {
     return rank[groups[a].group] - rank[groups[b].group] || compare(groups[a].key, groups[b].key)
   })
-  var weekEnd = addDays(today, 6 - (dayDate(today).getDay() - (((Number(weekStart) % 7) + 7) % 7) + 7) % 7)
+  var weekEnd = weekEndOf(today, weekStart)
   var trail = { day: "", week: "weekday", later: "weekdayDate", month: "weekdayDate" }
   order.forEach(function (key) {
     var entry = groups[key]
@@ -751,6 +874,341 @@ function upcomingRows(model, today, options, flat) {
     })
   })
   return result
+}
+
+// ---- the Week view (Wide) --------------------------------------------------------
+
+// Four columns, [{key, entries, cards}]: "overdue" (oldest first), "today",
+// "tomorrow" and "later", the seven days after tomorrow, each day under a
+// heading ({kind: "day", key, dayKey}). The tasks are rows as in the list
+// (taskRow, view "week": the project, an overdue task's date, the time),
+// with the personal filter of Today and Upcoming.
+function weekColumns(model, today, options) {
+  options = Object.assign({}, options, { personalView: true })
+  var card = function (task) {
+    return taskRow(model, { task: task, depth: 0 }, today, "week", options.struck, options.unconfirmed)
+  }
+  var dueOn = function (test) {
+    return visibleTasks(model, options, function (task) {
+      return !!task.due && test(task.due.day)
+    })
+  }
+  var tomorrow = addDays(today, 1)
+  var last = addDays(today, 8)
+  var later = []
+  var heading = ""
+  dueOn(function (day) {
+    return day > tomorrow && day <= last
+  }).sort(function (a, b) {
+    return compare(a.due.day, b.due.day) || byDay(a, b)
+  }).forEach(function (task) {
+    if (task.due.day !== heading) {
+      heading = task.due.day
+      later.push({ kind: "day", key: "day:" + heading, dayKey: heading })
+    }
+    later.push(card(task))
+  })
+  return [
+    weekColumn("overdue", dueOn(function (day) {
+      return day < today
+    }).sort(byOverdue).map(card)),
+    weekColumn("today", dueOn(function (day) {
+      return day === today
+    }).sort(byDay).map(card)),
+    weekColumn("tomorrow", dueOn(function (day) {
+      return day === tomorrow
+    }).sort(byDay).map(card)),
+    weekColumn("later", later)
+  ]
+}
+// A column's indices, computed once: each card's `card` (its place among
+// the column's tasks, headings left out; -1 on a heading), and `cards`,
+// each card's entry, so the view finds an entry without searching.
+function weekColumn(key, entries) {
+  var cards = []
+  entries.forEach(function (entry, index) {
+    if (entry.kind === "task") {
+      entry.card = cards.length
+      cards.push(index)
+    } else
+      entry.card = -1
+  })
+  return { key: key, entries: entries, cards: cards }
+}
+
+// Ctrl+←/→ in the Week view: the task's day moved by `delta` days, never
+// before today (an overdue task lands on today); "" when it can't move: no
+// date, recurring (as `t`), or nothing would change.
+function shiftedDay(task, delta, today) {
+  if (!task || !task.due || task.due.recurring)
+    return ""
+  var day = addDays(task.due.day, delta)
+  if (day < today)
+    day = today
+  return day === task.due.day ? "" : day
+}
+
+// ---- the overview (Wide's pane while no task is selected) -------------------------
+// One summary of the current view, from the same snapshot and filters as
+// its list, each in one pass over the view's tasks. Built only while it
+// shows (TodoView).
+
+// Today's timeline covers these hours, stretched to any timed task outside
+// them; a task's block is BLOCK_MINUTES long (its time has no end in Todoist).
+var TIMELINE_START = 8
+var TIMELINE_END = 18
+var BLOCK_MINUTES = 60
+// At most this many blocks side by side: a timeline can't show thousands,
+// and a lane keeps room to click (the rest are summed up, todayOverview).
+var MAX_LANES = 3
+
+// Today (the personal tasks due today or before): {kind: "today", left
+// (due today), overdue, untimed (due today without a time), next (the
+// first timed task after `options.nowMinutes` that isn't struck: {id,
+// text, time, inMinutes}, or null), start and end (the timeline's hours),
+// nowMinutes, now (whether nowMinutes is inside them), blocks}. Each block: {id, text,
+// time, minutes, length (minutes, cut at the range's end), past (started
+// before now), struck, lane, lanes}: blocks that overlap share their
+// width in lanes.
+function todayOverview(model, today, options) {
+  options = Object.assign({}, options, { personalView: true })
+  var now = Number(options.nowMinutes) || 0
+  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: TIMELINE_START, end: TIMELINE_END, nowMinutes: now, now: false, blocks: [] }
+  var timed = []
+  visibleTasks(model, options, function (task) {
+    return !!task.due && task.due.day <= today
+  }).forEach(function (task) {
+    if (task.due.day < today)
+      out.overdue++
+    else {
+      out.left++
+      if (task.due.minutes < 0)
+        out.untimed++
+      else
+        timed.push(task)
+    }
+  })
+  timed.sort(byDay)
+  var struck = options.struck
+  timed.forEach(function (task) {
+    var m = task.due.minutes
+    out.start = Math.min(out.start, Math.floor(m / 60))
+    out.end = Math.max(out.end, Math.min(24, Math.ceil((m + BLOCK_MINUTES) / 60)))
+    var done = has(struck, task.id) && !!struck[task.id]
+    if (!out.next && !done && m > now)
+      out.next = { id: task.id, text: task.text, time: task.due.time, inMinutes: m - now }
+  })
+  out.now = now >= out.start * 60 && now <= out.end * 60
+  // Lanes: a block takes the lowest lane free at its time; a run of blocks
+  // that overlap one another splits the width by its number of lanes, at
+  // most MAX_LANES. A run that needs more keeps MAX_LANES - 1 lanes of
+  // blocks and sums up the rest in one "+N more" block in the last lane,
+  // from the first of them to the end of the last.
+  // Every block is BLOCK_MINUTES long and they come in time order, so the
+  // run's blocks end in the order they started (a queue), and a block only
+  // looks at the shown lanes: linear after the sort, however many tasks
+  // share a time (the overview is built on the UI thread, each minute).
+  var low = MAX_LANES - 1
+  var run = []
+  var going = []
+  var head = 0
+  var taken = []
+  var high = 0
+  var lanes = 0
+  var close = function () {
+    var more = null
+    run.forEach(function (block) {
+      if (lanes <= MAX_LANES || block.lane < low) {
+        block.lanes = Math.min(lanes, MAX_LANES)
+        out.blocks.push(block)
+        return
+      }
+      if (!more) {
+        more = { id: block.id, text: "", time: block.time, minutes: block.minutes, length: 0, past: false, struck: false, lane: low, lanes: MAX_LANES, more: 0 }
+        out.blocks.push(more)
+      }
+      more.more++
+      more.past = block.past
+      more.length = Math.max(more.length, block.minutes + block.length - more.minutes)
+    })
+    run = []
+    going = []
+    head = 0
+    taken = []
+    high = 0
+    lanes = 0
+  }
+  timed.forEach(function (task) {
+    var m = task.due.minutes
+    while (head < going.length && going[head].end <= m) {
+      var ended = going[head++]
+      if (ended.lane < low)
+        taken[ended.lane] = false
+      else
+        high--
+    }
+    if (run.length && head === going.length)
+      close()
+    // A shown lane, else above them (only the first of those is drawn, in
+    // the last lane, unless the run overflows).
+    var lane = 0
+    while (lane < low && taken[lane])
+      lane++
+    if (lane < low)
+      taken[lane] = true
+    else
+      lane = low + high++
+    lanes = Math.max(lanes, lane + 1)
+    going.push({ end: m + BLOCK_MINUTES, lane: lane })
+    run.push({
+      id: task.id,
+      text: task.text,
+      time: task.due.time,
+      minutes: m,
+      length: Math.min(BLOCK_MINUTES, out.end * 60 - m),
+      past: m < now,
+      struck: has(struck, task.id) && !!struck[task.id],
+      lane: lane,
+      lanes: 1,
+      more: 0
+    })
+  })
+  close()
+  return out
+}
+
+// When a list's tasks are due, in order: overdue, today, "week" (after
+// today to the end of this calendar week), later, and "none" (no date).
+// [{key, count}], only the parts with tasks.
+var WHEN_KEYS = ["overdue", "today", "week", "later", "none"]
+function whenKey(task, today, weekEnd) {
+  if (!task.due)
+    return "none"
+  var day = task.due.day
+  return day < today ? "overdue" : day === today ? "today" : day <= weekEnd ? "week" : "later"
+}
+
+// A project, the Inbox or the search results: {kind: "list", total,
+// sections, when, labels}. `sections` (a project only, and only when it
+// has a section or a sub-project): [{kind: "section", id ("" for the tasks
+// without one), name, count}] in the list's order, the empty ones left
+// out, then [{kind: "project", id, name, role, count}] for its
+// sub-projects (`options.projectCounts`, the rail's counts). `labels`:
+// [{name, count}], the most used first.
+function listOverview(model, view, today, options) {
+  options = options || {}
+  var projectId = view === "inbox" ? model.inboxId : view === "project" ? options.projectId : ""
+  var tasks
+  if (view === "search")
+    tasks = searchMatches(model, options.query, options)
+  else if (projectId && model.projects[projectId])
+    tasks = visibleTasks(model, view === "inbox" ? Object.assign({}, options, { personalView: true }) : options, function (task) {
+      return task.projectId === projectId
+    })
+  else
+    tasks = []
+  var weekEnd = weekEndOf(today, options.weekStart !== undefined ? options.weekStart : 1)
+  var when = dict()
+  var labels = dict()
+  var bySection = dict()
+  tasks.forEach(function (task) {
+    var key = whenKey(task, today, weekEnd)
+    when[key] = (when[key] || 0) + 1
+    task.labels.forEach(function (name) {
+      labels[name] = (labels[name] || 0) + 1
+    })
+    var section = task.sectionId || ""
+    bySection[section] = (bySection[section] || 0) + 1
+  })
+  var out = {
+    kind: "list",
+    total: tasks.length,
+    sections: [],
+    when: WHEN_KEYS.filter(function (key) {
+      return when[key] > 0
+    }).map(function (key) {
+      return { key: key, count: when[key] }
+    }),
+    labels: Object.keys(labels).sort(function (a, b) {
+      return labels[b] - labels[a] || compare(a.toLowerCase(), b.toLowerCase()) || compare(a, b)
+    }).map(function (name) {
+      return { name: name, count: labels[name] }
+    })
+  }
+  if (view !== "project" || !projectId)
+    return out
+  var sections = Object.keys(model.sections).map(function (id) {
+    return model.sections[id]
+  }).filter(function (section) {
+    return section.projectId === projectId && bySection[section.id] > 0
+  }).sort(function (a, b) {
+    return a.order - b.order || compare(a.id, b.id)
+  }).map(function (section) {
+    return { kind: "section", id: section.id, name: section.name, count: bySection[section.id] }
+  })
+  var counts = options.projectCounts
+  var children = Object.keys(model.projects).map(function (id) {
+    return model.projects[id]
+  }).filter(function (project) {
+    return project.parentId === projectId
+  }).sort(function (a, b) {
+    return a.order - b.order || compare(a.name, b.name) || compare(a.id, b.id)
+  }).map(function (project) {
+    return { kind: "project", id: project.id, name: project.name, role: colorRole(project.color), count: (has(counts, project.id) && counts[project.id]) || 0 }
+  })
+  if (sections.length || children.length)
+    out.sections = (bySection[""] ? [{ kind: "section", id: "", name: "", count: bySection[""] }] : []).concat(sections, children)
+  return out
+}
+
+// Upcoming (the personal tasks): {kind: "upcoming", days, deadline,
+// undated}. `days`: the seven days after today, [{day, count}];
+// `deadline`: the nearest deadline from today on ({id, text, day, inDays})
+// or null; `undated`: the tasks without a date (Upcoming doesn't list them).
+function upcomingOverview(model, today, options) {
+  options = Object.assign({}, options, { personalView: true })
+  var days = []
+  var at = dict()
+  for (var i = 1; i <= 7; i++) {
+    var day = addDays(today, i)
+    at[day] = days.length
+    days.push({ day: day, count: 0 })
+  }
+  var out = { kind: "upcoming", days: days, deadline: null, undated: 0 }
+  var best = null
+  visibleTasks(model, options, function () {
+    return true
+  }).forEach(function (task) {
+    if (!task.due)
+      out.undated++
+    else if (has(at, task.due.day))
+      days[at[task.due.day]].count++
+    if (task.deadline && task.deadline >= today && (!best || task.deadline < best.deadline || (task.deadline === best.deadline && (task.order - best.order || compare(task.id, best.id)) < 0)))
+      best = task
+  })
+  if (best)
+    out.deadline = { id: best.id, text: best.text, day: best.deadline, inDays: daysBetween(today, best.deadline) }
+  return out
+}
+
+// The overview of `view` (as `rows` takes it; options also nowMinutes and
+// projectCounts), or null for a view that has none (the Week view).
+function overview(model, view, today, options) {
+  if (view === "today")
+    return todayOverview(model, today, options)
+  if (view === "upcoming")
+    return upcomingOverview(model, today, options)
+  if (view === "inbox" || view === "project" || view === "search")
+    return listOverview(model, view, today, options)
+  return null
+}
+
+// "in 2 h 10 min", "in 2 h", "in 5 min": how far ahead a time is.
+var AHEAD_KEYS = ["in %1 h %2 min", "in %1 h", "in %1 min"]
+function aheadText(minutes, t) {
+  var h = Math.floor(minutes / 60)
+  var m = minutes % 60
+  return h && m ? t("in %1 h %2 min", [h, m]) : h ? t("in %1 h", [h]) : t("in %1 min", [m])
 }
 
 // Catalog keys the Upcoming texts use (translated by `t`, the formats
@@ -803,6 +1261,31 @@ function detailDate(row, format, t, today) {
   }
 }
 
+// The editor's date in the panel's words: the day as on a row's detail
+// line ("Tomorrow", a weekday, "Mon 23 Nov") and the time after it
+// ("Tomorrow 09:00"); "" without a date.
+function dueWords(task, format, t, today) {
+  if (!task || !task.due)
+    return ""
+  var day = dayWords(task.due.day, format, t, today)
+  return task.due.time ? day + " " + task.due.time : day
+}
+
+// A day ("YYYY-MM-DD", a deadline) in the same words; "" without one.
+function dayWords(day, format, t, today) {
+  return validDate(day) ? detailDate({ dueDay: day, dateKind: dayKind(day, today) }, format, t, today) : ""
+}
+
+// A day's colour role, as Todoist colours dates: past days "error", today
+// "success", tomorrow "warning", the rest of the coming week "accent",
+// later (or no day) "muted".
+function dayRole(day, today) {
+  if (!validDate(day))
+    return "muted"
+  var days = daysBetween(today, day)
+  return days < 0 ? "error" : days === 0 ? "success" : days === 1 ? "warning" : days < 7 ? "accent" : "muted"
+}
+
 // A task row's day before its time in Upcoming's later groups: the short
 // weekday next week, the short weekday and the date after that; "" elsewhere.
 function trailingDay(row, format, t) {
@@ -834,24 +1317,51 @@ function openArgv(command, url) {
   return replaced ? argv : argv.concat([url])
 }
 
-// Search: open tasks whose text, project name or a label contains every
-// word of the query (case-insensitive), flat, grouped by project (Inbox
-// first, then the rail's order).
-function searchRows(model, query, today, options) {
-  var words = String(query || "").toLowerCase().split(/\s+/).filter(function (word) {
-    return word !== ""
-  }).map(function (word) {
-    return word.charAt(0) === "@" && word.length > 1 ? word.slice(1) : word
-  })
+// A search query's words, lowercased: {label} for `@name` (a label whose
+// name starts with it), {text} for the rest (the task's text, project name
+// or a label contains it). A space escaped as `\ ` belongs to the word, as
+// in Quick Add (`@waiting\ on`); a lone "@" is text.
+function searchWords(query) {
+  var text = String(query || "")
+  var out = []
+  var at = 0
+  while (at < text.length) {
+    if (/\s/.test(text.charAt(at))) {
+      at++
+      continue
+    }
+    var end = at
+    while (end < text.length && !breaksWord(text, end))
+      end++
+    var word = text.slice(at, end).replace(/\\ /g, " ").toLowerCase()
+    out.push(word.charAt(0) === "@" && word.length > 1 ? { label: word.slice(1) } : { text: word })
+    at = end
+  }
+  return out
+}
+
+// The search's matches: open tasks that every word of the query matches.
+function searchMatches(model, query, options) {
+  var words = searchWords(query)
   if (!words.length)
     return []
-  var matches = visibleTasks(model, options, function (task) {
+  return visibleTasks(model, options, function (task) {
     var project = model.projects[task.projectId]
     var haystack = [task.text, project ? project.name : ""].concat(task.labels).join("\n").toLowerCase()
     return words.every(function (word) {
-      return haystack.indexOf(word) >= 0
+      if (word.label === undefined)
+        return haystack.indexOf(word.text) >= 0
+      return task.labels.some(function (label) {
+        return label.toLowerCase().indexOf(word.label) === 0
+      })
     })
   })
+}
+
+// Search: the matches, flat, grouped by project (Inbox first, then the
+// rail's order).
+function searchRows(model, query, today, options) {
+  var matches = searchMatches(model, query, options)
   var byProject = dict()
   matches.forEach(function (task) {
     if (!byProject[task.projectId])
@@ -960,8 +1470,10 @@ function msToMidnight(now) {
 
 if (typeof module !== "undefined")
   module.exports = {
-    WEB, webUrl, validId, colorRole, priorityRole, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
+    WEB, webUrl, validId, validDate, colorRole, priorityRole, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
-    upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot
+    upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
+    MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
+    weekEndOf, searchWords, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
   }

@@ -1,5 +1,5 @@
 pragma Singleton
-// foamy-kit 0.12.1 4384a8b0ffa4c6ac579a872ca6293b48a4dabc69d5270345e029ea4fc68d48c2 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 e0aa535543b7c0116594af27e1ea2eb8573cd85289f9f95b2f698a38d29a62a2 — do not edit; change foamy-kit and run sync
 import QtQuick
 import qs.Commons
 
@@ -97,6 +97,8 @@ QtObject {
   // switch or a compact dropdown.
   readonly property int unitWidthCompact: Style.space(18)
   readonly property int controlPaddingX: Style.space(10)
+  // Above and below the text of a multi-line field (SafeTextArea).
+  readonly property int controlPaddingY: Style.space(6)
   readonly property int actionSize: Style.space(28)
   readonly property int iconSize: Style.space(15)
   readonly property int settingsButtonSize: Style.space(32)

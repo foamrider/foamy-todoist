@@ -15,7 +15,14 @@ function validOpenCommand(text) {
 var fields = [
   // The number in the bar: tasks left today, or nothing (icon only).
   { key: "barCount", type: "enum", options: ["today", "none"], defaultValue: "today" },
+  // The size: Small (the 420 px popup with tabs) or Wide (the rail, the
+  // list, and the details pane while a task is selected). The key keeps its
+  // old name, so a saved "standard" or "wide" needs no migration; a saved
+  // "large" (the size Wide took over) reads as "wide" (current()).
   { key: "panelWidth", type: "enum", options: ["standard", "wide"], defaultValue: "standard" },
+  // Enter in the add field: add and close the panel, or add and keep the
+  // field open for the next task (Shift+Enter does the other).
+  { key: "afterAdd", type: "enum", options: ["close", "keep"], defaultValue: "close" },
   // "last": the view of the last open, kept for the shell session only.
   { key: "openOn", type: "enum", options: ["today", "inbox", "upcoming", "last"], defaultValue: "today" },
   // Tasks assigned to someone else in Today, Upcoming, the Inbox and the
@@ -26,4 +33,13 @@ var fields = [
   { key: "openCommand", type: "string", defaultValue: "", maxLength: 300, pattern: openCommandPattern }
 ]
 
-if (typeof module !== "undefined") module.exports = { fields: fields, refreshChoices: refreshChoices, views: views, openCommandPattern: openCommandPattern, validOpenCommand: validOpenCommand }
+// The bar entry as the panel reads it (Panel.qml's FoamyPrefsQueue):
+// "large", the size Wide took over, reads as "wide", quietly; the next save
+// of any setting writes the entry with "wide".
+function current(settings) {
+  if (settings && settings.panelWidth === "large")
+    return Object.assign({}, settings, { panelWidth: "wide" })
+  return settings
+}
+
+if (typeof module !== "undefined") module.exports = { fields: fields, refreshChoices: refreshChoices, views: views, openCommandPattern: openCommandPattern, validOpenCommand: validOpenCommand, current: current }

@@ -23,6 +23,18 @@ const LOCK_WAIT: Duration = Duration::from_secs(15);
 /// The cache holds at most the bounded state; anything bigger isn't ours.
 const MAX_CACHE: u64 = 64 << 20;
 pub const MAX_COMMANDS: usize = 100;
+/// An edited description, in characters (Todoist's limit).
+pub const MAX_DESCRIPTION: usize = 16_383;
+/// A description `task` reads: longer ones are cut, ending in "…".
+pub const MAX_READ_DESCRIPTION: usize = 16_384;
+/// Labels an update sets, and each name's length in characters.
+pub const MAX_UPDATE_LABELS: usize = 50;
+pub const MAX_UPDATE_LABEL: usize = 60;
+/// A date in words for Todoist to parse.
+pub const MAX_DUE_STRING: usize = 200;
+/// `task`'s reply is one task: a description at its longest, every
+/// character escaped, stays far below this.
+const MAX_TASK_REPLY: u64 = 1 << 20;
 
 fn invalid(text: &str) -> Failure {
     Failure::coded("INVALID_ARGUMENT", text)
@@ -37,6 +49,10 @@ fn unknown_outcome() -> Failure {
         "UNKNOWN_OUTCOME",
         "Todoist didn't answer. The task may have been added: check the list before adding it again.",
     )
+}
+
+fn not_found() -> Failure {
+    Failure::coded("NOT_FOUND", "That task no longer exists in Todoist.")
 }
 
 fn signed_out() -> Failure {
@@ -314,21 +330,6 @@ impl Context {
         Ok(json!({"ok": true, "state": "signed_in", "user": state.user}))
     }
 
-    /// The cache's names for the launcher's suggestions, no network: every
-    /// list empty when signed out or before the first sync.
-    pub fn names(&self) -> Result<Value, Failure> {
-        let _lock = self.lock()?;
-        let (state, account) = if self.vault.get()?.is_none() {
-            (State::empty(), "signed_out")
-        } else {
-            (load(&cache_file()?), "signed_in")
-        };
-        let mut out = state.names();
-        out["ok"] = json!(true);
-        out["state"] = json!(account);
-        Ok(out)
-    }
-
     pub fn token_set(&self, request: &Map<String, Value>) -> Result<Value, Failure> {
         let token = request
             .get("token")
@@ -391,18 +392,37 @@ impl Context {
         let client = Context::client()?;
         let _lock = self.lock()?;
         let token = stored_token(&self.vault)?;
-        let ids = uuids(changes.len())?;
-        let commands: Vec<Value> = changes
-            .iter()
-            .zip(&ids)
-            .map(|(change, uuid)| change.command(uuid))
-            .collect();
         let path = cache_file()?;
         let mut state = load(&path);
+        // Each change is one or two Sync commands (an update and a move);
+        // `planned` keeps which UUIDs belong to which task.
+        let mut commands = Vec::new();
+        let mut planned = Vec::with_capacity(changes.len());
+        for change in &changes {
+            let parts = change.commands();
+            let ids = uuids(parts.len())?;
+            for ((kind, args), uuid) in parts.into_iter().zip(&ids) {
+                commands.push(json!({"type": kind, "uuid": uuid, "args": args}));
+            }
+            planned.push((change.id(), ids));
+        }
+        // Todoist takes at most 100 commands per request; an update with a
+        // move is two, so check the expanded count, not the changes.
+        if commands.len() > MAX_COMMANDS {
+            return Err(invalid(
+                "These changes need more than 100 Todoist commands. Send fewer at a time.",
+            ));
+        }
         let sync_reply = exchange(&client, &token, &mut state, &commands)?;
+        // One result per task: its first command that failed, else "ok".
         let mut results = Map::new();
-        for (change, uuid) in changes.iter().zip(&ids) {
-            results.insert(change.id().to_string(), result(&sync_reply, uuid));
+        for (id, ids) in planned {
+            let outcome = ids
+                .iter()
+                .map(|uuid| result(&sync_reply, uuid))
+                .find(|outcome| outcome != "ok")
+                .unwrap_or_else(|| json!("ok"));
+            results.insert(id.to_string(), outcome);
         }
         let mut out = reply(&state);
         out["results"] = Value::Object(results);
@@ -500,12 +520,7 @@ impl Context {
                 Some(message)
             }
         };
-        let mut out = if add.short_reply {
-            let (task, project) = state.added(&id);
-            json!({"ok": true, "task": task, "project": project})
-        } else {
-            reply(&state)
-        };
+        let mut out = reply(&state);
         out["added"] = json!(id);
         if let Some(failure) = follow_up_failed {
             out["stale"] = json!(true);
@@ -524,6 +539,52 @@ impl Context {
     }
 }
 
+impl Context {
+    /// One task's description, read from Todoist (`GET /tasks/{id}`) when
+    /// the editor opens; nothing is cached. The lock is held only while the
+    /// token is read: this writes nothing, so a sign-out meanwhile can't be
+    /// undone by it.
+    pub fn task(&self, request: &Map<String, Value>) -> Result<Value, Failure> {
+        let id = request
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| model::valid_id(id))
+            .ok_or_else(|| invalid("That isn't a Todoist task id."))?;
+        let client = Context::client()?.with_max_bytes(MAX_TASK_REPLY);
+        let token = {
+            let _lock = self.lock()?;
+            stored_token(&self.vault)?
+        };
+        // The id is letters, digits, `_` and `-` only: safe in the path.
+        let reply = client.get(&format!("/tasks/{id}"), &token)?;
+        match reply.status {
+            200 => {}
+            404 => return Err(not_found()),
+            _ => return Err(refused(&reply)),
+        }
+        let body = &reply.body;
+        if body.get("id").and_then(Value::as_str) != Some(id) {
+            return Err(unexpected());
+        }
+        // Completed or deleted: gone as far as the panel is concerned.
+        let flag = |key: &str| body.get(key).and_then(Value::as_bool) == Some(true);
+        if flag("checked") || flag("is_deleted") {
+            return Err(not_found());
+        }
+        let description = match body.get("description") {
+            None | Some(Value::Null) => "",
+            Some(Value::String(text)) => text.as_str(),
+            Some(_) => return Err(unexpected()),
+        };
+        let truncated = description.chars().count() > MAX_READ_DESCRIPTION;
+        Ok(json!({"ok": true, "task": {
+            "id": id,
+            "description": model::cap(description, MAX_READ_DESCRIPTION),
+            "truncated": truncated,
+        }}))
+    }
+}
+
 fn reply(state: &State) -> Value {
     let mut out = state.snapshot();
     out["ok"] = json!(true);
@@ -535,27 +596,64 @@ fn reply(state: &State) -> Value {
 pub enum Edit {
     Close(String),
     Due(String, String),
+    Update(Update),
+}
+
+/// An `update`: the `item_update` fields to set, and where to move the task.
+#[derive(Debug, PartialEq)]
+pub struct Update {
+    pub id: String,
+    /// `item_update`'s arguments besides `id`, already in Todoist's shape.
+    pub fields: Map<String, Value>,
+    pub moved: Option<Move>,
+}
+
+/// An `item_move` destination: exactly one of these goes to Todoist.
+#[derive(Debug, PartialEq)]
+pub enum Move {
+    /// The project's root (no section).
+    Project(String),
+    Section(String),
 }
 
 impl Edit {
     fn id(&self) -> &str {
         match self {
             Edit::Close(id) | Edit::Due(id, _) => id,
+            Edit::Update(update) => &update.id,
         }
     }
 
-    fn command(&self, uuid: &str) -> Value {
+    /// The Sync commands (type, args) this change needs: one or two.
+    fn commands(&self) -> Vec<(&'static str, Value)> {
         match self {
-            Edit::Close(id) => json!({"type": "item_close", "uuid": uuid, "args": {"id": id}}),
-            Edit::Due(id, date) => json!({
-                "type": "item_update", "uuid": uuid, "args": {"id": id, "due": {"date": date}}
-            }),
+            Edit::Close(id) => vec![("item_close", json!({"id": id}))],
+            Edit::Due(id, date) => {
+                vec![("item_update", json!({"id": id, "due": {"date": date}}))]
+            }
+            Edit::Update(update) => {
+                let mut out = Vec::new();
+                if !update.fields.is_empty() {
+                    let mut args = update.fields.clone();
+                    args.insert("id".into(), json!(update.id));
+                    out.push(("item_update", Value::Object(args)));
+                }
+                if let Some(moved) = &update.moved {
+                    let (key, target) = match moved {
+                        Move::Project(project) => ("project_id", project),
+                        Move::Section(section) => ("section_id", section),
+                    };
+                    out.push(("item_move", json!({"id": update.id, key: target})));
+                }
+                out
+            }
         }
     }
 }
 
-/// `{"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD"}]}`:
-/// 1–100 changes, at most one per task.
+/// `{"commands":[…]}`: 1–100 changes, at most one per task. `close`
+/// `{"op","id"}`, `due` `{"op","id","date":"YYYY-MM-DD"}`, `update` (see
+/// [`parse_update`]).
 pub fn parse_changes(request: &Map<String, Value>) -> Result<Vec<Edit>, Failure> {
     let list = request
         .get("commands")
@@ -583,10 +681,182 @@ pub fn parse_changes(request: &Map<String, Value>) -> Result<Vec<Edit>, Failure>
                     .ok_or_else(|| invalid("Enter a date as YYYY-MM-DD."))?;
                 Edit::Due(id, date.to_string())
             }
+            Some("update") => Edit::Update(parse_update(id, entry)?),
             _ => return Err(invalid("Unknown change.")),
         });
     }
     Ok(edits)
+}
+
+const UPDATE_KEYS: [&str; 10] = [
+    "id",
+    "op",
+    "content",
+    "description",
+    "priority",
+    "labels",
+    "due_string",
+    "deadline",
+    "project_id",
+    "section_id",
+];
+
+// The update's refusals that more than one check gives (catalog keys).
+fn no_content() -> Failure {
+    invalid("Enter a task.")
+}
+
+fn bad_project() -> Failure {
+    invalid("That isn't a Todoist project id.")
+}
+
+fn bad_section() -> Failure {
+    invalid("That isn't a Todoist section id.")
+}
+
+fn long_description() -> Failure {
+    invalid("A description can have at most 16383 characters.")
+}
+
+fn bad_labels() -> Failure {
+    invalid("Give at most 50 labels of 1 to 60 characters each, without control characters.")
+}
+
+fn bad_due_string() -> Failure {
+    invalid("Enter the date in words, at most 200 characters.")
+}
+
+fn bad_deadline() -> Failure {
+    invalid("Enter a deadline as YYYY-MM-DD.")
+}
+
+/// Text without control characters; `keep` lists the ones allowed.
+fn plain(text: &str, keep: &[char]) -> bool {
+    !text.chars().any(|c| c.is_control() && !keep.contains(&c))
+}
+
+/// An `update`: at least one field, each optional, unknown keys refused.
+/// `content` 1–500 characters after trimming, one line; `description`
+/// 0–16 383, line breaks and tabs allowed ("" clears it); `priority` 1–4
+/// (Todoist's: 4 is p1); `labels` 0–100 names of 1–60 characters, each
+/// once ignoring case; `due_string` words for Todoist to parse, at most
+/// 200 characters ("" removes the date); `deadline` `YYYY-MM-DD` ("" removes
+/// it); `project_id` moves the task to that project's root; `section_id`
+/// moves it into that section ("" is the root of `project_id`, which it
+/// then needs).
+pub fn parse_update(id: String, entry: &Value) -> Result<Update, Failure> {
+    let Some(map) = entry.as_object() else {
+        return Err(invalid("Unknown change."));
+    };
+    if map.keys().any(|key| !UPDATE_KEYS.contains(&key.as_str())) {
+        return Err(invalid("Unknown change."));
+    }
+    let text = |key: &str, error: fn() -> Failure| -> Result<Option<&str>, Failure> {
+        match map.get(key) {
+            None => Ok(None),
+            Some(Value::String(value)) => Ok(Some(value.as_str())),
+            Some(_) => Err(error()),
+        }
+    };
+    let mut fields = Map::new();
+    if let Some(content) = text("content", no_content)? {
+        let content = content.trim();
+        if content.is_empty() {
+            return Err(no_content());
+        }
+        if content.chars().count() > model::MAX_CONTENT {
+            return Err(invalid("A task can have at most 500 characters."));
+        }
+        if !plain(content, &[]) {
+            return Err(invalid(
+                "A task can't have line breaks or other control characters.",
+            ));
+        }
+        fields.insert("content".into(), json!(content));
+    }
+    if let Some(description) = text("description", long_description)? {
+        if description.chars().count() > MAX_DESCRIPTION {
+            return Err(long_description());
+        }
+        if !plain(description, &['\n', '\r', '\t']) {
+            return Err(invalid(
+                "A description can't have control characters other than line breaks and tabs.",
+            ));
+        }
+        fields.insert("description".into(), json!(description));
+    }
+    if let Some(priority) = map.get("priority") {
+        let priority = priority
+            .as_i64()
+            .filter(|priority| (1..=4).contains(priority))
+            .ok_or_else(|| invalid("Pick a priority from 1 to 4."))?;
+        fields.insert("priority".into(), json!(priority));
+    }
+    if let Some(labels) = map.get("labels") {
+        let list = labels
+            .as_array()
+            .filter(|list| list.len() <= MAX_UPDATE_LABELS)
+            .ok_or_else(bad_labels)?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut names = Vec::with_capacity(list.len());
+        for label in list {
+            let name = label
+                .as_str()
+                .filter(|name| {
+                    !name.trim().is_empty()
+                        && name.chars().count() <= MAX_UPDATE_LABEL
+                        && plain(name, &[])
+                })
+                .ok_or_else(bad_labels)?;
+            if !seen.insert(name.to_lowercase()) {
+                return Err(invalid("A label is given twice."));
+            }
+            names.push(json!(name));
+        }
+        fields.insert("labels".into(), Value::Array(names));
+    }
+    if let Some(due) = text("due_string", bad_due_string)? {
+        if due.is_empty() {
+            fields.insert("due".into(), Value::Null);
+        } else {
+            let due = due.trim();
+            if due.is_empty() || due.chars().count() > MAX_DUE_STRING || !plain(due, &[]) {
+                return Err(bad_due_string());
+            }
+            fields.insert("due".into(), json!({"string": due}));
+        }
+    }
+    if let Some(deadline) = text("deadline", bad_deadline)? {
+        if deadline.is_empty() {
+            fields.insert("deadline".into(), Value::Null);
+        } else if model::valid_date(deadline) {
+            fields.insert("deadline".into(), json!({"date": deadline}));
+        } else {
+            return Err(bad_deadline());
+        }
+    }
+    let project = text("project_id", bad_project)?;
+    if project.is_some_and(|project| !model::valid_id(project)) {
+        return Err(bad_project());
+    }
+    let section = text("section_id", bad_section)?;
+    // A section implies its project, so only one destination goes to
+    // Todoist, as `item_move` requires.
+    let moved = match (project, section) {
+        (_, Some(section)) if model::valid_id(section) => Some(Move::Section(section.into())),
+        (Some(project), Some("")) | (Some(project), None) => Some(Move::Project(project.into())),
+        (None, Some("")) => {
+            return Err(invalid(
+                "Moving a task out of its section needs the project's id.",
+            ));
+        }
+        (_, Some(_)) => return Err(bad_section()),
+        (None, None) => None,
+    };
+    if fields.is_empty() && moved.is_none() {
+        return Err(invalid("The change has nothing to update."));
+    }
+    Ok(Update { id, fields, moved })
 }
 
 /// Whether Quick Add text has a `#project` token: `#` at the start or after
@@ -611,11 +881,9 @@ pub struct Add {
     pub text: String,
     pub due_date: Option<String>,
     pub project_id: Option<String>,
-    /// `"reply":"task"`: reply with the added task, not the snapshot.
-    pub short_reply: bool,
 }
 
-/// `{"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null,"reply"?:"task"}`.
+/// `{"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null}`.
 pub fn parse_add(request: &Map<String, Value>) -> Result<Add, Failure> {
     let text = request
         .get("text")
@@ -633,11 +901,6 @@ pub fn parse_add(request: &Map<String, Value>) -> Result<Add, Failure> {
                 _ => Err(invalid(error)),
             }
         };
-    let short_reply = match request.get("reply") {
-        None => false,
-        Some(Value::String(reply)) if reply == "task" => true,
-        _ => return Err(invalid("Unknown reply kind.")),
-    };
     Ok(Add {
         text: text.to_string(),
         due_date: optional("due_date", model::valid_date, "Enter a date as YYYY-MM-DD.")?,
@@ -646,7 +909,6 @@ pub fn parse_add(request: &Map<String, Value>) -> Result<Add, Failure> {
             model::valid_id,
             "That isn't a Todoist project id.",
         )?,
-        short_reply,
     })
 }
 
@@ -699,6 +961,247 @@ mod tests {
         }
     }
 
+    fn update(fields: Value) -> Result<Update, Failure> {
+        let mut entry = fields;
+        entry["op"] = json!("update");
+        entry["id"] = json!("T1");
+        match parse_changes(&map(json!({"commands": [entry]})))?.pop() {
+            Some(Edit::Update(update)) => Ok(update),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_fields_take_todoists_shape() {
+        let all = update(json!({
+            "content": "  Call Bob  ", "description": "line 1\nline 2\ttab", "priority": 4,
+            "labels": ["home", "Høst 2026"], "due_string": " every monday 9am ",
+            "deadline": "2026-12-01"
+        }))
+        .unwrap();
+        assert_eq!(
+            Value::Object(all.fields),
+            json!({"content": "Call Bob", "description": "line 1\nline 2\ttab", "priority": 4,
+                   "labels": ["home", "Høst 2026"], "due": {"string": "every monday 9am"},
+                   "deadline": {"date": "2026-12-01"}})
+        );
+        assert_eq!(all.moved, None);
+        // "" clears: the description to "", the date and the deadline to null.
+        let cleared =
+            update(json!({"description": "", "due_string": "", "deadline": "", "labels": []}))
+                .unwrap();
+        assert_eq!(
+            Value::Object(cleared.fields),
+            json!({"description": "", "due": null, "deadline": null, "labels": []})
+        );
+        // Bounds, at the limit.
+        let longest = update(json!({
+            "content": "é".repeat(500), "description": "é".repeat(MAX_DESCRIPTION),
+            "labels": (0..MAX_UPDATE_LABELS).map(|n| format!("{n:0>60}")).collect::<Vec<_>>(),
+            "due_string": "x".repeat(200), "priority": 1
+        }));
+        assert!(longest.is_ok(), "{longest:?}");
+    }
+
+    #[test]
+    fn update_places_are_one_destination() {
+        let place = |fields: Value| update(fields).unwrap().moved;
+        assert_eq!(
+            place(json!({"project_id": "P2"})),
+            Some(Move::Project("P2".into()))
+        );
+        assert_eq!(
+            place(json!({"project_id": "P2", "section_id": ""})),
+            Some(Move::Project("P2".into()))
+        );
+        assert_eq!(
+            place(json!({"section_id": "S1"})),
+            Some(Move::Section("S1".into()))
+        );
+        assert_eq!(
+            place(json!({"project_id": "P2", "section_id": "S1"})),
+            Some(Move::Section("S1".into())),
+            "the section implies its project"
+        );
+        // A move alone is a change.
+        assert!(
+            update(json!({"section_id": "S1"}))
+                .unwrap()
+                .fields
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn update_shapes_are_refused_with_their_message() {
+        for (bad, message) in [
+            (json!({}), "The change has nothing to update."),
+            (json!({"title": "x"}), "Unknown change."),
+            (
+                json!({"content": "x", "date": "2026-11-17"}),
+                "Unknown change.",
+            ),
+            (json!({"content": "   "}), "Enter a task."),
+            (json!({"content": 5}), "Enter a task."),
+            (
+                json!({"content": "é".repeat(501)}),
+                "A task can have at most 500 characters.",
+            ),
+            (
+                json!({"content": "a\nb"}),
+                "A task can't have line breaks or other control characters.",
+            ),
+            (
+                json!({"content": "a\u{0}b"}),
+                "A task can't have line breaks or other control characters.",
+            ),
+            (
+                json!({"content": "a\u{85}b"}),
+                "A task can't have line breaks or other control characters.",
+            ),
+            (
+                json!({"description": "x".repeat(MAX_DESCRIPTION + 1)}),
+                "A description can have at most 16383 characters.",
+            ),
+            (
+                json!({"description": null}),
+                "A description can have at most 16383 characters.",
+            ),
+            (
+                json!({"description": "a\u{1b}[31m"}),
+                "A description can't have control characters other than line breaks and tabs.",
+            ),
+            (json!({"priority": 0}), "Pick a priority from 1 to 4."),
+            (json!({"priority": 5}), "Pick a priority from 1 to 4."),
+            (json!({"priority": 2.5}), "Pick a priority from 1 to 4."),
+            (json!({"priority": "4"}), "Pick a priority from 1 to 4."),
+            (
+                json!({"labels": "home"}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": (0..=MAX_UPDATE_LABELS).map(|n| format!("l{n}")).collect::<Vec<_>>()}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": [""]}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": ["  "]}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": ["x".repeat(61)]}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": ["a\tb"]}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": [5]}),
+                "Give at most 50 labels of 1 to 60 characters each, without control characters.",
+            ),
+            (
+                json!({"labels": ["Home", "home"]}),
+                "A label is given twice.",
+            ),
+            (
+                json!({"due_string": "   "}),
+                "Enter the date in words, at most 200 characters.",
+            ),
+            (
+                json!({"due_string": "x".repeat(201)}),
+                "Enter the date in words, at most 200 characters.",
+            ),
+            (
+                json!({"due_string": "tomorrow\n9am"}),
+                "Enter the date in words, at most 200 characters.",
+            ),
+            (
+                json!({"due_string": null}),
+                "Enter the date in words, at most 200 characters.",
+            ),
+            (
+                json!({"deadline": "2026-02-30"}),
+                "Enter a deadline as YYYY-MM-DD.",
+            ),
+            (
+                json!({"deadline": "tomorrow"}),
+                "Enter a deadline as YYYY-MM-DD.",
+            ),
+            (json!({"deadline": null}), "Enter a deadline as YYYY-MM-DD."),
+            (
+                json!({"project_id": ""}),
+                "That isn't a Todoist project id.",
+            ),
+            (
+                json!({"project_id": "../P"}),
+                "That isn't a Todoist project id.",
+            ),
+            (json!({"project_id": 2}), "That isn't a Todoist project id."),
+            (
+                json!({"section_id": "a b"}),
+                "That isn't a Todoist section id.",
+            ),
+            (
+                json!({"section_id": null}),
+                "That isn't a Todoist section id.",
+            ),
+            (
+                json!({"section_id": ""}),
+                "Moving a task out of its section needs the project's id.",
+            ),
+        ] {
+            let failure = update(bad.clone()).unwrap_err();
+            assert_eq!(
+                (failure.code.as_str(), failure.message.as_str()),
+                ("INVALID_ARGUMENT", message),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_update_is_an_item_update_and_a_move() {
+        let edit = |id: &str, fields: Value| {
+            let mut entry = fields;
+            entry["op"] = json!("update");
+            entry["id"] = json!(id);
+            parse_changes(&map(json!({"commands": [entry]})))
+                .unwrap()
+                .pop()
+                .unwrap()
+        };
+        assert_eq!(
+            edit("T1", json!({"content": "x", "project_id": "P2"})).commands(),
+            [
+                ("item_update", json!({"id": "T1", "content": "x"})),
+                ("item_move", json!({"id": "T1", "project_id": "P2"}))
+            ]
+        );
+        assert_eq!(
+            edit("T1", json!({"section_id": "S1"})).commands(),
+            [("item_move", json!({"id": "T1", "section_id": "S1"}))]
+        );
+        assert_eq!(
+            edit("T1", json!({"priority": 2})).commands(),
+            [("item_update", json!({"id": "T1", "priority": 2}))]
+        );
+        // Out of the section to the project's root.
+        assert_eq!(
+            edit("T2", json!({"project_id": "P2", "section_id": ""})).commands(),
+            [("item_move", json!({"id": "T2", "project_id": "P2"}))]
+        );
+        // A requested place is sent even when the cache says the task is
+        // there already: the cache may be stale.
+        assert_eq!(
+            edit("T2", json!({"project_id": "P2", "section_id": "S1"})).commands(),
+            [("item_move", json!({"id": "T2", "section_id": "S1"}))]
+        );
+    }
+
     #[test]
     fn an_add_is_validated() {
         assert_eq!(
@@ -707,13 +1210,7 @@ mod tests {
                 text: "Milk #Shop".into(),
                 due_date: None,
                 project_id: None,
-                short_reply: false
             }
-        );
-        assert!(
-            parse_add(&map(json!({"text": "x", "reply": "task"})))
-                .unwrap()
-                .short_reply
         );
         let full = parse_add(&map(
             json!({"text": "é".repeat(500), "due_date": "2026-11-17", "project_id": "P2"}),
@@ -726,9 +1223,6 @@ mod tests {
             json!({"text": "é".repeat(501)}),
             json!({"text": "x", "due_date": "tomorrow"}),
             json!({"text": "x", "project_id": 5}),
-            json!({"text": "x", "reply": "snapshot"}),
-            json!({"text": "x", "reply": null}),
-            json!({"text": "x", "reply": true}),
         ] {
             assert_eq!(
                 parse_add(&map(bad.clone())).unwrap_err().code,

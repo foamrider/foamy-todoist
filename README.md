@@ -1,11 +1,12 @@
 # Foamy Todoist
 
 An Omarchy bar plugin for Todoist: the tasks left today in the bar, and a
-popup with your Inbox, Today, Upcoming and (in the wide panel) each of your
-projects. Add tasks with Todoist's own Quick Add syntax, complete them with
-a click or Space, and open any of them in Todoist.
+panel with your Inbox, Today, Upcoming and (in the Wide size) each of
+your projects. Add tasks with Todoist's own Quick Add syntax,
+complete them with a click or Space, and change a task's text, date,
+deadline, project, priority, labels and description in the panel.
 
-![Foamy Todoist: the Today view with the Inbox, Today and Upcoming tabs, overdue tasks and the Add task row](preview.png)
+![Foamy Todoist: the Today view with the Inbox, Today and Upcoming tabs, overdue tasks, and + and Search in the band](preview.png)
 
 The bar shows the Todoist mark and, in the bar's urgent colour, the number
 of tasks left today (overdue plus due today), like Foamy Zendesk's count.
@@ -15,17 +16,29 @@ many of them are overdue.
 
 ## The panel
 
-The band at the top holds the Todoist mark, the title, the current view and
-its count, a **Search** button and ⋯ (**Open in Todoist** opens the current
-view in the browser; **Settings** is last). In the standard panel a row of
-tabs under it picks **Inbox**, **Today** or **Upcoming**, with their counts
-(Today's in red while something is overdue). The **wide** panel (560 px,
-where the screen has room) has no tabs: a rail on the left lists the three
-views, then **My projects** (sub-projects indented one step) with their
-open tasks.
+Two sizes (**Size** in Settings), both the popup under the bar:
 
-The list starts with a quiet **Add task** row (key `a`); nothing has the
-cursor when the popup opens.
+- **Small**: 420 px. A row of tabs under the band picks **Inbox**,
+  **Today** or **Upcoming**, with their counts (Today's in red while
+  something is overdue).
+- **Wide**: no tabs. A rail on the left lists the views (with **Week** after
+  Upcoming), then **My projects** (sub-projects indented one step) with
+  their open tasks; the list is beside it, and a pane on the right shows
+  the selected task's details (a click on it, or the keys resting on it)
+  or, with none selected, an overview of the view (see "The overview").
+  The popup is always 880 px, with or without a selection, in the Week
+  view and on its settings page (whose sections keep the 560 px column,
+  centred), so it never changes width while open. It is as tall as its
+  content up to 70% of the screen (the list scrolls inside). Where the
+  screen has no room for 880 px beside the popup's margins, it opens Small
+  instead.
+
+The band at the top holds the Todoist mark, the title, the current view and
+its count, and three buttons: **+** (add a task, `a`), **Search** (`/`) and
+⋯ (**Open in Todoist** opens the current view in the browser; **Settings**
+is last). In Wide, while the details pane shows a task, the middle button
+is **Open in Todoist** for that task and **Search** is the first entry in
+⋯ (`/` still searches). Nothing has the cursor when the panel opens.
 
 - **Inbox**: the Inbox project in Todoist's order, subtasks under their
   parent, sections with a header.
@@ -43,8 +56,17 @@ cursor when the popup opens.
   before the time. Today's sections show their counts on the right too. The band counts the tasks of the next seven days. A task
   added in Upcoming gets the day of the day group the cursor was last in,
   else tomorrow.
-- **A project** (wide): its tasks without a section first, then each
+- **A project** (Wide): its tasks without a section first, then each
   section.
+- **Week** (Wide): four columns, **Overdue**, **Today**, **Tomorrow** and
+  **Later** (the seven days after tomorrow, each day under a small
+  heading). A card shows the task, its time and its project. ↑/↓ move in a
+  column, ←/→ across (← from the first column goes to the rail), Space
+  completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move it a
+  day earlier or later (never before today; recurring tasks stay, as with
+  `t`). Enter, `e` or a click opens the details over the right part of the
+  view; Esc closes them. Small shows Today instead, and so does **Open on:
+  Last view**.
 
 Each row has a ring in the priority's colour (p1 red, p2 orange, p3 accent,
 p4 grey), the task (Markdown links show their text), and a line with what
@@ -58,37 +80,52 @@ one line tall; the text, the ring and the time are centred either way.
 
 **Completing**: click the ring or press Space. The task stays, struck
 through, with **Undo**; four seconds after the last completion every
-pending one is sent to Todoist in one request (at once when the popup
+pending one is sent to Todoist in one request (at once when the panel
 closes). Undo only takes it back here, so nothing is sent. If Todoist
-refuses a completion the task comes back and the line under the field says
+refuses a completion the task comes back and the line under the band says
 why. When the request fails as a whole (no answer, the network), Todoist may
 or may not have done it, so those tasks show dimmed and can't be completed
 or moved again until the next refresh, which starts at once. A recurring
 task moves to its next date, as in Todoist.
 
-**Adding**: click the **Add task** row, press Enter or Space on it, or
-press `a` anywhere: the row turns into a field in its place, with the view's
-date in a chip and "Enter adds · Esc closes" under it. Enter adds the task
-and keeps the field open for the next one; the task appears when Todoist has
-answered (a spinner shows meanwhile). An error shows under the field and
-keeps the text. When the task was sent but no answer came back (a timeout,
-a lost connection), Todoist may have added it: the line says so, the text
-stays, and the list refreshes at once, so you can check before pressing
-Enter again. Esc clears the text, and on an empty field closes it back to
-the row. An empty field also closes when it loses the keys (a click on a
-tab, a task, a button, ↓ into the list); one with text stays open. Text
-you've typed is never thrown away by moving around: it stays when you
-switch views, Tab doesn't leave a field with text in it (Tab from an empty
-field goes to the next panel), and when the popup closes the draft is kept
-for this session and comes back, with the caret at its end, the next time
-the popup opens. Adding the task or clearing it with Esc ends the draft. A
-suggestion that would make the text longer than 500 characters isn't put
-in (the line under the field says so). At most 500 characters. The text
-goes to Todoist's Quick Add (see below).
+**Adding**: click **+** or press `a` anywhere: a field grows out of the
+button across the band (the band keeps its height, and nothing moves under
+it). Its placeholder says where the task goes: "Add a task to the Inbox…",
+"for today…", for Upcoming's day, or to the project you are looking at;
+that date or project applies when the text gives none. The Quick Add parts
+show in colour as you type: `#project`, `/section` and `+person` in the
+accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
+the urgent colour, `{deadline}` and ` // description` muted; dates are left
+for Todoist to read and aren't coloured. While the field is open the footer
+shows its keys:
+
+- **Enter** does what **After adding a task** says. **Close the panel**
+  (the default) sends the task and closes the field and the panel. **Keep
+  the field open** sends it and keeps the caret in the field, which empties
+  once Todoist has the task.
+- **Shift+Enter** does the other one.
+- **Esc** clears the text, and on an empty field closes it (the field
+  shrinks back into **+**).
+
+The task appears when Todoist has answered (a spinner in the field shows
+meanwhile). An error shows under the band and keeps the text. When the task
+was sent but no answer came back (a timeout, a lost connection), Todoist may
+have added it: the line says so, the text stays, and the list refreshes at
+once, so you can check before sending it again. An empty field also closes
+when it loses the keys (a click on a tab, a task, ↓ into the list); one with
+text stays open. Text you've typed is never thrown away by moving around: it
+stays when you switch views, Tab doesn't leave a field with text in it (Tab
+from an empty field goes to the next panel), and when the panel closes, also
+after Enter closed it before Todoist answered, the draft is kept for this
+session and comes back, with the caret at its end and the error if the add
+failed, the next time the panel opens. Adding the task or clearing it with
+Esc ends the draft. A suggestion that would make the text longer than 500
+characters isn't put in (the line under the band says so). At most 500
+characters. The text goes to Todoist's Quick Add (see below).
 
 **Suggestions**: typing `#` at the start of a word lists your projects (the
 Inbox too), `@` your labels (your personal ones and the shared labels on
-open tasks). The list drops from the field and narrows as you type: names
+open tasks). The list drops from the band and narrows as you type: names
 that start with what you typed first, then names that contain it, at most
 six. ↓/↑ pick one, Enter or Tab (or a click) puts it in, as `#Name` or
 `@name` with spaces written `\ ` the way Quick Add reads them, followed by
@@ -103,24 +140,114 @@ labels, sections or people; the plugin escapes them the same way, which is
 not verified against Todoist yet. Esc closes only the list. With the list
 closed, Enter adds the task as before. Search never shows suggestions.
 
-**Search** (the button, or `/`): the add row turns into a search field
-that searches every open task by text, project name and labels, shown
-grouped by project. Esc clears the text, then leaves search. Leaving
-search (Esc, another view, the button again) puts back an add draft you
-had started before it, the caret at its end; without one, the Add row
-returns.
+**Search** (the button, or `/`): the same field grows out of **Search** and
+searches every open task by text, project name and labels; a word that
+starts with `@` matches labels only (a label whose name starts with it;
+write a space in a label's name as `\ `, as in Quick Add). The results
+replace the list, grouped by project. Esc clears the text, then leaves
+search. Leaving search (Esc, another view) puts back an add draft you had
+started before it, the caret at its end; without one, the field closes.
+
+**The overview** (Wide): with no task selected, the pane sums up the
+view. Parts with nothing to show are left out; a click on a part (or Tab
+to it and Enter) acts on it.
+
+- **Today**: the date, how many tasks are left today and how many are
+  overdue, **Next** (the next task with a time still ahead today, and how
+  far ahead), and **Today's times**: the hours from 08 to 18 (wider when a
+  task is outside them), each task with a time as a block at its time, and
+  a red line at now; under it, how many tasks have no time. Tasks at the
+  same time share the width, three side by side at most: the rest show
+  as one "+N more" block. A block or Next selects that task ("+N more"
+  the first of its tasks, in the list beside the others).
+- **A project**: **Sections** with their task counts ("(No section)" for
+  the tasks without one) and its sub-projects: a section scrolls the list
+  to it, a sub-project opens it. **When**: one bar of overdue, today, this
+  week (to the end of the calendar week), later and no date, with a
+  legend. **Labels**: the labels on its tasks, the most used first; a
+  label searches for it (`@label`). A long label's name is shortened with
+  "…" (in full when you point at it).
+- **Inbox** and **search**: When and Labels, as for a project.
+- **Upcoming**: the next seven days as columns, a bar each by its number
+  of tasks; the day a new task goes to is lit (tomorrow, or the day you
+  picked). A day scrolls the list to it. **Next deadline**: the nearest
+  deadline from today on (selects its task), then how many tasks have no
+  date (Upcoming doesn't list them).
+
+**Editing**: a click on a task, Enter or `e` opens it in the editor. In
+Small the editor takes the panel's place, like the settings page:
+**Back** (or Esc, or ← on Back) returns to the list with the task under the
+cursor. Its band says "Saving…" while a change is sent. In Wide it is
+the details pane on the right (the left in right-to-left languages), which
+shows the selected task (the one the keys or a click moved to; pointing at
+a row doesn't change it): `e` or a click on a part puts the caret there,
+Tab moves through the parts, and Esc gives the keys back to the list.
+While a change is sent, the footer says "Saving…" in place of "Updated …",
+then "Saved" for two seconds. A click on the list's space that isn't a row
+(below the last row, a heading, the Week view's empty column space), or
+Esc in the list, clears the selection: no row is selected and the pane
+shows the overview again (over the Week view it closes); what you typed in
+the pane is saved first.
+A task completed or deleted elsewhere closes the pane too. A click on
+empty space anywhere in the panel takes the keys from a text field, which
+saves as when you leave it.
+
+The editor reads like the task, as Todoist's task view does: the ring and
+the title, the description under it, then the task's **Project**, **Date**,
+**Deadline**, **Priority** and **Labels**, each under a small caption. Each
+part is edited where it is. Each property is one click target, its caption and value
+together, as in Todoist: a click anywhere in it, or Enter on it (one Tab
+stop each), changes it.
+
+- The **title** and the **description** look like text; a click (or Tab)
+  makes them fields. The description is read from Todoist when the editor
+  opens the task ("Loading…" meanwhile; a failed read says why, with
+  **Retry**). One that is longer than the editor takes (16 384 characters)
+  is shown, not edited: open it in Todoist.
+- **Date** and **Deadline**: a click on the section (or Enter on it) opens
+  a one-line field. The date is written as in Todoist ("tomorrow 9am",
+  "every Monday") and Todoist reads it; the field starts with Todoist's
+  own words for the date (a repeating task's rule). A deadline is
+  `YYYY-MM-DD`. Enter saves, Esc cancels; an empty field removes the date
+  or deadline. Without one, the caption shows a **+**.
+  The calendar icon has the date's colour (overdue, today, tomorrow, this
+  week).
+- **Project** (and section), **Priority** (P1 to P4, flags in the rows'
+  colours) and **Labels** (× takes one off; a click elsewhere in the
+  section, marked **+**, adds one of your personal labels) open a menu and
+  save when you pick.
+- A text field saves when it loses the keys, or on Enter (Ctrl+Enter in
+  the description); Esc in it drops what you typed there. Each save sends
+  only the part that changed. Leaving the task (another task, Back, another
+  view or size, closing the panel) saves what you typed first; a change
+  that can't be sent then, such as a deadline that isn't a day, is said on
+  the list's error line. A save Todoist refuses shows why under the part,
+  with **Retry**, and keeps your text. Only what you typed is sent: a field
+  you haven't changed follows the task when it changes in Todoist (also
+  while it has the caret); one you changed keeps your text, and saving it
+  replaces Todoist's.
+- A task with more labels than the panel keeps (50) has its labels shown,
+  not edited.
+- The **ring** beside the title completes the task. **Open in Todoist** is
+  an icon in the band: the page's, or in Wide the panel's (in Search's
+  place).
+  Completing the task (here, or with its row's ring or Space) saves what
+  you typed first. A task completed or deleted elsewhere meanwhile: the
+  page says it is no longer in Todoist.
+
+Ctrl+O on a task opens it in Todoist.
 
 The footer has a **Todoist** button on the left that opens the current
 view in Todoist (with the open command, see Settings); when that fails, the
 footer says so until a launch works. On the right it shows when the tasks
 were last updated and **Refresh**. When a
 refresh fails the tasks stay as they were, the footer keeps the time they
-are from, and the line under the field says what failed. When Todoist asks
+are from, and the line under the band says what failed. When Todoist asks
 to slow down, no refresh, add or change is sent until the time it gave has
 passed; adds and changes asked for meanwhile fail at once and say so. At
 most 20 requests wait in line; more are refused with "Too many changes are
 waiting". A very large account (over 20 000 open tasks, 2 000 projects or
-5 000 sections) shows only part of it, and a muted line under the field
+5 000 sections) shows only part of it, and a muted line under the band
 says so (an empty view then says that too, not "Nothing planned").
 
 ## Quick Add syntax
@@ -129,8 +256,8 @@ The text you add goes to Todoist's own Quick Add, which reads it the way the
 Todoist apps do: `#Project`, `/Section`, `@label`, `p1` to `p4`, dates in
 plain words in your account's language ("tomorrow 9am", "every Monday"),
 `{deadline}`, `!reminder` (`!30m`), `+assignee` in a shared project, and
-` // description` at the end. The view's date (today in Today, the chip's
-day in Upcoming) applies only when the text gives no date, and the
+` // description` at the end. The view's date (today in Today, the day
+the placeholder names in Upcoming) applies only when the text gives no date, and the
 project's view moves the task there only when the text names no project: a
 `#` at the start or after a space, followed by a non-space
 (`Buy milk #Inbox` stays in the Inbox; `C#` and `email#1` don't count).
@@ -141,22 +268,30 @@ project's view moves the task there only when the text names no project: a
 |---|---|---|
 | Alt+1, Alt+2, Alt+3 | anywhere, also while typing | Inbox, Today, Upcoming |
 | 1, 2, 3 | the list | the same |
-| ↓ | nothing selected | the **Add task** row |
-| Enter, Space | the **Add task** row | open the add field in its place |
+| ↓ | nothing selected | the first row |
 | a | anywhere (signed in) | open the add field |
-| Enter | the field | add the task, keep the field open (in search: go to the results) |
-| ↓ / ↑ | the field | the first row / the tabs (the rail when wide) |
+| Enter, Shift+Enter | the add field | add the task; close the panel or keep the field open, as **After adding a task** says (Shift: the other) |
+| Enter | the search field | go to the results |
+| ↓ | the field | the first row |
 | Esc | the field | clear the text; when empty close the field (and leave search) |
 | ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list |
-| ↑ ↓ j k | the list | move; ↑ on the first row goes to the **Add task** row, ↑ from there to the tabs |
+| ↑ ↓ j k | the list | move; ↑ on the first row goes to the tabs (the rail), ↑ from there to ⋯, Search and + |
 | Space | a row | complete (again: undo) |
-| Enter | a row | open the task in Todoist |
+| Enter, e | a row | open the task in the editor (Wide: the caret in the details pane) |
+| Ctrl+O | a row | open the task in Todoist |
 | t | a row | move to tomorrow (not for recurring tasks) |
 | / | the list | search |
 | ← → | the tabs | pick a view (Enter or Space shows it) |
-| ↑ ↓, Enter | the rail (wide) | pick a view or project; ← from the list goes to the rail |
+| ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |
+| ↑ ↓ ← → | the Week view | move in a column, across columns |
+| Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
+| Enter, Space | a value in the editor | change it (a menu, or the date field) |
+| Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
+| Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts) |
+| Enter, Space | a part of the overview | what a click does |
+| Esc | the overview | the keys back to the list |
 | r, s | the list | refresh, Settings |
-| Esc | the list | close |
+| Esc | the list | close (Wide: close the details pane first; in a list that clears the selection) |
 | Tab, Shift+Tab | the list, or an empty field | the next or previous panel (in a field with text: nothing) |
 
 ## Settings
@@ -167,7 +302,10 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
   Find it in Todoist under Settings → Integrations → Developer (**Open
   Todoist settings** goes there). The token is checked with Todoist before
   it is stored. Signed in, the page shows who, and **Sign out**.
-- **Panel width**: Standard or Wide.
+- **Size**: Small (default) or Wide (see "The panel"). A **Large** saved by
+  an earlier version opens as Wide.
+- **After adding a task**: Close the panel (default) or Keep the field
+  open: what Enter in the add field does; Shift+Enter does the other.
 - **Open on**: Today, Inbox, Upcoming or Last view (kept until the shell
   restarts).
 - **Tasks assigned to others**: Hide (default) or Show. A task is someone
@@ -175,7 +313,7 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
   yours). Hidden, they stay out of Today, Upcoming and the Inbox, the bar
   number and its tooltip, and the Inbox/Today/Upcoming counts. A project
   view, search and the projects' counts in the rail always show every task.
-- **Open command**: what opens Todoist links (the footer button, Enter on
+- **Open command**: what opens Todoist links (the footer button, Ctrl+O on
   a task, **Open in Todoist**). Empty (**Browser (default)**) uses
   `xdg-open`. Otherwise, for example `omarchy-launch-or-focus-webapp
   Todoist {url}`: the command is split on spaces and run without a shell
@@ -185,36 +323,21 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
   session, so what it opens stays when the shell restarts. Only
   `https://app.todoist.com/` links are ever opened.
 - **Show in the bar**: Tasks left today or Icon only.
-- **Refresh every**: 1 to 30 minutes (5 by default). The popup also
+- **Refresh every**: 1 to 30 minutes (5 by default). The panel also
   refreshes when it opens and the data is older than 30 seconds. After a
   failure the wait doubles, up to 30 minutes, and never ends before
   Todoist's own retry time when it asks to slow down.
 
-IPC (`omarchy-shell foamy.todoist <function>`): `toggle`, `add` (opens the
-popup with the add field open and the caret in it), `refresh`,
-`openTask <id>` (opens that task in Todoist with the open command, as Enter
-on a task does; an id that isn't a Todoist id is refused and logged) and
-`openInbox` (the Inbox, the same way).
+IPC (`omarchy-shell foamy.todoist <function>`): `toggle` (the panel),
+`add` (opens the panel with the add field open and the caret in it) and
+`refresh`. To open the panel or the add field with keys, bind them in
+Hyprland, for example in `~/.config/hypr/bindings.conf` (pick your own
+keys in place of `MODS` and `KEY`):
 
-## Other plugins
-
-Foamy Menu adds tasks through this plugin's helper,
-`bin/<arch>/foamy-todoist-helper`, so the token, the cache and the requests
-to Todoist stay here. Every reply has `"contract": 1`, the version of the
-replies other plugins read. The commands they use:
-
-- `names`: the projects, sections, labels and people in the cache, for
-  suggestions, and the open tasks (at most 1 000, dated ones first, each
-  cut to 200 characters and 10 labels), for the launcher's task search. No network; empty lists when signed out or
-  before the first sync.
-- `add` with `"reply": "task"`: adds as the panel does, but replies with the
-  added task and its project instead of every task.
-- `notify`: a desktop notification about an add, through
-  `omarchy-notification-send`, with the texts the caller translated. Its
-  button runs `openTask` or `openInbox` above. The helper waits at most 2
-  seconds for it.
-
-The requests and replies are described at the top of `native/src/main.rs`.
+```ini
+bindd = MODS, KEY, Todoist, exec, omarchy-shell foamy.todoist toggle
+bindd = MODS SHIFT, KEY, Add a Todoist task, exec, omarchy-shell foamy.todoist add
+```
 
 ## Privacy
 
@@ -226,14 +349,11 @@ The requests and replies are described at the top of `native/src/main.rs`.
   sections, your personal labels, the names and emails of the people you
   share projects with (for `+` suggestions), your name, email and Inbox id, and
   Todoist's sync token, so a refresh only fetches what changed. Signing out
-  removes it.
+  removes it. Descriptions are not kept: the editor reads the shown task's
+  description from Todoist and holds only that one, in memory, while it
+  shows the task.
 - The only server contacted is `api.todoist.com`. Opening a task or view
   hands an `https://app.todoist.com/app/…` link to your browser.
-- When Foamy Menu asks for a notification (`notify`), the task's text,
-  project, date and labels, or the text you typed, are in the command line
-  of `omarchy-notification-send` while it runs, so other programs of yours
-  can see them in the process list for that moment. Nothing else the
-  helper runs gets task text on its command line.
 
 ## Languages
 

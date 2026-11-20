@@ -23,18 +23,6 @@ pub const MAX_LABEL_RECORDS: usize = 2_000;
 pub const MAX_COLLABORATORS: usize = 2_000;
 /// Active "user in shared project" pairs kept.
 pub const MAX_MEMBERSHIPS: usize = 20_000;
-/// Label names `names` lists: the personal ones, then names from tasks
-/// (shared labels) while there is room.
-pub const MAX_LABEL_NAMES: usize = 2_000;
-/// Tasks `names` lists for the launcher's task search; more sets `truncated`.
-/// The launcher keeps them in the shell's memory and searches them on every
-/// keystroke, so the list stays small: about 2.6 MB with every task, text and
-/// label at its longest, a few hundred bytes per task in practice.
-pub const MAX_SEARCH_TASKS: usize = 1_000;
-/// A searched task's text, cut ending in "…"; enough to find and show it.
-pub const MAX_SEARCH_CONTENT: usize = 200;
-/// Labels kept per searched task.
-pub const MAX_SEARCH_LABELS: usize = 10;
 /// Task content longer than this (in characters) is cut, ending in "…".
 pub const MAX_CONTENT: usize = 500;
 const MAX_NAME: usize = 200;
@@ -42,9 +30,9 @@ const MAX_LABEL: usize = 100;
 const MAX_LABELS: usize = 50;
 const MAX_DUE_STRING: usize = 200;
 /// 2: labels; 3: collaborators and shared projects; 4: tasks' assignees
-/// (`responsible_uid`). An older cache keeps only its user, so the next
-/// sync is a full one that brings them.
-const CACHE_VERSION: u64 = 4;
+/// (`responsible_uid`); 5: tasks' deadlines. An older cache keeps only its
+/// user, so the next sync is a full one that brings them.
+const CACHE_VERSION: u64 = 5;
 
 /// A Todoist id: 1–64 ASCII letters, digits, `_` or `-`.
 pub fn valid_id(text: &str) -> bool {
@@ -169,19 +157,42 @@ fn due(record: &Value) -> Result<Value, ()> {
     }
 }
 
-fn labels(record: &Value) -> Vec<String> {
-    record
+/// A deadline: Todoist's `{"date":"YYYY-MM-DD","lang":…}` (no time, never
+/// recurring), or the cache's `"YYYY-MM-DD"`; kept as the date or null.
+fn deadline(record: &Value) -> Result<Value, ()> {
+    match record.get("deadline") {
+        None | Some(Value::Null) => Ok(Value::Null),
+        Some(Value::String(date)) if valid_date(date) => Ok(json!(date)),
+        Some(deadline @ Value::Object(_)) => string(deadline, "date")
+            .filter(|date| valid_date(date))
+            .map(|date| json!(date))
+            .ok_or(()),
+        Some(_) => Err(()),
+    }
+}
+
+/// The task's labels, at most MAX_LABELS, and whether some were left out.
+fn labels(record: &Value) -> (Vec<String>, bool) {
+    let names: Vec<&str> = record
         .get("labels")
         .and_then(Value::as_array)
         .map(|list| {
             list.iter()
                 .filter_map(Value::as_str)
                 .filter(|label| !label.is_empty())
-                .take(MAX_LABELS)
-                .map(|label| cap(label, MAX_LABEL))
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let kept = names
+        .iter()
+        .take(MAX_LABELS)
+        .map(|label| cap(label, MAX_LABEL))
+        .collect();
+    // A cached task comes through here again on load with the kept 50:
+    // its saved marker still says the list is partial.
+    let cut =
+        names.len() > MAX_LABELS || record.get("labels_truncated") == Some(&Value::Bool(true));
+    (kept, cut)
 }
 
 pub fn normalize_task(record: &Value) -> Change {
@@ -193,7 +204,8 @@ pub fn normalize_task(record: &Value) -> Change {
     }
     let build = || -> Result<Value, ()> {
         let priority = record.get("priority").and_then(Value::as_i64).unwrap_or(1);
-        Ok(json!({
+        let (labels, labels_cut) = labels(record);
+        let mut task = json!({
             "id": id,
             "content": cap(string(record, "content").ok_or(())?, MAX_CONTENT),
             "project_id": id_field(record, "project_id").ok_or(())?,
@@ -201,13 +213,20 @@ pub fn normalize_task(record: &Value) -> Change {
             "parent_id": optional_id(record, "parent_id")?,
             "priority": if (1..=4).contains(&priority) { priority } else { 1 },
             "due": due(record)?,
-            "labels": labels(record),
+            "deadline": deadline(record)?,
+            "labels": labels,
             "child_order": integer(record, "child_order"),
             "day_order": integer(record, "day_order"),
             // Who the task is assigned to (shared projects); anything that
             // isn't an id is no one, never a reason to drop the task.
             "responsible_uid": optional_id(record, "responsible_uid").unwrap_or(Value::Null),
-        }))
+        });
+        // Only on the rare task with more labels than kept: the list is
+        // partial, so an editor must not save it back as the whole list.
+        if labels_cut {
+            task["labels_truncated"] = json!(true);
+        }
+        Ok(task)
     };
     match build() {
         Ok(task) => Change::Keep(id, task),
@@ -397,9 +416,9 @@ impl State {
         let value: Value = serde_json::from_slice(data).ok()?;
         match value.get("version").and_then(Value::as_u64) {
             Some(CACHE_VERSION) => {}
-            // Written before labels or collaborators: only the user is
-            // kept; a full sync follows.
-            Some(1..=3) => {
+            // Written before labels, collaborators, assignees or deadlines:
+            // only the user is kept; a full sync follows.
+            Some(1..=4) => {
                 let mut state = State::empty();
                 state.user = value.get("user").and_then(normalize_user);
                 return Some(state);
@@ -557,206 +576,6 @@ impl State {
         Value::Object(members)
     }
 
-    /// The Inbox's id: the user's, else the project marked as the Inbox.
-    fn inbox_project_id(&self) -> Option<&str> {
-        self.user
-            .as_ref()
-            .and_then(|user| string(user, "inbox_project_id"))
-            .or_else(|| {
-                self.projects
-                    .values()
-                    .find(|project| flag(project, "inbox"))
-                    .and_then(|project| string(project, "id"))
-            })
-    }
-
-    /// The label names to suggest, as the panel's `Model.labelList` builds
-    /// them: the personal labels in `item_order`, then the other names on
-    /// listed tasks (shared labels exist only there) by name, each name
-    /// once ignoring case (a personal one wins). At most
-    /// [`MAX_LABEL_NAMES`] in all: the shared names fill the room the
-    /// personal ones leave, the first by name; the bool says whether some
-    /// were cut.
-    fn label_names(&self) -> (Vec<String>, bool) {
-        let mut personal: Vec<&Value> = self.labels.values().collect();
-        personal.sort_by_key(|label| {
-            let name = string(label, "name").unwrap_or("");
-            (integer(label, "item_order"), name.to_lowercase(), name)
-        });
-        let mut seen = std::collections::BTreeSet::new();
-        let mut names = Vec::new();
-        for name in personal.iter().filter_map(|label| string(label, "name")) {
-            if seen.insert(name.to_lowercase()) {
-                names.push(name.to_string());
-            }
-        }
-        // Keyed by the lowercase name; the first spelling seen stays. Only
-        // the first `room` keys are kept while reading, so up to 20 000
-        // tasks with 50 labels each never build a map of them all.
-        let room = MAX_LABEL_NAMES.saturating_sub(names.len());
-        let mut shared = BTreeMap::new();
-        let mut cut = false;
-        for task in self.listed_tasks() {
-            let labels = task.get("labels").and_then(Value::as_array);
-            for name in labels.into_iter().flatten().filter_map(Value::as_str) {
-                let key = name.to_lowercase();
-                if seen.contains(&key) {
-                    continue;
-                }
-                shared.entry(key).or_insert_with(|| name.to_string());
-                if shared.len() > room {
-                    shared.pop_last();
-                    cut = true;
-                }
-            }
-        }
-        names.extend(shared.into_values());
-        (names, cut)
-    }
-
-    /// Each project's place in the panel's order: the Inbox first, then the
-    /// project tree as `Model.projectTree` walks it (roots, each followed by
-    /// its subprojects, siblings by `child_order`, name, id). Projects the
-    /// tree never reaches (a parent cycle, another project flagged as the
-    /// Inbox) come last, by id, so every listed project has a rank.
-    fn project_ranks(&self) -> BTreeMap<&str, usize> {
-        let inbox = self.inbox_project_id();
-        let mut roots = Vec::new();
-        let mut children: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
-        for project in self.projects.values() {
-            if string(project, "id") == inbox || flag(project, "inbox") {
-                continue;
-            }
-            let parent = string(project, "parent_id")
-                .filter(|parent| self.projects.contains_key(*parent) && Some(*parent) != inbox);
-            match parent {
-                Some(parent) => children.entry(parent).or_default().push(project),
-                None => roots.push(project),
-            }
-        }
-        fn key<'a>(project: &&'a Value) -> (i64, &'a str, &'a str) {
-            (
-                integer(project, "child_order"),
-                string(project, "name").unwrap_or(""),
-                string(project, "id").unwrap_or(""),
-            )
-        }
-        let mut ranks = BTreeMap::new();
-        if let Some(inbox) = inbox {
-            ranks.insert(inbox, 0);
-        }
-        // Depth first without recursion: a chain of 2 000 subprojects must
-        // not grow the call stack. Siblings go on the stack in reverse.
-        roots.sort_by_key(key);
-        let mut stack: Vec<&Value> = roots.into_iter().rev().collect();
-        while let Some(project) = stack.pop() {
-            let Some(id) = string(project, "id") else {
-                continue;
-            };
-            let next = ranks.len();
-            ranks.entry(id).or_insert(next);
-            if let Some(mut list) = children.remove(id) {
-                list.sort_by_key(key);
-                stack.extend(list.into_iter().rev());
-            }
-        }
-        for id in self.projects.keys() {
-            let next = ranks.len();
-            ranks.entry(id.as_str()).or_insert(next);
-        }
-        ranks
-    }
-
-    /// The open tasks for the launcher's task search, every one the panel
-    /// lists (assigned to others too): dated ones by `due.date` (earliest,
-    /// so overdue, first), then undated ones; ties by the project's place
-    /// in the panel's order, then `child_order`, then id. At most
-    /// [`MAX_SEARCH_TASKS`]; the bool says whether some were cut.
-    fn search_tasks(&self) -> (Vec<Value>, bool) {
-        let ranks = self.project_ranks();
-        let mut tasks: Vec<_> = self
-            .listed_tasks()
-            .map(|task| {
-                let due = task.get("due").and_then(|due| string(due, "date"));
-                let rank = string(task, "project_id")
-                    .and_then(|project| ranks.get(project))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                let key = (
-                    due.is_none(),
-                    due.unwrap_or(""),
-                    rank,
-                    integer(task, "child_order"),
-                    string(task, "id").unwrap_or(""),
-                );
-                (key, task)
-            })
-            .collect();
-        // Ids are unique, so the key orders every pair: no stable sort needed.
-        tasks.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let cut = tasks.len() > MAX_SEARCH_TASKS;
-        let list = tasks
-            .into_iter()
-            .take(MAX_SEARCH_TASKS)
-            .map(|(_, task)| search_brief(task))
-            .collect();
-        (list, cut)
-    }
-
-    /// What `names` reports: the projects, sections, labels and people the
-    /// launcher suggests, and the open tasks it searches.
-    pub fn names(&self) -> Value {
-        let pick = |records: &BTreeMap<String, Value>, keys: &[&str]| -> Vec<Value> {
-            records
-                .values()
-                .map(|record| {
-                    let mut out = Map::new();
-                    for key in keys {
-                        out.insert(
-                            (*key).to_string(),
-                            record.get(*key).cloned().unwrap_or(Value::Null),
-                        );
-                    }
-                    Value::Object(out)
-                })
-                .collect()
-        };
-        let (labels, labels_cut) = self.label_names();
-        let (tasks, tasks_cut) = self.search_tasks();
-        let mut out = json!({
-            "inbox_project_id": self.inbox_project_id(),
-            "projects": pick(&self.projects, &["id", "name", "parent_id", "child_order", "inbox", "shared"]),
-            "sections": pick(&self.sections, &["id", "project_id", "name", "section_order"]),
-            "labels": labels,
-            "collaborators": json!(self.collaborators.values().collect::<Vec<_>>()),
-            "project_collaborators": self.project_collaborators(),
-            "tasks": tasks,
-            "truncated": self.truncated || labels_cut || tasks_cut,
-        });
-        fit_names(&mut out, MAX_NAMES_BYTES);
-        out
-    }
-
-    /// `add`'s short reply for the task `id`: the task (null when the
-    /// snapshot doesn't list it) and its project.
-    pub fn added(&self, id: &str) -> (Value, Value) {
-        let Some(task) = self.tasks.get(id) else {
-            return (Value::Null, Value::Null);
-        };
-        let Some(project) = string(task, "project_id").and_then(|p| self.projects.get(p)) else {
-            return (Value::Null, Value::Null);
-        };
-        let field = |record: &Value, key: &str| record.get(key).cloned().unwrap_or(Value::Null);
-        (
-            task_brief(task),
-            json!({
-                "id": field(project, "id"),
-                "name": field(project, "name"),
-                "inbox": field(project, "inbox"),
-            }),
-        )
-    }
-
     /// What the panel gets. Tasks of projects it doesn't have (archived,
     /// left, or cut by the bound) are left out with them.
     pub fn snapshot(&self) -> Value {
@@ -785,68 +604,6 @@ impl State {
         out.insert("synced_at".into(), json!(self.synced_at));
         Value::Object(out)
     }
-}
-
-/// The fields of a task that `add`'s short reply and `names` give other
-/// plugins.
-/// The `names` reply stays under this many bytes as JSON: the launcher reads
-/// at most 16 MiB of it. Each list has its own cap, but text that JSON
-/// escapes (control characters take 6 bytes each) can still pass the sum of
-/// them, so the whole reply is measured too.
-pub const MAX_NAMES_BYTES: usize = 14 << 20;
-
-/// Cuts `names` until its JSON fits `budget`: halving the lists the launcher
-/// can best do without first (the tasks it searches, then sections, people,
-/// labels, projects), then dropping who is in which project. Whatever is
-/// cut sets `truncated`, so the launcher says the lists are partial. Only a
-/// reply over the budget is measured more than once.
-fn fit_names(out: &mut Value, budget: usize) {
-    let size = |value: &Value| serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len());
-    if size(out) <= budget {
-        return;
-    }
-    out["truncated"] = true.into();
-    for key in ["tasks", "sections", "collaborators", "labels", "projects"] {
-        while size(out) > budget {
-            let Some(list) = out[key].as_array_mut().filter(|list| !list.is_empty()) else {
-                break;
-            };
-            let keep = list.len() / 2;
-            list.truncate(keep);
-        }
-    }
-    if size(out) > budget {
-        out["project_collaborators"] = json!({});
-    }
-}
-
-/// A task as the launcher's search keeps it: [`task_brief`] with the text
-/// cut to [`MAX_SEARCH_CONTENT`] and at most [`MAX_SEARCH_LABELS`] labels.
-fn search_brief(task: &Value) -> Value {
-    let mut out = task_brief(task);
-    if let Some(content) = out["content"].as_str() {
-        out["content"] = cap(content, MAX_SEARCH_CONTENT).into();
-    }
-    if let Some(labels) = out["labels"].as_array_mut() {
-        labels.truncate(MAX_SEARCH_LABELS);
-    }
-    out
-}
-
-fn task_brief(task: &Value) -> Value {
-    let mut out = Map::new();
-    for key in [
-        "id",
-        "content",
-        "project_id",
-        "section_id",
-        "priority",
-        "labels",
-        "due",
-    ] {
-        out.insert(key.into(), task.get(key).cloned().unwrap_or(Value::Null));
-    }
-    Value::Object(out)
 }
 
 /// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
@@ -944,6 +701,7 @@ mod tests {
             json!({"id": "T1", "content": "Buy milk", "project_id": "P1", "section_id": null,
                    "parent_id": null, "priority": 4,
                    "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"},
+                   "deadline": null,
                    "labels": ["home"], "child_order": 1, "day_order": -1, "responsible_uid": null})
         );
         // Normalizing the cached shape again changes nothing.
@@ -1069,9 +827,9 @@ mod tests {
         for bad in [
             &b"{"[..],
             b"[]",
-            br#"{"version":5,"sync_token":"A"}"#,
+            br#"{"version":6,"sync_token":"A"}"#,
             br#"{"version":0,"sync_token":"A"}"#,
-            br#"{"version":4,"sync_token":5}"#,
+            br#"{"version":5,"sync_token":5}"#,
         ] {
             assert!(
                 State::from_cache(bad).is_none(),
@@ -1134,6 +892,31 @@ mod tests {
     }
 
     #[test]
+    fn a_task_with_more_labels_than_kept_says_so() {
+        let mut record = task("T1", "one");
+        record["labels"] = json!(
+            (0..MAX_LABELS + 1)
+                .map(|n| format!("l{n}"))
+                .collect::<Vec<_>>()
+        );
+        let Change::Keep(_, kept) = normalize_task(&record) else {
+            panic!("kept")
+        };
+        assert_eq!(kept["labels"].as_array().unwrap().len(), MAX_LABELS);
+        assert_eq!(kept["labels_truncated"], true);
+        // Loading the cache normalizes the kept task again: still partial.
+        let Change::Keep(_, reloaded) = normalize_task(&kept) else {
+            panic!("kept")
+        };
+        assert_eq!(reloaded["labels_truncated"], true);
+        record["labels"] = json!((0..MAX_LABELS).map(|n| format!("l{n}")).collect::<Vec<_>>());
+        let Change::Keep(_, kept) = normalize_task(&record) else {
+            panic!("kept")
+        };
+        assert!(kept.get("labels_truncated").is_none());
+    }
+
+    #[test]
     fn labels_are_bounded() {
         let mut state = State::empty();
         let labels: Vec<Value> = (0..MAX_LABEL_RECORDS + 3)
@@ -1147,301 +930,6 @@ mod tests {
     }
 
     #[test]
-    fn names_list_what_the_launcher_suggests() {
-        assert_eq!(
-            State::empty().names(),
-            json!({"inbox_project_id": null, "projects": [], "sections": [], "labels": [],
-                   "collaborators": [], "project_collaborators": {}, "tasks": [], "truncated": false})
-        );
-        let mut state = State::empty();
-        let labelled = |id: &str, project: &str, labels: Value| {
-            let mut t = task(id, "x");
-            t["project_id"] = json!(project);
-            t["labels"] = labels;
-            t
-        };
-        state
-            .merge(
-                &json!({"sync_token": "A", "full_sync": true,
-                "projects": [{"id": "P1", "name": "Inbox", "inbox_project": true, "color": "grey", "child_order": 0},
-                             {"id": "P2", "name": "Team", "parent_id": "P1", "child_order": 3, "shared": true}],
-                "sections": [{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 2}],
-                "labels": [{"id": "L1", "name": "Zeta", "item_order": 1},
-                           {"id": "L2", "name": "alpha", "item_order": 2},
-                           {"id": "L3", "name": "ALPHA", "item_order": 3}],
-                "items": [labelled("T1", "P1", json!(["shared-b", "zeta", "Shared-A"])),
-                          labelled("T2", "P2", json!(["shared-a", "Alpha"])),
-                          // A task of a project not listed adds no label.
-                          labelled("T3", "P9", json!(["hidden"]))],
-                "collaborators": [{"id": "7", "full_name": "Grace", "email": "g@example.com"}],
-                "collaborator_states": [{"project_id": "P2", "user_id": "7", "state": "active"}]}),
-                "x",
-            )
-            .unwrap();
-        assert_eq!(
-            state.names(),
-            json!({"inbox_project_id": "P1",
-                   "projects": [{"id": "P1", "name": "Inbox", "parent_id": null, "child_order": 0, "inbox": true, "shared": false},
-                                {"id": "P2", "name": "Team", "parent_id": "P1", "child_order": 3, "inbox": false, "shared": true}],
-                   "sections": [{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 2}],
-                   "labels": ["Zeta", "alpha", "Shared-A", "shared-b"],
-                   "collaborators": [{"id": "7", "full_name": "Grace", "email": "g@example.com"}],
-                   "project_collaborators": {"P2": ["7"]},
-                   "tasks": [{"id": "T1", "content": "x", "project_id": "P1", "section_id": null,
-                              "priority": 4, "labels": ["shared-b", "zeta", "Shared-A"],
-                              "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"}},
-                             {"id": "T2", "content": "x", "project_id": "P2", "section_id": null,
-                              "priority": 4, "labels": ["shared-a", "Alpha"],
-                              "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"}}],
-                   "truncated": false})
-        );
-        // The user's Inbox id wins over the flag.
-        state.user = Some(json!({"id": "1", "inbox_project_id": "P2"}));
-        assert_eq!(state.names()["inbox_project_id"], "P2");
-    }
-
-    #[test]
-    fn names_are_bounded_like_the_snapshot() {
-        let mut state = State::empty();
-        // 2 001 distinct shared names on 41 tasks: the first 2 000 by name stay.
-        let tasks: Vec<Value> = (0..41)
-            .map(|t| {
-                let mut one = task(&format!("T{t}"), "x");
-                one["labels"] = json!(
-                    (0..50)
-                        .map(|l| format!("s{:05}", t * 50 + l))
-                        .filter(|name| name.as_str() <= "s02000")
-                        .collect::<Vec<_>>()
-                );
-                one
-            })
-            .collect();
-        state
-            .merge(
-                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": tasks}),
-                "x",
-            )
-            .unwrap();
-        assert!(!state.truncated);
-        let names = state.names();
-        let labels = names["labels"].as_array().unwrap();
-        assert_eq!(labels.len(), MAX_LABEL_NAMES);
-        assert_eq!(labels[0], "s00000");
-        assert_eq!(labels[MAX_LABEL_NAMES - 1], "s01999");
-        assert_eq!(names["truncated"], true);
-        // Personal labels take room first: the whole list stays at the cap.
-        state.labels.insert(
-            "L1".into(),
-            json!({"id": "L1", "name": "mine", "item_order": 1}),
-        );
-        let names = state.names();
-        let labels = names["labels"].as_array().unwrap();
-        assert_eq!(labels.len(), MAX_LABEL_NAMES);
-        assert_eq!(labels[0], "mine");
-        assert_eq!(labels[MAX_LABEL_NAMES - 1], "s01998");
-        assert_eq!(names["truncated"], true);
-        state.labels.remove("L1");
-        // Exactly the cap: nothing cut.
-        state.tasks.remove("T40");
-        let mut last = task("T40", "x");
-        last["labels"] = json!([]);
-        state.tasks.insert("T40".into(), last);
-        assert_eq!(state.names()["truncated"], false);
-        // A cut snapshot is a cut names list.
-        state.truncated = true;
-        assert_eq!(state.names()["truncated"], true);
-    }
-
-    #[test]
-    fn names_list_the_open_tasks_in_the_panels_order() {
-        let at = |id: &str, project: &str, date: Option<&str>, order: i64| {
-            let mut t = task(id, id);
-            t["project_id"] = json!(project);
-            t["due"] = date.map_or(
-                Value::Null,
-                |date| json!({"date": date, "is_recurring": false, "string": date}),
-            );
-            t["child_order"] = json!(order);
-            t
-        };
-        let mut others = at("assigned", "PB", None, 5);
-        others["responsible_uid"] = json!("99");
-        let mut state = State::empty();
-        state
-            .merge(
-                &json!({"sync_token": "A", "full_sync": true,
-                "user": {"id": "1", "inbox_project_id": "PI"},
-                "projects": [{"id": "PI", "name": "Inbox", "inbox_project": true},
-                             {"id": "PA", "name": "Alpha", "child_order": 2},
-                             {"id": "PB", "name": "Beta", "child_order": 1},
-                             {"id": "PB1", "name": "Beta sub", "parent_id": "PB", "child_order": 1},
-                             // A parent cycle: the tree never reaches them.
-                             {"id": "PY", "name": "Loop", "parent_id": "PZ"},
-                             {"id": "PZ", "name": "Loop", "parent_id": "PY"},
-                             {"id": "PX", "name": "Old", "is_archived": true},
-                             {"id": "PD", "name": "Gone", "is_deleted": true}],
-                "items": [at("undated-a", "PA", None, 1),
-                          at("undated-b1-second", "PB1", None, 1),
-                          at("undated-b1-first", "PB1", None, 0),
-                          at("undated-inbox", "PI", None, 9),
-                          at("undated-loop", "PY", None, 0),
-                          others,
-                          at("dated-b", "PB", Some("2026-12-01"), 0),
-                          at("dated-inbox-timed", "PI", Some("2026-12-01T10:00:00"), 0),
-                          at("dated-inbox", "PI", Some("2026-12-01"), 3),
-                          at("overdue", "PA", Some("2026-01-01"), 7),
-                          at("archived", "PX", None, 0),
-                          at("deleted", "PD", Some("2026-01-01"), 0)]}),
-                "x",
-            )
-            .unwrap();
-        let names = state.names();
-        let ids: Vec<&str> = names["tasks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|task| task["id"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            ids,
-            [
-                "overdue",
-                "dated-inbox",
-                "dated-b",
-                "dated-inbox-timed",
-                "undated-inbox",
-                "assigned",
-                "undated-b1-first",
-                "undated-b1-second",
-                "undated-a",
-                "undated-loop",
-            ]
-        );
-        assert_eq!(
-            names["tasks"][0],
-            json!({"id": "overdue", "content": "overdue", "project_id": "PA", "section_id": null,
-                   "priority": 4, "labels": ["home"],
-                   "due": {"date": "2026-01-01", "is_recurring": false, "string": "2026-01-01"}})
-        );
-        assert_eq!(names["truncated"], false);
-    }
-
-    #[test]
-    fn a_names_reply_over_its_byte_budget_is_cut_and_marked_partial() {
-        // Control characters are 6 bytes each in JSON: 400 tasks of 200 fit
-        // every list cap but not a 300 KB budget.
-        let task = json!({"id": "T", "content": "\u{1}".repeat(200), "labels": []});
-        let mut out = json!({"projects": [{"id": "P", "name": "Inbox"}], "sections": [],
-            "labels": [], "collaborators": [], "project_collaborators": {"P": ["U"]},
-            "tasks": vec![task; 400], "truncated": false});
-        fit_names(&mut out, 300_000);
-        let bytes = serde_json::to_vec(&out).unwrap().len();
-        assert!(bytes <= 300_000, "{bytes}");
-        assert_eq!(out["truncated"], true);
-        assert!(!out["tasks"].as_array().unwrap().is_empty());
-        assert_eq!(
-            out["projects"].as_array().unwrap().len(),
-            1,
-            "projects kept while tasks can go"
-        );
-        // Within the budget nothing changes.
-        let small = json!({"projects": [], "sections": [], "labels": [], "collaborators": [],
-            "project_collaborators": {}, "tasks": [], "truncated": false});
-        let mut same = small.clone();
-        fit_names(&mut same, 300_000);
-        assert_eq!(same, small);
-    }
-
-    #[test]
-    fn searched_tasks_are_cut_to_200_characters_and_10_labels() {
-        let mut state = State::empty();
-        let mut long = task("T1", &"é".repeat(MAX_CONTENT));
-        long["labels"] = json!((0..12).map(|n| format!("l{n}")).collect::<Vec<_>>());
-        state
-            .merge(
-                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": [long]}),
-                "x",
-            )
-            .unwrap();
-        let listed = state.names()["tasks"][0].clone();
-        let content = listed["content"].as_str().unwrap();
-        assert_eq!(content.chars().count(), MAX_SEARCH_CONTENT);
-        assert!(content.ends_with('…'));
-        assert_eq!(
-            listed["labels"].as_array().unwrap().len(),
-            MAX_SEARCH_LABELS
-        );
-        // The add reply keeps the whole task.
-        assert_eq!(
-            state.added("T1").0["content"]
-                .as_str()
-                .unwrap()
-                .chars()
-                .count(),
-            MAX_CONTENT
-        );
-    }
-
-    #[test]
-    fn names_list_at_most_1000_tasks() {
-        let mut state = State::empty();
-        let tasks: Vec<Value> = (0..=MAX_SEARCH_TASKS)
-            .map(|n| {
-                let mut one = task(&format!("T{n}"), "x");
-                one["due"] = Value::Null;
-                one["labels"] = json!([]);
-                one["child_order"] = json!(n);
-                one
-            })
-            .collect();
-        state
-            .merge(
-                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": tasks}),
-                "x",
-            )
-            .unwrap();
-        assert!(!state.truncated);
-        let names = state.names();
-        let listed = names["tasks"].as_array().unwrap();
-        assert_eq!(listed.len(), MAX_SEARCH_TASKS);
-        assert_eq!(
-            listed[MAX_SEARCH_TASKS - 1]["id"],
-            format!("T{}", MAX_SEARCH_TASKS - 1)
-        );
-        assert_eq!(names["truncated"], true);
-        // Exactly the cap: nothing cut.
-        state.tasks.remove(&format!("T{MAX_SEARCH_TASKS}"));
-        let names = state.names();
-        assert_eq!(names["tasks"].as_array().unwrap().len(), MAX_SEARCH_TASKS);
-        assert_eq!(names["truncated"], false);
-    }
-
-    #[test]
-    fn the_added_task_comes_with_its_project() {
-        let mut state = State::empty();
-        state
-            .merge(
-                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox", "inbox_project": true}],
-                        "items": [task("T1", "Buy milk")]}),
-                "x",
-            )
-            .unwrap();
-        assert_eq!(
-            state.added("T1"),
-            (
-                json!({"id": "T1", "content": "Buy milk", "project_id": "P1", "section_id": null,
-                       "priority": 4, "labels": ["home"],
-                       "due": {"date": "2026-11-16", "is_recurring": false, "string": "today"}}),
-                json!({"id": "P1", "name": "Inbox", "inbox": true})
-            )
-        );
-        assert_eq!(state.added("T9"), (Value::Null, Value::Null));
-        // A task whose project isn't listed isn't in the snapshot either.
-        state.projects.clear();
-        assert_eq!(state.added("T1"), (Value::Null, Value::Null));
-    }
-
-    #[test]
     fn a_cache_from_before_labels_keeps_the_user_and_syncs_in_full() {
         let old = json!({"version": 1, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
             "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": []});
@@ -1449,7 +937,7 @@ mod tests {
         assert!(state.is_full(), "the next sync is a full one");
         assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
         assert!(state.tasks.is_empty() && state.projects.is_empty());
-        assert!(State::from_cache(br#"{"version":5,"sync_token":"A"}"#).is_none());
+        assert!(State::from_cache(br#"{"version":6,"sync_token":"A"}"#).is_none());
     }
 
     #[test]
@@ -1553,6 +1041,60 @@ mod tests {
     fn a_cache_from_before_assignees_syncs_in_full() {
         // Version 3 tasks have no responsible_uid: a full sync brings it.
         let old = json!({"version": 3, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
+            "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
+            "labels": [], "collaborators": [], "memberships": []});
+        let state = State::from_cache(old.to_string().as_bytes()).unwrap();
+        assert!(state.is_full(), "the next sync is a full one");
+        assert!(state.tasks.is_empty());
+        assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
+    }
+
+    #[test]
+    fn a_task_keeps_its_deadline_date() {
+        let mut due = task("T1", "x");
+        due["deadline"] = json!({"date": "2026-12-01", "lang": "en"});
+        let Change::Keep(_, kept) = normalize_task(&due) else {
+            panic!("dropped")
+        };
+        assert_eq!(kept["deadline"], "2026-12-01");
+        // The cached shape normalizes to itself.
+        assert_eq!(
+            normalize_task(&kept),
+            Change::Keep("T1".into(), kept.clone())
+        );
+        for none in [json!(null), Value::Null] {
+            let mut open = task("T2", "y");
+            open["deadline"] = none;
+            let Change::Keep(_, kept) = normalize_task(&open) else {
+                panic!("dropped")
+            };
+            assert_eq!(kept["deadline"], Value::Null);
+        }
+        // A deadline that isn't a date drops the task, like a broken due.
+        for bad in [
+            json!({"date": "2026-02-30"}),
+            json!({"date": "2026-12-01T10:00:00"}),
+            json!({}),
+            json!("soon"),
+            json!(5),
+            json!({"date": 20261201}),
+        ] {
+            let mut broken = task("T3", "z");
+            broken["deadline"] = bad.clone();
+            assert_eq!(normalize_task(&broken), Change::Drop("T3".into()), "{bad}");
+        }
+        // The cache keeps it.
+        let mut state = State::empty();
+        state
+            .merge(&json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": [due]}), "x")
+            .unwrap();
+        let back = State::from_cache(&state.to_cache()).unwrap();
+        assert_eq!(back.tasks["T1"]["deadline"], "2026-12-01");
+    }
+
+    #[test]
+    fn a_cache_from_before_deadlines_syncs_in_full() {
+        let old = json!({"version": 4, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
             "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
             "labels": [], "collaborators": [], "memberships": []});
         let state = State::from_cache(old.to_string().as_bytes()).unwrap();

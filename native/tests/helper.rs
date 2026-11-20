@@ -21,6 +21,7 @@ const TOKEN: &str = "0123456789abcdef0123456789abcdef01234567";
 /// A request the fixture server received.
 #[derive(Debug, Clone)]
 struct Seen {
+    method: String,
     path: String,
     authorization: String,
     /// The body; form fields decoded.
@@ -118,6 +119,7 @@ fn read_request(stream: &TcpStream) -> Seen {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
+    let method = line.split(' ').next().unwrap_or("").to_string();
     let path = line.split(' ').nth(1).unwrap_or("").to_string();
     let mut length = 0;
     let mut authorization = String::new();
@@ -138,6 +140,7 @@ fn read_request(stream: &TcpStream) -> Seen {
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body).unwrap();
     Seen {
+        method,
         path,
         authorization,
         body: String::from_utf8(body).unwrap(),
@@ -677,7 +680,7 @@ fn signed_out_and_locked_keyrings() {
     let (reply, _) = home.run("status", "", &closed());
     assert_eq!(
         reply,
-        json!({"ok": true, "contract": 1, "state": "signed_out", "user": null})
+        json!({"ok": true, "state": "signed_out", "user": null})
     );
 
     fs::write(home.bin().join("item"), TOKEN).unwrap();
@@ -727,7 +730,14 @@ fn a_held_lock_is_busy_and_no_runtime_dir_is_unavailable() {
 #[test]
 fn wrong_arguments_are_refused() {
     let home = Home::new("args");
-    for args in [vec![], vec!["sync", "extra"], vec!["delete"]] {
+    // `names` and `notify` (Foamy Menu's) are gone: unknown like any other.
+    for args in [
+        vec![],
+        vec!["sync", "extra"],
+        vec!["delete"],
+        vec!["names"],
+        vec!["notify"],
+    ] {
         let output = Command::new(HELPER)
             .args(&args)
             .env_clear()
@@ -737,8 +747,11 @@ fn wrong_arguments_are_refused() {
             .unwrap();
         let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(reply["code"], "INVALID_ARGUMENT", "{args:?}");
-        // Errors carry the contract number too.
-        assert_eq!(reply["contract"], 1, "{args:?}");
+        assert_eq!(
+            reply["error"], "The Todoist helper was called with the wrong arguments.",
+            "{args:?}"
+        );
+        assert!(reply.get("contract").is_none(), "{args:?}");
         assert_ne!(output.status.code(), Some(0));
     }
 }
@@ -963,317 +976,275 @@ fn a_quick_add_answer_without_a_task_id_has_an_unknown_outcome() {
     }
 }
 
-#[test]
-fn every_reply_has_the_contract_number() {
-    let home = Home::signed_in("contract");
-    let server = Server::start(vec![ok(full_sync())], TOKEN);
-    let (reply, _) = home.run("sync", "", &server.base);
-    assert_eq!(reply["contract"], 1, "{reply}");
-    let (reply, _) = home.run("status", "", &closed());
-    assert_eq!(reply["contract"], 1, "{reply}");
-    let (reply, _) = home.run("sync", "", &closed());
-    assert_eq!(
-        (reply["code"].as_str(), &reply["contract"]),
-        (Some("NETWORK"), &json!(1))
-    );
+/// A Sync server for `apply`: answers each command with `status(command)`
+/// (keyed by the UUIDs the helper made) and the incremental `items`.
+fn apply_server(status: fn(&Value) -> Value, items: Value) -> (String, JoinHandle<Seen>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let thread = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let request = read_request(&stream);
+        let statuses: serde_json::Map<String, Value> = decoded_commands(&request)
+            .iter()
+            .map(|command| {
+                (
+                    command["uuid"].as_str().unwrap().to_string(),
+                    status(command),
+                )
+            })
+            .collect();
+        respond(
+            stream,
+            &ok(json!({"sync_token": "S2", "sync_status": statuses, "items": items})),
+        );
+        request
+    });
+    (base, thread)
 }
 
-#[test]
-fn names_come_from_the_cache_without_network() {
-    let home = Home::new("names");
-    let empty = json!({"ok": true, "contract": 1, "inbox_project_id": null, "projects": [],
-                       "sections": [], "labels": [], "collaborators": [],
-                       "project_collaborators": {}, "tasks": [], "truncated": false});
-    // Signed out: everything empty.
-    let (reply, _) = home.run("names", "", &closed());
-    let mut expected = empty.clone();
-    expected["state"] = json!("signed_out");
-    assert_eq!(reply, expected);
-    // Signed in, nothing synced yet: empty too.
-    fs::write(home.bin().join("item"), TOKEN).unwrap();
-    let (reply, _) = home.run("names", "", &closed());
-    expected["state"] = json!("signed_in");
-    assert_eq!(reply, expected);
-    // After a sync: the cache's names, the shared labels from tasks.
+fn synced(tag: &str) -> Home {
+    let home = Home::signed_in(tag);
     let mut sync = full_sync();
-    sync["labels"] = json!([{"id": "L1", "name": "home", "item_order": 2},
-                            {"id": "L2", "name": "Work", "item_order": 1}]);
-    sync["items"][0]["labels"] = json!(["home", "team-shared"]);
-    sync["items"][1]["project_id"] = json!("P2");
-    sync["items"][1]["due"] =
-        json!({"date": "2026-11-20", "is_recurring": true, "string": "every fri"});
-    sync["items"][1]["section_id"] = json!("S1");
-    sync["items"][2]["child_order"] = json!(0);
     sync["sections"] =
         json!([{"id": "S1", "project_id": "P2", "name": "Doing", "section_order": 1}]);
+    sync["items"][2]["project_id"] = json!("P2");
+    sync["items"][2]["section_id"] = json!("S1");
     let server = Server::start(vec![ok(sync)], TOKEN);
     home.run("sync", "", &server.base);
-    let (reply, _) = home.run("names", "", &closed());
-    assert_eq!(reply["state"], "signed_in", "{reply}");
-    assert_eq!(reply["inbox_project_id"], "P1");
-    assert_eq!(reply["labels"], json!(["Work", "home", "team-shared"]));
-    assert_eq!(reply["sections"][0]["name"], "Doing");
-    let projects: Vec<&str> = reply["projects"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| p["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(projects, ["Inbox", "Work"]);
-    // The open tasks: dated first, then the Inbox's by child_order.
-    assert_eq!(
-        reply["tasks"],
-        json!([{"id": "T2", "content": "two", "project_id": "P2", "section_id": "S1",
-                "priority": 1, "labels": [],
-                "due": {"date": "2026-11-20", "is_recurring": true, "string": "every fri"}},
-               {"id": "T3", "content": "three", "project_id": "P1", "section_id": null,
-                "priority": 1, "labels": [], "due": null},
-               {"id": "T1", "content": "one", "project_id": "P1", "section_id": null,
-                "priority": 1, "labels": ["home", "team-shared"], "due": null}])
-    );
-    assert_eq!(reply["truncated"], false);
-    assert!(reply.get("user").is_none());
-    // A locked keyring is an error, not an empty list.
-    fs::write(home.bin().join("locked"), "").unwrap();
-    let (reply, _) = home.run("names", "", &closed());
-    assert_eq!(reply["code"], "KEYRING_LOCKED", "{reply}");
-}
-
-#[test]
-fn an_add_can_reply_with_just_the_task() {
-    let home = Home::signed_in("add-short");
-    let server = Server::start(vec![ok(full_sync())], TOKEN);
-    home.run("sync", "", &server.base);
-    let mut created = task("T5", "Call Bob");
-    created["project_id"] = json!("P2");
-    created["labels"] = json!(["phone"]);
-    created["due"] = json!({"date": "2026-11-20", "is_recurring": false, "string": "fri"});
-    let (base, thread) = add_server(
-        created.clone(),
-        json!({"sync_token": "S2", "items": [created]}),
-    );
-    let input = json!({"text": "Call Bob fri #Work @phone", "reply": "task"});
-    let (reply, _) = home.run("add", &input.to_string(), &base);
-    thread.join().unwrap();
-    assert_eq!(
-        reply,
-        json!({"ok": true, "contract": 1, "added": "T5",
-               "task": {"id": "T5", "content": "Call Bob", "project_id": "P2", "section_id": null,
-                        "priority": 1, "labels": ["phone"],
-                        "due": {"date": "2026-11-20", "is_recurring": false, "string": "fri"}},
-               "project": {"id": "P2", "name": "Work", "inbox": false}})
-    );
-    // A follow-up that fails: the same warning fields as the full reply.
-    let limited = Answer {
-        status: 429,
-        headers: "Retry-After: 30\r\n".into(),
-        body: "{}".into(),
-    };
-    let server = Server::start(vec![ok(task("T7", "Milk")), limited], TOKEN);
-    let (reply, _) = home.run("add", r#"{"text":"Milk","reply":"task"}"#, &server.base);
-    assert_eq!(reply["added"], "T7", "{reply}");
-    assert_eq!(reply["task"]["content"], "Milk");
-    assert_eq!(reply["project"]["inbox"], true);
-    assert_eq!(reply["stale"], true);
-    assert_eq!(reply["warning_code"], "RATE_LIMITED");
-    assert_eq!(reply["retry_after"], 30);
-    assert!(reply["warning"].as_str().is_some(), "{reply}");
-    assert!(reply.get("tasks").is_none(), "{reply}");
-    // Any other reply kind is refused before anything is sent.
-    for bad in [json!("snapshot"), json!(null), json!(1)] {
-        let input = json!({"text": "x", "reply": bad});
-        let (reply, _) = home.run("add", &input.to_string(), &closed());
-        assert_eq!(reply["code"], "INVALID_ARGUMENT", "{bad}: {reply}");
-    }
-}
-
-/// Runs `notify` with only the temporary bin dir on `PATH`, so neither the
-/// real `omarchy-notification-send` nor `omarchy-shell` can be found.
-fn notify(home: &Home, input: &Value) -> (Value, std::time::Duration) {
-    let started = std::time::Instant::now();
-    let mut helper = Command::new(HELPER);
-    helper
-        .arg("notify")
-        .env_clear()
-        .env("PATH", home.bin())
-        .env("HOME", home.0.join("home"))
-        .env("XDG_RUNTIME_DIR", home.0.join("run"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = helper.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.to_string().as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    let text = String::from_utf8_lossy(&output.stdout).to_string();
-    assert_eq!(text.lines().count(), 1, "one reply line: {text:?}");
-    (serde_json::from_str(&text).unwrap(), started.elapsed())
-}
-
-fn with_sender(tag: &str) -> Home {
-    let home = Home::new(tag);
-    let sender = home.bin().join("omarchy-notification-send");
-    fs::write(&sender, include_str!("fake-notification-send.sh")).unwrap();
-    fs::set_permissions(&sender, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(server.seen().len(), 1);
     home
 }
 
-fn sent(home: &Home) -> Vec<String> {
-    let data = fs::read(home.bin().join("argv")).unwrap();
-    String::from_utf8(data)
-        .unwrap()
-        .split_terminator('\0')
-        .map(str::to_string)
-        .collect()
-}
-
-fn added_notice() -> Value {
-    json!({"kind": "added", "title": "Added to Todoist", "detail": "", "open_label": "Open in Todoist",
-           "text": "", "task": {"id": "T5", "content": "Call <Bob> & co\u{1b}", "project": "Work",
-                                "due": "fri", "labels": ["phone", "a&b"]}})
-}
-
 #[test]
-fn notify_sends_one_argv_per_kind() {
-    let home = with_sender("notify");
-    // No lock: a held state lock doesn't delay it.
-    let lock_dir = home.0.join("run/foamy-todoist");
-    fs::create_dir_all(&lock_dir).unwrap();
-    fs::set_permissions(&lock_dir, fs::Permissions::from_mode(0o700)).unwrap();
-    let file = fs::File::create(lock_dir.join("state.lock")).unwrap();
-    file.lock().unwrap();
-    let (reply, took) = notify(&home, &added_notice());
-    assert_eq!(reply, json!({"ok": true, "contract": 1}));
-    assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+fn an_update_and_its_move_go_in_one_sync_with_one_result_per_task() {
+    let home = synced("update");
+    let mut edited = task("T1", "Call Bob");
+    edited["project_id"] = json!("P2");
+    edited["priority"] = json!(4);
+    edited["deadline"] = json!({"date": "2026-12-01", "lang": "en"});
+    // T2's update works but its move is refused: T2's result is the refusal.
+    let (base, thread) = apply_server(
+        |command| {
+            if command["type"] == "item_move" && command["args"]["id"] == "T2" {
+                json!({"error_tag": "INVALID_ARGUMENT_VALUE", "error": "Invalid argument value", "http_code": 400})
+            } else {
+                json!("ok")
+            }
+        },
+        json!([edited]),
+    );
+    let input = json!({"commands": [
+        {"op": "update", "id": "T1", "content": " Call Bob ", "priority": 4, "labels": ["phone"],
+         "due_string": "tomorrow 9am", "deadline": "2026-12-01", "description": "Ask about\nthe trip",
+         "project_id": "P2"},
+        {"op": "update", "id": "T2", "deadline": "", "due_string": "", "section_id": "S1"},
+        // T3's cached place is S1, but the cache may be stale: the move goes too.
+        {"op": "update", "id": "T3", "content": "three!", "project_id": "P2", "section_id": "S1"},
+        {"op": "close", "id": "T9"}
+    ]});
+    let (reply, _) = home.run("apply", &input.to_string(), &base);
+    let request = thread.join().unwrap();
+    assert_eq!(request.path, "/sync");
+    let commands = decoded_commands(&request);
+    let shapes: Vec<(&str, &Value)> = commands
+        .iter()
+        .map(|c| (c["type"].as_str().unwrap(), &c["args"]))
+        .collect();
     assert_eq!(
-        sent(&home),
+        shapes,
         [
-            "--app-name",
-            "Todoist",
-            "Added to Todoist",
-            "<b>Call &lt;\u{2060}Bob&gt; &amp;\u{2060} co</b>\n#Work · fri · @phone @a&amp;\u{2060}b",
-            "--action",
-            "Open in Todoist",
-            "omarchy-shell",
-            "foamy.todoist",
-            "openTask",
-            "--with",
-            "T5"
+            (
+                "item_update",
+                &json!({"id": "T1", "content": "Call Bob", "priority": 4, "labels": ["phone"],
+                                    "due": {"string": "tomorrow 9am"}, "deadline": {"date": "2026-12-01"},
+                                    "description": "Ask about\nthe trip"})
+            ),
+            ("item_move", &json!({"id": "T1", "project_id": "P2"})),
+            (
+                "item_update",
+                &json!({"id": "T2", "due": null, "deadline": null})
+            ),
+            ("item_move", &json!({"id": "T2", "section_id": "S1"})),
+            ("item_update", &json!({"id": "T3", "content": "three!"})),
+            ("item_move", &json!({"id": "T3", "section_id": "S1"})),
+            ("item_close", &json!({"id": "T9"})),
         ]
     );
-    for kind in ["failed", "unknown"] {
-        let input = json!({"kind": kind, "title": "Could not add the task",
-                           "detail": "Can't reach Todoist.\u{7}", "open_label": "Open Inbox in Todoist",
-                           "text": "Call Bob <b>now</b>", "task": null});
-        let (reply, _) = notify(&home, &input);
-        assert_eq!(reply["ok"], true, "{kind}: {reply}");
+    let uuids: std::collections::BTreeSet<&str> = commands
+        .iter()
+        .map(|c| c["uuid"].as_str().unwrap())
+        .collect();
+    assert_eq!(uuids.len(), commands.len(), "a UUID per command");
+    assert_eq!(request.field("sync_token").as_deref(), Some("S1"));
+    assert_eq!(
+        reply["results"],
+        json!({"T1": "ok", "T3": "ok", "T9": "ok",
+               "T2": {"code": "INVALID_ARGUMENT_VALUE",
+                      "error": "Todoist didn't accept the change (%1).\u{1f}Invalid argument value"}}),
+        "{reply}"
+    );
+    // The snapshot has the edit and its deadline.
+    let t1 = reply["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "T1")
+        .unwrap();
+    assert_eq!(t1["deadline"], "2026-12-01");
+    assert_eq!(t1["project_id"], "P2");
+    assert!(t1.get("description").is_none(), "descriptions aren't kept");
+    let t2 = reply["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "T2")
+        .unwrap();
+    assert_eq!(t2["deadline"], Value::Null);
+    let cache = fs::read_to_string(home.cache()).unwrap();
+    assert!(
+        !cache.contains("Ask about"),
+        "the description reached the cache"
+    );
+}
+
+#[test]
+fn an_invalid_update_never_reaches_todoist() {
+    let home = synced("update-bad");
+    for (input, message) in [
+        (
+            json!({"commands": [{"op": "update", "id": "T1"}]}),
+            "The change has nothing to update.",
+        ),
+        (
+            json!({"commands": [{"op": "update", "id": "T1", "priority": 9}]}),
+            "Pick a priority from 1 to 4.",
+        ),
+        (
+            json!({"commands": [{"op": "update", "id": "T1", "section_id": ""}]}),
+            "Moving a task out of its section needs the project's id.",
+        ),
+        (
+            json!({"commands": [{"op": "update", "id": "T1", "content": "x"},
+                             {"op": "close", "id": "T1"}]}),
+            "The same task is changed twice.",
+        ),
+        (
+            // 51 changes are allowed, but each is two Sync commands.
+            json!({"commands": (0..51).map(|n| json!({"op": "update", "id": format!("T{n}"),
+                "content": "x", "project_id": "P2"})).collect::<Vec<_>>()}),
+            "These changes need more than 100 Todoist commands. Send fewer at a time.",
+        ),
+    ] {
+        let (reply, _) = home.run("apply", &input.to_string(), &closed());
         assert_eq!(
-            sent(&home),
-            [
-                "--app-name",
-                "Todoist",
-                "Could not add the task",
-                "<b>Call Bob &lt;\u{2060}b&gt;now&lt;\u{2060}/b&gt;</b>\nCan't reach Todoist.",
-                "--action",
-                "Open Inbox in Todoist",
-                "omarchy-shell",
-                "foamy.todoist",
-                "openInbox"
-            ],
-            "{kind}"
+            (reply["code"].as_str(), reply["error"].as_str()),
+            (Some("INVALID_ARGUMENT"), Some(message)),
+            "{input}"
         );
     }
-    drop(file);
-    // Nothing but the fake ran: omarchy-shell isn't on PATH, and the fake
-    // only records.
-    assert!(!home.bin().join("omarchy-shell").exists());
+    // The longest single update fits the request limit and goes out.
+    let longest = json!({"commands": [{"op": "update", "id": "T1",
+        "description": "\u{1F600}".repeat(16_383),
+        "labels": (0..50).map(|n| format!("{n:\u{1F600}>60}")).collect::<Vec<_>>()}]});
+    let (base, thread) = apply_server(|_| json!("ok"), json!([]));
+    let (reply, _) = home.run("apply", &longest.to_string(), &base);
+    thread.join().unwrap();
+    assert_eq!(reply["results"]["T1"], "ok", "{reply}");
 }
 
 #[test]
-fn notify_refuses_invalid_and_oversized_requests() {
-    let home = with_sender("notify-bad");
-    let mut bad_id = added_notice();
-    bad_id["task"]["id"] = json!("T5; rm -rf");
-    let mut long_title = added_notice();
-    long_title["title"] = json!("x".repeat(201));
-    let mut many_labels = added_notice();
-    many_labels["task"]["labels"] = json!(vec!["l"; 51]);
-    let mut no_task = added_notice();
-    no_task["task"] = json!(null);
-    let mut dash = added_notice();
-    dash["title"] = json!("--exec");
-    for request in [
-        bad_id,
-        long_title,
-        many_labels,
-        no_task,
-        dash,
-        json!({"kind": "sent"}),
-    ] {
-        let (reply, _) = notify(&home, &request);
-        assert_eq!(reply["code"], "INVALID_ARGUMENT", "{request}: {reply}");
-        assert_eq!(reply["contract"], 1);
+fn task_reads_one_description_and_writes_nothing() {
+    let home = synced("task");
+    let before = fs::read(home.cache()).unwrap();
+    let mut found = task("T1", "one");
+    found["description"] = json!("Line 1\nLine 2");
+    let server = Server::start(vec![ok(found.clone())], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    assert_eq!(
+        reply,
+        json!({"ok": true, "task": {"id": "T1", "description": "Line 1\nLine 2", "truncated": false}})
+    );
+    let seen = server.seen();
+    assert_eq!(
+        (seen[0].method.as_str(), seen[0].path.as_str()),
+        ("GET", "/tasks/T1")
+    );
+    assert_eq!(seen[0].authorization, format!("Bearer {TOKEN}"));
+    assert_eq!(fs::read(home.cache()).unwrap(), before, "the cache changed");
+    // No description, or null: "".
+    let server = Server::start(vec![ok(task("T1", "one"))], TOKEN);
+    assert_eq!(
+        home.run("task", r#"{"id":"T1"}"#, &server.base).0["task"]["description"],
+        ""
+    );
+    // Longer than 16 384 characters: cut, and said so.
+    let mut long = task("T1", "one");
+    long["description"] = json!("é".repeat(20_000));
+    let server = Server::start(vec![ok(long)], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    let text = reply["task"]["description"].as_str().unwrap();
+    assert_eq!(text.chars().count(), 16_384);
+    assert!(text.ends_with('…'));
+    assert_eq!(reply["task"]["truncated"], true);
+}
+
+#[test]
+fn task_reports_a_missing_oversized_or_wrong_task() {
+    let home = synced("task-bad");
+    let gone = "That task no longer exists in Todoist.";
+    let server = Server::start(vec![status(404, r#"{"error":"Task not found"}"#)], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+    assert_eq!(
+        (reply["code"].as_str(), reply["error"].as_str()),
+        (Some("NOT_FOUND"), Some(gone)),
+        "{reply}"
+    );
+    for flag in ["checked", "is_deleted"] {
+        let mut done = task("T1", "one");
+        done[flag] = json!(true);
+        let server = Server::start(vec![ok(done)], TOKEN);
+        let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+        assert_eq!(reply["code"], "NOT_FOUND", "{flag}: {reply}");
     }
-    let mut huge = added_notice();
-    huge["padding"] = json!("x".repeat(17 << 10));
-    let (reply, _) = notify(&home, &huge);
-    assert_eq!(reply["error"], "The request is too large.", "{reply}");
-    assert!(!home.bin().join("argv").exists(), "the sender never ran");
-}
-
-#[test]
-fn notify_reports_a_missing_failing_or_hanging_sender() {
-    // Missing: PATH has no sender at all.
-    let home = Home::new("notify-missing");
-    let (reply, _) = notify(&home, &added_notice());
-    assert_eq!(reply["code"], "NOTIFY_FAILED", "{reply}");
-    assert_eq!(reply["error"], "The notification command isn't installed.");
-    assert_eq!(reply["contract"], 1);
-
-    let home = with_sender("notify-fail");
-    fs::write(home.bin().join("mode"), "fail").unwrap();
-    let (reply, _) = notify(&home, &added_notice());
-    assert_eq!(reply["code"], "NOTIFY_FAILED", "{reply}");
+    // Over 1 MiB: refused while it is read.
+    let mut huge = task("T1", "one");
+    huge["description"] = json!("x".repeat(1 << 20));
+    let server = Server::start(vec![ok(huge)], TOKEN);
+    let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
     assert_eq!(
-        reply["error"],
-        "The notification command failed (%1).\u{1f}3"
+        reply["error"], "Todoist sent an oversized reply.",
+        "{reply}"
     );
-
-    // Hanging: killed at 2 s, with what it started (its process group).
-    fs::write(home.bin().join("mode"), "hang").unwrap();
-    let (reply, took) = notify(&home, &added_notice());
-    assert_eq!(reply["code"], "NOTIFY_FAILED", "{reply}");
+    // Another task, not JSON, or a description that isn't text.
+    let mut wrong_type = task("T1", "one");
+    wrong_type["description"] = json!(["x"]);
+    for body in [task("T2", "two"), json!("nope"), wrong_type] {
+        let server = Server::start(vec![ok(body.clone())], TOKEN);
+        let (reply, _) = home.run("task", r#"{"id":"T1"}"#, &server.base);
+        assert_eq!(
+            reply["error"], "Todoist sent an unexpected reply.",
+            "{body}: {reply}"
+        );
+    }
+    let server = Server::start(vec![ok(json!({}))], "another-token");
     assert_eq!(
-        reply["error"],
-        "The notification command didn't finish within %1 seconds.\u{1f}2"
+        home.run("task", r#"{"id":"T1"}"#, &server.base).0["code"],
+        "INVALID_TOKEN"
     );
-    assert!(
-        took >= std::time::Duration::from_secs(2) && took < std::time::Duration::from_secs(5),
-        "{took:?}"
-    );
-    let child = fs::read_to_string(home.bin().join("child")).unwrap();
-    let proc = PathBuf::from(format!("/proc/{}", child.trim()));
-    // The killed grandchild is reaped by whoever adopted it; wait for that
-    // (bounded), never for the sleep to end on its own (30 s).
-    let gone = (0..100).any(|_| {
-        let alive = fs::read_to_string(proc.join("stat"))
-            .map(|stat| {
-                !stat
-                    .rsplit(')')
-                    .next()
-                    .unwrap_or("")
-                    .trim_start()
-                    .starts_with('Z')
-            })
-            .unwrap_or(false);
-        if alive {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        !alive
-    });
-    assert!(gone, "the sender's child still runs: {}", child.trim());
+    // Invalid ids never reach Todoist.
+    for bad in [
+        r#"{"id":"../sync"}"#,
+        r#"{"id":""}"#,
+        r#"{}"#,
+        r#"{"id":5}"#,
+    ] {
+        let (reply, _) = home.run("task", bad, &closed());
+        assert_eq!(
+            reply["error"], "That isn't a Todoist task id.",
+            "{bad}: {reply}"
+        );
+    }
+    // Signed out.
+    let (reply, _) = Home::new("task-out").run("task", r#"{"id":"T1"}"#, &closed());
+    assert_eq!(reply["code"], "SIGNED_OUT", "{reply}");
 }

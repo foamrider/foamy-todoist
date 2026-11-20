@@ -4,6 +4,7 @@ import Quickshell.Io
 import "kit"
 import "kit/FoamyNative.js" as FoamyNative
 import "Model.js" as Model
+import "Edit.js" as Edit
 
 // Todoist for every bar instance: one helper process at a time, the last
 // snapshot, the sign-in, completions waiting for their undo window, and the
@@ -158,6 +159,16 @@ QtObject {
   // `t`: due tomorrow (all-day). Recurring tasks are left alone: moving one
   // occurrence isn't something the API describes.
   function moveToTomorrow(id) {
+    moveDue(id, Model.addDays(today, 1))
+  }
+  // Ctrl+←/→ in the Week view: a day earlier or later, never before today,
+  // with the same rules as `t`.
+  function shiftDue(id, delta) {
+    var day = Model.shiftedDay(model.byId[id], delta, today)
+    if (day !== "")
+      moveDue(id, day)
+  }
+  function moveDue(id, day) {
     var task = model.byId[id]
     if (!signedIn || !task || (task.due && task.due.recurring) || Model.has(struck, id) || Model.has(sending, id) || Model.has(unconfirmed, id))
       return
@@ -172,12 +183,145 @@ QtObject {
         {
           op: "due",
           id: id,
-          date: Model.addDays(today, 1)
+          date: day
         }
       ]
     }, {
       due: id
     })
+  }
+
+  // ---- editing (the task editor) ---------------------------------------------------
+  // One field's save is one apply job with one `update` command (Edit.js
+  // builds its fields), so two saves of a task never share a batch. The
+  // editor that sent a save owns it (`editorSaves`) until it closes: then
+  // a failure has nowhere to show and goes to the error line instead.
+  property int saveRequests: 0
+  property var editorSaves: ({})
+  signal taskSaved(int request, string id, bool ok, string message)
+  function saveTask(id, fields) {
+    if (!signedIn || !Model.validId(id) || !model.byId[id] || !fields)
+      return -1
+    var request = ++saveRequests
+    var owned = Object.assign({}, editorSaves)
+    owned[request] = true
+    editorSaves = owned
+    enqueue("apply", Edit.request(id, fields), {
+      update: id,
+      request: request,
+      description: typeof fields.description === "string" ? fields.description : null
+    })
+    return request
+  }
+  // The editor closed: its saves still in flight report to the error line.
+  function releaseSaves(requests) {
+    var owned = Object.assign({}, editorSaves)
+    requests.forEach(function (request) {
+      delete owned[request]
+    })
+    editorSaves = owned
+  }
+  // An edit the editor couldn't send as it let its task go: the error
+  // line says why, as for a save that fails after the editor closed.
+  function editRefused(message) {
+    if (message !== "")
+      error = message
+  }
+  function saveDone(job, ok, message) {
+    var request = job.extra.request
+    var owned = Model.has(editorSaves, request)
+    if (owned) {
+      let rest = Object.assign({}, editorSaves)
+      delete rest[request]
+      editorSaves = rest
+    } else if (!ok && message !== "")
+      error = message
+    // A saved description is the one the editor compares with from now on.
+    if (ok && job.extra.description !== null && description.id === job.extra.update)
+      description = Object.assign({}, description, {
+        text: job.extra.description
+      })
+    taskSaved(request, job.extra.update, ok, message)
+  }
+
+  // The open editor's description (not in the snapshot): one at a time,
+  // {id, state: "" | "loading" | "ready" | "error", text, truncated,
+  // error}. A reply for another request (another task, a closed editor) is
+  // ignored.
+  property var description: ({
+      id: "",
+      state: "",
+      text: "",
+      truncated: false,
+      error: ""
+    })
+  property int descriptionRequest: 0
+  function loadDescription(id) {
+    if (!signedIn || !Model.validId(id))
+      return
+    var request = ++descriptionRequest
+    // Previews: the sample descriptions, no helper.
+    if (fixtures) {
+      description = {
+        id: id,
+        state: "ready",
+        text: Model.has(fixtureDescriptions, id) ? fixtureDescriptions[id] : "",
+        truncated: false,
+        error: ""
+      }
+      return
+    }
+    // Only the newest read waits: one queued for an earlier selection goes.
+    queue = queue.filter(function (job) {
+      return job.command !== "task"
+    })
+    description = {
+      id: id,
+      state: "loading",
+      text: "",
+      truncated: false,
+      error: ""
+    }
+    enqueue("task", {
+      id: id
+    }, {
+      describe: id,
+      request: request
+    })
+  }
+  function dropDescription() {
+    descriptionRequest++
+    queue = queue.filter(function (job) {
+      return job.command !== "task"
+    })
+    description = {
+      id: "",
+      state: "",
+      text: "",
+      truncated: false,
+      error: ""
+    }
+  }
+  function describeDone(job, reply, ok, code) {
+    if (job.extra.request !== descriptionRequest || description.id !== job.extra.describe)
+      return
+    var task = ok && reply.task && typeof reply.task === "object" ? reply.task : null
+    if (task && task.id === job.extra.describe && typeof task.description === "string") {
+      description = {
+        id: task.id,
+        state: "ready",
+        text: task.description,
+        truncated: task.truncated === true,
+        error: ""
+      }
+      return
+    }
+    description = Object.assign({}, description, {
+      state: "error",
+      error: ok ? FoamyI18n.t("Todoist sent an unexpected reply.") : failureText(reply, code)
+    })
+    if (!ok && reply && reply.code === "SIGNED_OUT")
+      failed(reply, code)
   }
 
   // ---- adding -------------------------------------------------------------------
@@ -242,7 +386,7 @@ QtObject {
   property var current: null
   readonly property bool busy: current !== null || queue.length > 0
   // A job that brings a new snapshot is running: the footer's Refresh spins.
-  readonly property bool syncing: current !== null && current.command !== "status" && current.command !== "token-clear" && current.command !== "token-set"
+  readonly property bool syncing: current !== null && current.command !== "status" && current.command !== "token-clear" && current.command !== "token-set" && current.command !== "task"
   readonly property bool tokenBusy: [current].concat(queue).some(function (job) {
     return !!job && (job.command === "token-set" || job.command === "token-clear")
   })
@@ -284,7 +428,7 @@ QtObject {
       queue = queue.slice(1)
       // While Todoist asks to wait, nothing that calls it starts: a sync
       // is dropped, an add or a change ends at once as failed.
-      if (Date.now() < retryUntil && (job.command === "sync" || job.command === "add" || job.command === "apply")) {
+      if (Date.now() < retryUntil && (job.command === "sync" || job.command === "add" || job.command === "apply" || job.command === "task")) {
         drop(job, job.command === "sync" ? "" : rateLimitText())
         continue
       }
@@ -314,6 +458,17 @@ QtObject {
     // A move to tomorrow that never ran: the task stays, the line says why.
     if (job.extra.due && message !== "")
       error = message
+    // A save that never ran: the editor keeps the text and says why.
+    if (job.extra.update) {
+      Qt.callLater(function () {
+        store.saveDone(job, false, message)
+      })
+    }
+    if (job.extra.describe && job.extra.request === descriptionRequest && message !== "")
+      description = Object.assign({}, description, {
+        state: "error",
+        error: message
+      })
     if (job.command === "token-set") {
       if (message !== "")
         tokenError = message
@@ -388,6 +543,10 @@ QtObject {
       undoWindow.stop()
       if (job.command === "add")
         addFinished(job.extra.request, false, accountError)
+      if (job.extra.update)
+        saveDone(job, false, accountError)
+      if (job.command === "task")
+        drop(job, accountError)
       return
     }
     var reply = Model.parseReply(text)
@@ -402,17 +561,22 @@ QtObject {
       return stale ? undefined : statusDone(reply, ok, code)
     if (job.command === "token-set" || job.command === "token-clear")
       return tokenDone(job, reply, ok, code)
+    if (job.command === "task")
+      return stale ? undefined : describeDone(job, reply, ok, code)
     if (job.extra.closing)
       closingDone(job.extra.closing, ok, stale)
     if (stale) {
       if (job.command === "add")
         addFinished(job.extra.request, false, "")
+      if (job.extra.update)
+        saveDone(job, false, "")
       return
     }
-    // A failed add is reported under the add field, not as a sync error.
+    // A failed add is reported under the add field, a failed save under
+    // its field, not as a sync error.
     if (ok)
       receive(reply)
-    else if (job.command !== "add" || (reply && reply.code === "SIGNED_OUT"))
+    else if ((job.command !== "add" && !job.extra.update) || (reply && reply.code === "SIGNED_OUT"))
       failed(reply, code)
     // Quick Add went out but no answer came: the task may exist. A sync
     // now shows whether it does (the queue still honours a rate limit).
@@ -425,7 +589,12 @@ QtObject {
       addFinished(job.extra.request, ok, ok ? (reply.warning ? helperText(reply.warning) : "") : failureText(reply, code))
     else if (ok && reply.warning)
       error = helperText(reply.warning)
-    if (ok && reply.results)
+    if (job.extra.update) {
+      // The task's own result: "ok", or why Todoist refused it.
+      const result = ok && reply.results && Model.has(reply.results, job.extra.update) ? reply.results[job.extra.update] : null
+      const saved = result === "ok"
+      saveDone(job, saved, saved ? "" : !ok ? failureText(reply, code) : result && typeof result.error === "string" ? helperText(result.error) : FoamyI18n.t("Todoist didn't accept the change."))
+    } else if (ok && reply.results)
       reportResults(reply.results)
   }
 
@@ -545,6 +714,7 @@ QtObject {
     sending = ({})
     unconfirmed = ({})
     undoWindow.stop()
+    dropDescription()
   }
 
   // ---- what the panels ask for --------------------------------------------------
@@ -644,16 +814,6 @@ QtObject {
   function openView(kind, id) {
     openUrl(Model.webUrl(kind, id))
   }
-  // IPC `openTask` (Foamy Menu's "Open in Todoist" and its notification):
-  // the same launch as Enter on a task row. The id comes from another
-  // process, so an invalid one is refused and logged, never opened.
-  function openTask(id) {
-    if (!Model.validId(id)) {
-      console.warn("foamy.todoist: openTask refused an invalid task id")
-      return
-    }
-    openView("task", id)
-  }
   function launchNext() {
     if (launchRunning || !launches.length)
       return
@@ -681,6 +841,7 @@ QtObject {
 
   // Preview: sample data, and no helper is ever started.
   property bool fixtures: false
+  property var fixtureDescriptions: ({})
   function loadFixture(reply, signedInState) {
     fixtures = true
     queue = []

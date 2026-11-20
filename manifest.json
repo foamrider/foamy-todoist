@@ -20,6 +20,7 @@
     "defaults": {
       "barCount": "today",
       "panelWidth": "standard",
+      "afterAdd": "close",
       "openOn": "today",
       "othersTasks": "hide",
       "refreshSeconds": 300,
@@ -39,11 +40,21 @@
       {
         "key": "panelWidth",
         "type": "enum",
-        "label": "Panel width",
+        "label": "Size",
         "defaultValue": "standard",
         "options": [
           "standard",
           "wide"
+        ]
+      },
+      {
+        "key": "afterAdd",
+        "type": "enum",
+        "label": "After adding a task",
+        "defaultValue": "close",
+        "options": [
+          "close",
+          "keep"
         ]
       },
       {
