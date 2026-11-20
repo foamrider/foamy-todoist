@@ -31,6 +31,7 @@ kit = Path(
 os.environ.setdefault("FOAMY_HOST_45", "/usr/share/omarchy/shell")
 sys.path.insert(0, str(kit / "preview"))
 import harness  # noqa: E402
+import hostenv  # noqa: E402
 
 FAKE_HELPER = r"""
 cmd=$1
@@ -44,6 +45,7 @@ cat "$out/reply-$cmd.json"
 
 SHELL = r"""
 import QtQuick
+import QtQuick.Controls as Controls
 import QtTest
 import Quickshell
 import Quickshell.Io
@@ -342,6 +344,122 @@ ShellRoot {
       done();
     });
   }
+  // The editor's menus (Wide, t7 open): each field's context menu, then a
+  // project menu taller than its room; back to the list, then done().
+  function editorMenus(view, done) {
+    view.openTask("t7", true);
+    wait.waitFor(function() { var d = Plugin.TodoStore.description; return view.pageShown && view.editor.taskId === "t7" && d.id === "t7" && d.state === "ready" && view.editor.descriptionField.enabled; }, 15000, function(ok) {
+      if (!check(ok, "t7 open in the editor, its description read")) return;
+      var ed = view.editor;
+      shell.contextPaste(ed, [
+        { name: "dueField", open: "due" },
+        { name: "deadlineField", open: "deadline" },
+        { name: "contentField", open: "" },
+        { name: "descriptionField", open: "" }
+      ], function() {
+        shell.menuLeave(ed, function() {
+          shell.longPlaceMenu(ed, function() {
+            view.editor.back();
+            done();
+          });
+        });
+      });
+    });
+  }
+  // A right-click on an editor field opens its context menu: the menu takes
+  // the keys, but the field stays open and nothing is saved; the menu's
+  // Paste lands in it (the stand-in clipboard reads "folder"); Esc drops it.
+  function contextPaste(ed, fields, done) {
+    if (!fields.length) { done(); return; }
+    var f = fields[0];
+    var field = ed[f.name];
+    if (f.open) ed.openField(f.open); else field.focusInput();
+    field.cursorPosition = field.text.length;
+    var before = field.text;
+    var calls = shell.calls("apply").length;
+    var editor = field.editorItem;
+    var menu = editor.Controls.ContextMenu.menu;
+    var still = function() { return field.visible && (!f.open || ed.opened === f.open) && Object.keys(ed.pending).length === 0 && shell.calls("apply").length === calls; };
+    ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.RightButton, Qt.NoModifier, -1);
+    wait.waitFor(function() { return menu.opened; }, 5000, function(ok) {
+      if (!check(ok && !field.inputActiveFocus && still(), f.name + ": the context menu has the keys, the field stays open, nothing saved (" + JSON.stringify([ok, field.visible, ed.opened, Object.keys(ed.pending)]) + ")")) return;
+      var paste = null;
+      for (var i = 0; i < menu.count; i++)
+        if (menu.itemAt(i) && menu.itemAt(i).text === "Paste") paste = menu.itemAt(i);
+      if (!check(paste && paste.enabled, f.name + ": the menu has Paste")) return;
+      ev.mouseClick(paste, paste.width / 2, paste.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { return !menu.visible && !field.pasteRunning && field.text !== before; }, 10000, function(pasted) {
+        if (!check(pasted && field.text === before + "folder" && field.inputActiveFocus && still(), f.name + ": the menu's Paste landed in the open field, nothing saved (" + JSON.stringify([field.text, field.pasteError, ed.opened, Object.keys(ed.pending)]) + ")")) return;
+        ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+        if (!check(field.text === before && shell.calls("apply").length === calls && (!f.open || ed.opened === ""), f.name + ": Esc dropped the paste, nothing sent (" + JSON.stringify([field.text, ed.opened]) + ")")) return;
+        shell.contextPaste(ed, fields.slice(1), done);
+      });
+    });
+  }
+  // From the Date field's menu, a press on the title: the edit ends there
+  // (the untouched field closes, nothing to send), the title has the keys.
+  function menuLeave(ed, done) {
+    ed.openField("due");
+    var editor = ed.dueField.editorItem;
+    var menu = editor.Controls.ContextMenu.menu;
+    var calls = shell.calls("apply").length;
+    ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.RightButton, Qt.NoModifier, -1);
+    wait.waitFor(function() { return menu.opened; }, 5000, function(ok) {
+      if (!check(ok && ed.opened === "due", "the Date field's menu is open")) return;
+      var title = ed.contentField.editorItem;
+      var menuLeft = menu.contentItem.mapToItem(title, 0, 0).x;
+      ev.mouseClick(title, menuLeft > 12 ? 6 : title.width - 6, title.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { return !menu.visible && ed.opened === ""; }, 5000, function(left) {
+        if (!check(left && ed.contentField.inputActiveFocus && shell.calls("apply").length === calls, "a press on the title from the menu closed the Date field (" + JSON.stringify([menu.visible, ed.opened]) + ")")) return;
+        done();
+      });
+    });
+  }
+  // "" when entry `index` of the menu shows whole in its view; else where.
+  function menuRowShown(menu, index) {
+    // The panel's Flickable (it has a contentItem).
+    var view = null;
+    for (var child of menu.panel.children)
+      if (child.contentItem !== undefined && child.contentY !== undefined) view = child;
+    if (!view) return "no menu view";
+    var list = view.contentItem.children[0];
+    var row = null;
+    for (var item of list.children)
+      if (item.objectName === "foamyMenuRow" && item.index === index) row = item;
+    if (!row) return "no row " + index;
+    var top = row.mapToItem(view, 0, 0).y;
+    return top >= -0.5 && top + row.height <= view.height + 0.5 ? "" : "row " + index + " at " + top + ".." + (top + row.height) + " of " + view.height;
+  }
+  // Many projects: the project menu is taller than its room (it scrolls);
+  // End and Down keep the entry the keys are on in view.
+  function longPlaceMenu(ed, done) {
+    var store = Plugin.TodoStore;
+    var many = shell.snapshot();
+    for (var n = 1; n <= 40; n++)
+      many.projects.push({ id: "extra" + n, name: "Extra " + n, color: "grey", parent_id: null, child_order: 10 + n, inbox: false });
+    store.snapshot = many;
+    ed.openPlaceMenu(true);
+    var menu = ed.menu;
+    var last = menu.entries.length - 1;
+    var tall = function() { return menu.opened && last > 40 && menu.panel.height > 100 && menu.panel.height + 1 < menu.overlayItem.naturalHeight; };
+    wait.waitFor(tall, 3000, function(ok) {
+    if (!check(ok, "the project menu is taller than its room (" + JSON.stringify([last + 1, menu.panel.height, menu.overlayItem.naturalHeight]) + ")")) return;
+    ev.keyClick(Qt.Key_End, Qt.NoModifier, -1);
+    if (!check(menu.currentIndex === last && shell.menuRowShown(menu, last) === "", "End: the last project, in view (" + shell.menuRowShown(menu, last) + ")")) return;
+    ev.keyClick(Qt.Key_Home, Qt.NoModifier, -1);
+    var hidden = [];
+    for (var i = 0; i < last; i++) {
+      ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+      var at = shell.menuRowShown(menu, menu.currentIndex);
+      if (at !== "") hidden.push(at);
+    }
+    if (!check(menu.currentIndex === last && hidden.length === 0, "Down keeps each project in view (" + JSON.stringify(hidden.slice(0, 3)) + ")")) return;
+    ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+    if (!check(!menu.opened && Object.keys(ed.pending).length === 0, "Esc closed the menu, nothing picked")) return;
+    store.snapshot = shell.snapshot();
+    done();
+    });
+  }
   function check(ok, message) {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
     return ok;
@@ -495,7 +613,7 @@ ShellRoot {
     case 78: return [function() { return !store.busy; }, 15000, "the late reply came"];
     case 79: return [function() { return store.description.state === "ready" && store.description.id === "t7"; }, 15000, "t7's description"];
     case 80: return [function() { return view.wide && one.size === "wide"; }, 20000, "Wide"];
-    case 81: return [function() { return one.size === "large"; }, 10000, "Large"];
+    case 81: return [function() { return one.size === "large"; }, 40000, "Large"];
     case 82: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.size === "large" && Math.abs(one.popup.cardItem.width - 880) < 1; }, 10000, "the Large popup"];
     case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1"; }, 15000, "the pane's description"];
     case 84: return [function() { var v = one.popup.bodyItem; return v.editor.contentField.inputActiveFocus && store.description.state === "ready" && store.description.id === v.paneTask; }, 10000, "e put the caret in the pane, the description read"];
@@ -1699,7 +1817,7 @@ ShellRoot {
           // Undone within its window: nothing is sent.
           store.toggleComplete("t4");
           if (!check(!store.struck.t4 && shell.calls("apply").length === shell.callsBefore + 1, "and undone, nothing sent")) return;
-          one.prefs.save("panelWidth", "large");
+          shell.editorMenus(view, function() { one.prefs.save("panelWidth", "large"); });
         });
       });
       });
@@ -2062,6 +2180,8 @@ run = harness.Run(
 try:
     (run.out / "reply-status.json").write_text(json.dumps({"ok": True, "state": "signed_out", "user": None}))
     run.env["FAKE_HELPER"] = FAKE_HELPER
+    # The kit's stand-in wl-paste: a paste reads "folder", never the real clipboard.
+    run.env.update(hostenv.clipboard_fakes(run.base / "clipboard", env=run.env))
     run.run(timeout=200)
     refused = run.host_commands()
     if refused:
