@@ -2,7 +2,7 @@
 # Hashes are of each file's body (the file without its stamp line);
 # notices and REVIEW.md are hashed whole. tests/kit-check.sh verifies them.
 version 0.13.0
-source 58c850d07fd57c7b9d341c4e79dd6a22537aa18a
+source dc83f267cffdae6b760469a450826e9de4cbbbfd
 components FoamyAction,FoamyButton,FoamyClickAway,FoamyClipboard,FoamyCursor,FoamyDropdown,FoamyHeader,FoamyHeroBand,FoamyI18n,FoamyIcon,FoamyInfoNote,FoamyIpc,FoamyMenu,FoamyMotion,FoamyNative,FoamyNumberField,FoamyPalette,FoamyPanelFooter,FoamyPopup,FoamyPrefs,FoamySettings,FoamyShared,FoamyStyle,FoamyTabs,FoamyText,FoamyWallClock,FoamyWheelScroll,SafeTextArea,SafeTextField
 5079c3e4ecd2ca5399dff48f64327729d8e84916a4c73fbcb9e0491b16014990  .github/workflows/checks.yml
 98bd9e4430551129a6f4c309ee8ba59b66514db5ca1d4c5b7151ec308f6d632b  .github/workflows/verify-native.yml
@@ -26,7 +26,7 @@ c0b06867bfa1e08d7f7ba42acb6718cb9db71120664edb068455af5008280069  kit/FoamyInfoN
 04c7e30a4501692cfa778a7999d12f42e81c03047cf06a1a8c69a966f74b915a  kit/FoamyIpcPreference.qml
 72e0502f9cd35ca638b6af1c5e3e5411738a161cff2ed18f5751e11e9365f48c  kit/FoamyIpcResolver.js
 32aa0fb8fd9f8d3184da86ba58314f4972cbe61c43237a2c560bb05097571e01  kit/FoamyMember.qml
-782fef94965a2802e5d4eb8ee44de10b213b0601afa264c209215bd5c7aa0ac5  kit/FoamyMenu.qml
+d74ee65b3df0ace94e2b809f6d37099719307eae51642ca1741bc02ce2ad4268  kit/FoamyMenu.qml
 e9b6a91b5308809f93fce754319135cbac17fa92ab9546fca6bd51691dd9d50e  kit/FoamyMenuItem.qml
 ac985fdddb1be105d4ca5590c31fb7972e55cf5b05a792ef618a80afda25980f  kit/FoamyMotion.qml
 0e877660044748bd8926a24de47ee8f6f194e085fb20b794e0621b039eda1eb4  kit/FoamyNative.js
