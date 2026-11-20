@@ -797,9 +797,7 @@ function rows(model, view, today, options) {
 // calendar week, "later" for the rest of this month after that (key:
 // "YYYY-MM"), then one "month" per month (key: "YYYY-MM").
 function upcomingGroup(day, today, weekStart) {
-  var start = ((Number(weekStart) % 7) + 7) % 7
-  var sinceStart = (dayDate(today).getDay() - start + 7) % 7
-  var weekEnd = addDays(today, 6 - sinceStart)
+  var weekEnd = weekEndOf(today, weekStart)
   // Tomorrow is always a day of its own, also on the week's last day.
   if (day <= weekEnd || day === addDays(today, 1))
     return { group: "day", key: day }
@@ -808,6 +806,13 @@ function upcomingGroup(day, today, weekStart) {
   if (day.slice(0, 7) === today.slice(0, 7))
     return { group: "later", key: day.slice(0, 7) }
   return { group: "month", key: day.slice(0, 7) }
+}
+
+// The last day of the calendar week `today` is in, for the locale's first
+// day of the week (`weekStart`, 0 = Sunday).
+function weekEndOf(today, weekStart) {
+  var start = ((Number(weekStart) % 7) + 7) % 7
+  return addDays(today, 6 - (dayDate(today).getDay() - start + 7) % 7)
 }
 
 // Upcoming: the folded Overdue row, then the groups in order, each with a
@@ -843,7 +848,7 @@ function upcomingRows(model, today, options, flat) {
   order.sort(function (a, b) {
     return rank[groups[a].group] - rank[groups[b].group] || compare(groups[a].key, groups[b].key)
   })
-  var weekEnd = addDays(today, 6 - (dayDate(today).getDay() - (((Number(weekStart) % 7) + 7) % 7) + 7) % 7)
+  var weekEnd = weekEndOf(today, weekStart)
   var trail = { day: "", week: "weekday", later: "weekdayDate", month: "weekdayDate" }
   order.forEach(function (key) {
     var entry = groups[key]
@@ -941,6 +946,227 @@ function shiftedDay(task, delta, today) {
   if (day < today)
     day = today
   return day === task.due.day ? "" : day
+}
+
+// ---- the overview (Wide's pane while no task is selected) -------------------------
+// One summary of the current view, from the same snapshot and filters as
+// its list, each in one pass over the view's tasks. Built only while it
+// shows (TodoView).
+
+// Today's timeline covers these hours, stretched to any timed task outside
+// them; a task's block is BLOCK_MINUTES long (its time has no end in Todoist).
+var TIMELINE_START = 8
+var TIMELINE_END = 18
+var BLOCK_MINUTES = 60
+
+// Today (the personal tasks due today or before): {kind: "today", left
+// (due today), overdue, untimed (due today without a time), next (the
+// first timed task after `options.nowMinutes` that isn't struck: {id,
+// text, time, inMinutes}, or null), start and end (the timeline's hours),
+// nowMinutes, now (whether nowMinutes is inside them), blocks}. Each block: {id, text,
+// time, minutes, length (minutes, cut at the range's end), past (started
+// before now), struck, lane, lanes}: blocks that overlap share their
+// width in lanes.
+function todayOverview(model, today, options) {
+  options = Object.assign({}, options, { personalView: true })
+  var now = Number(options.nowMinutes) || 0
+  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: TIMELINE_START, end: TIMELINE_END, nowMinutes: now, now: false, blocks: [] }
+  var timed = []
+  visibleTasks(model, options, function (task) {
+    return !!task.due && task.due.day <= today
+  }).forEach(function (task) {
+    if (task.due.day < today)
+      out.overdue++
+    else {
+      out.left++
+      if (task.due.minutes < 0)
+        out.untimed++
+      else
+        timed.push(task)
+    }
+  })
+  timed.sort(byDay)
+  var struck = options.struck
+  timed.forEach(function (task) {
+    var m = task.due.minutes
+    out.start = Math.min(out.start, Math.floor(m / 60))
+    out.end = Math.max(out.end, Math.min(24, Math.ceil((m + BLOCK_MINUTES) / 60)))
+    var done = has(struck, task.id) && !!struck[task.id]
+    if (!out.next && !done && m > now)
+      out.next = { id: task.id, text: task.text, time: task.due.time, inMinutes: m - now }
+  })
+  out.now = now >= out.start * 60 && now <= out.end * 60
+  // Lanes: a block takes the first lane free at its time; a run of blocks
+  // that overlap one another splits the width by its number of lanes.
+  var run = []
+  var laneEnds = []
+  var close = function () {
+    run.forEach(function (block) {
+      block.lanes = laneEnds.length
+    })
+    run = []
+    laneEnds = []
+  }
+  timed.forEach(function (task) {
+    var m = task.due.minutes
+    if (run.length && laneEnds.every(function (end) {
+        return end <= m
+      }))
+      close()
+    var lane = 0
+    while (lane < laneEnds.length && laneEnds[lane] > m)
+      lane++
+    laneEnds[lane] = m + BLOCK_MINUTES
+    var block = {
+      id: task.id,
+      text: task.text,
+      time: task.due.time,
+      minutes: m,
+      length: Math.min(BLOCK_MINUTES, out.end * 60 - m),
+      past: m < now,
+      struck: has(struck, task.id) && !!struck[task.id],
+      lane: lane,
+      lanes: 1
+    }
+    run.push(block)
+    out.blocks.push(block)
+  })
+  close()
+  return out
+}
+
+// When a list's tasks are due, in order: overdue, today, "week" (after
+// today to the end of this calendar week), later, and "none" (no date).
+// [{key, count}], only the parts with tasks.
+var WHEN_KEYS = ["overdue", "today", "week", "later", "none"]
+function whenKey(task, today, weekEnd) {
+  if (!task.due)
+    return "none"
+  var day = task.due.day
+  return day < today ? "overdue" : day === today ? "today" : day <= weekEnd ? "week" : "later"
+}
+
+// A project, the Inbox or the search results: {kind: "list", total,
+// sections, when, labels}. `sections` (a project only, and only when it
+// has a section or a sub-project): [{kind: "section", id ("" for the tasks
+// without one), name, count}] in the list's order, the empty ones left
+// out, then [{kind: "project", id, name, role, count}] for its
+// sub-projects (`options.projectCounts`, the rail's counts). `labels`:
+// [{name, count}], the most used first.
+function listOverview(model, view, today, options) {
+  options = options || {}
+  var projectId = view === "inbox" ? model.inboxId : view === "project" ? options.projectId : ""
+  var tasks
+  if (view === "search")
+    tasks = searchMatches(model, options.query, options)
+  else if (projectId && model.projects[projectId])
+    tasks = visibleTasks(model, view === "inbox" ? Object.assign({}, options, { personalView: true }) : options, function (task) {
+      return task.projectId === projectId
+    })
+  else
+    tasks = []
+  var weekEnd = weekEndOf(today, options.weekStart !== undefined ? options.weekStart : 1)
+  var when = dict()
+  var labels = dict()
+  var bySection = dict()
+  tasks.forEach(function (task) {
+    var key = whenKey(task, today, weekEnd)
+    when[key] = (when[key] || 0) + 1
+    task.labels.forEach(function (name) {
+      labels[name] = (labels[name] || 0) + 1
+    })
+    var section = task.sectionId || ""
+    bySection[section] = (bySection[section] || 0) + 1
+  })
+  var out = {
+    kind: "list",
+    total: tasks.length,
+    sections: [],
+    when: WHEN_KEYS.filter(function (key) {
+      return when[key] > 0
+    }).map(function (key) {
+      return { key: key, count: when[key] }
+    }),
+    labels: Object.keys(labels).sort(function (a, b) {
+      return labels[b] - labels[a] || compare(a.toLowerCase(), b.toLowerCase()) || compare(a, b)
+    }).map(function (name) {
+      return { name: name, count: labels[name] }
+    })
+  }
+  if (view !== "project" || !projectId)
+    return out
+  var sections = Object.keys(model.sections).map(function (id) {
+    return model.sections[id]
+  }).filter(function (section) {
+    return section.projectId === projectId && bySection[section.id] > 0
+  }).sort(function (a, b) {
+    return a.order - b.order || compare(a.id, b.id)
+  }).map(function (section) {
+    return { kind: "section", id: section.id, name: section.name, count: bySection[section.id] }
+  })
+  var counts = options.projectCounts
+  var children = Object.keys(model.projects).map(function (id) {
+    return model.projects[id]
+  }).filter(function (project) {
+    return project.parentId === projectId
+  }).sort(function (a, b) {
+    return a.order - b.order || compare(a.name, b.name) || compare(a.id, b.id)
+  }).map(function (project) {
+    return { kind: "project", id: project.id, name: project.name, role: colorRole(project.color), count: (has(counts, project.id) && counts[project.id]) || 0 }
+  })
+  if (sections.length || children.length)
+    out.sections = (bySection[""] ? [{ kind: "section", id: "", name: "", count: bySection[""] }] : []).concat(sections, children)
+  return out
+}
+
+// Upcoming (the personal tasks): {kind: "upcoming", days, deadline,
+// undated}. `days`: the seven days after today, [{day, count}];
+// `deadline`: the nearest deadline from today on ({id, text, day, inDays})
+// or null; `undated`: the tasks without a date (Upcoming doesn't list them).
+function upcomingOverview(model, today, options) {
+  options = Object.assign({}, options, { personalView: true })
+  var days = []
+  var at = dict()
+  for (var i = 1; i <= 7; i++) {
+    var day = addDays(today, i)
+    at[day] = days.length
+    days.push({ day: day, count: 0 })
+  }
+  var out = { kind: "upcoming", days: days, deadline: null, undated: 0 }
+  var best = null
+  visibleTasks(model, options, function () {
+    return true
+  }).forEach(function (task) {
+    if (!task.due)
+      out.undated++
+    else if (has(at, task.due.day))
+      days[at[task.due.day]].count++
+    if (task.deadline && task.deadline >= today && (!best || task.deadline < best.deadline || (task.deadline === best.deadline && (task.order - best.order || compare(task.id, best.id)) < 0)))
+      best = task
+  })
+  if (best)
+    out.deadline = { id: best.id, text: best.text, day: best.deadline, inDays: daysBetween(today, best.deadline) }
+  return out
+}
+
+// The overview of `view` (as `rows` takes it; options also nowMinutes and
+// projectCounts), or null for a view that has none (the Week view).
+function overview(model, view, today, options) {
+  if (view === "today")
+    return todayOverview(model, today, options)
+  if (view === "upcoming")
+    return upcomingOverview(model, today, options)
+  if (view === "inbox" || view === "project" || view === "search")
+    return listOverview(model, view, today, options)
+  return null
+}
+
+// "in 2 h 10 min", "in 2 h", "in 5 min": how far ahead a time is.
+var AHEAD_KEYS = ["in %1 h %2 min", "in %1 h", "in %1 min"]
+function aheadText(minutes, t) {
+  var h = Math.floor(minutes / 60)
+  var m = minutes % 60
+  return h && m ? t("in %1 h %2 min", [h, m]) : h ? t("in %1 h", [h]) : t("in %1 min", [m])
 }
 
 // Catalog keys the Upcoming texts use (translated by `t`, the formats
@@ -1049,24 +1275,51 @@ function openArgv(command, url) {
   return replaced ? argv : argv.concat([url])
 }
 
-// Search: open tasks whose text, project name or a label contains every
-// word of the query (case-insensitive), flat, grouped by project (Inbox
-// first, then the rail's order).
-function searchRows(model, query, today, options) {
-  var words = String(query || "").toLowerCase().split(/\s+/).filter(function (word) {
-    return word !== ""
-  }).map(function (word) {
-    return word.charAt(0) === "@" && word.length > 1 ? word.slice(1) : word
-  })
+// A search query's words, lowercased: {label} for `@name` (a label whose
+// name starts with it), {text} for the rest (the task's text, project name
+// or a label contains it). A space escaped as `\ ` belongs to the word, as
+// in Quick Add (`@waiting\ on`); a lone "@" is text.
+function searchWords(query) {
+  var text = String(query || "")
+  var out = []
+  var at = 0
+  while (at < text.length) {
+    if (/\s/.test(text.charAt(at))) {
+      at++
+      continue
+    }
+    var end = at
+    while (end < text.length && !breaksWord(text, end))
+      end++
+    var word = text.slice(at, end).replace(/\\ /g, " ").toLowerCase()
+    out.push(word.charAt(0) === "@" && word.length > 1 ? { label: word.slice(1) } : { text: word })
+    at = end
+  }
+  return out
+}
+
+// The search's matches: open tasks that every word of the query matches.
+function searchMatches(model, query, options) {
+  var words = searchWords(query)
   if (!words.length)
     return []
-  var matches = visibleTasks(model, options, function (task) {
+  return visibleTasks(model, options, function (task) {
     var project = model.projects[task.projectId]
     var haystack = [task.text, project ? project.name : ""].concat(task.labels).join("\n").toLowerCase()
     return words.every(function (word) {
-      return haystack.indexOf(word) >= 0
+      if (word.label === undefined)
+        return haystack.indexOf(word.text) >= 0
+      return task.labels.some(function (label) {
+        return label.toLowerCase().indexOf(word.label) === 0
+      })
     })
   })
+}
+
+// Search: the matches, flat, grouped by project (Inbox first, then the
+// rail's order).
+function searchRows(model, query, today, options) {
+  var matches = searchMatches(model, query, options)
   var byProject = dict()
   matches.forEach(function (task) {
     if (!byProject[task.projectId])
@@ -1179,5 +1432,6 @@ if (typeof module !== "undefined")
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
-    MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate
+    MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
+    weekEndOf, searchWords, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
   }

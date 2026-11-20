@@ -23,17 +23,14 @@ Two sizes (**Size** in Settings), both the popup under the bar:
   something is overdue).
 - **Wide**: no tabs. A rail on the left lists the views (with **Week** after
   Upcoming), then **My projects** (sub-projects indented one step) with
-  their open tasks; the list is beside it. With no task selected the popup
-  is only as wide as the rail and the list (609 px). Selecting a task (a
-  click on it, or the keys resting on it) opens its details on the right
-  and the popup grows to 880 px; clearing the selection closes them and it
-  shrinks back. The Week view is always 880 px. The width change is
-  animated (instant with reduced motion), and the list keeps its width, so
-  the rows don't reflow. The popup stays centred under the bar button, or
-  against the screen's edge, so the list slides with it as it grows. It is
-  as tall as its content up to 70% of the screen (the list scrolls inside),
-  never wider than the screen, and its settings page is 560 px. Where the
-  screen has no room for 609 px beside the popup's margins, it opens Small
+  their open tasks; the list is beside it, and a pane on the right shows
+  the selected task's details (a click on it, or the keys resting on it)
+  or, with none selected, an overview of the view (see "The overview").
+  The popup is always 880 px, with or without a selection, in the Week
+  view and on its settings page (whose sections keep the 560 px column,
+  centred), so it never changes width while open. It is as tall as its
+  content up to 70% of the screen (the list scrolls inside). Where the
+  screen has no room for 880 px beside the popup's margins, it opens Small
   instead.
 
 The band at the top holds the Todoist mark, the title, the current view and
@@ -144,10 +141,35 @@ not verified against Todoist yet. Esc closes only the list. With the list
 closed, Enter adds the task as before. Search never shows suggestions.
 
 **Search** (the button, or `/`): the same field grows out of **Search** and
-searches every open task by text, project name and labels; the results
+searches every open task by text, project name and labels; a word that
+starts with `@` matches labels only (a label whose name starts with it;
+write a space in a label's name as `\ `, as in Quick Add). The results
 replace the list, grouped by project. Esc clears the text, then leaves
 search. Leaving search (Esc, another view) puts back an add draft you had
 started before it, the caret at its end; without one, the field closes.
+
+**The overview** (Wide): with no task selected, the pane sums up the
+view. Parts with nothing to show are left out; a click on a part (or Tab
+to it and Enter) acts on it.
+
+- **Today**: the date, how many tasks are left today and how many are
+  overdue, **Next** (the next task with a time still ahead today, and how
+  far ahead), and **Today's times**: the hours from 08 to 18 (wider when a
+  task is outside them), each task with a time as a block at its time, and
+  a red line at now; under it, how many tasks have no time. A block or
+  Next selects that task.
+- **A project**: **Sections** with their task counts ("(No section)" for
+  the tasks without one) and its sub-projects: a section scrolls the list
+  to it, a sub-project opens it. **When**: one bar of overdue, today, this
+  week (to the end of the calendar week), later and no date, with a
+  legend. **Labels**: the labels on its tasks, the most used first; a
+  label searches for it (`@label`).
+- **Inbox** and **search**: When and Labels, as for a project.
+- **Upcoming**: the next seven days as columns, a bar each by its number
+  of tasks; the day a new task goes to is lit (tomorrow, or the day you
+  picked). A day scrolls the list to it. **Next deadline**: the nearest
+  deadline from today on (selects its task), then how many tasks have no
+  date (Upcoming doesn't list them).
 
 **Editing**: a click on a task, Enter or `e` opens it in the editor. In
 Small the editor takes the panel's place, like the settings page:
@@ -160,8 +182,9 @@ Tab moves through the parts, and Esc gives the keys back to the list.
 While a change is sent, the footer says "Saving…" in place of "Updated …",
 then "Saved" for two seconds. A click on the list's space that isn't a row
 (below the last row, a heading, the Week view's empty column space), or
-Esc in the list, clears the selection: no row is selected and the pane closes (outside the Week
-view the popup narrows again); what you typed in the pane is saved first.
+Esc in the list, clears the selection: no row is selected and the pane
+shows the overview again (over the Week view it closes); what you typed in
+the pane is saved first.
 A task completed or deleted elsewhere closes the pane too. A click on
 empty space anywhere in the panel takes the keys from a text field, which
 saves as when you leave it.
@@ -261,7 +284,9 @@ project's view moves the task there only when the text names no project: a
 | Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
 | Enter, Space | a value in the editor | change it (a menu, or the date field) |
 | Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
-| Tab | the list (Wide) | into the details pane |
+| Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts) |
+| Enter, Space | a part of the overview | what a click does |
+| Esc | the overview | the keys back to the list |
 | r, s | the list | refresh, Settings |
 | Esc | the list | close (Wide: close the details pane first; in a list that clears the selection) |
 | Tab, Shift+Tab | the list, or an empty field | the next or previous panel (in a field with text: nothing) |

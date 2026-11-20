@@ -1,4 +1,8 @@
 {
+  "%1 later": {
+    "one": "%1 later",
+    "other": "%1 later"
+  },
   "%1 left today": {
     "one": "%1 left today",
     "other": "%1 left today"
@@ -11,10 +15,35 @@
     "one": "%1 overdue",
     "other": "%1 overdue"
   },
+  "%1 tasks": {
+    "one": "%1 task",
+    "other": "%1 tasks"
+  },
+  "%1 tasks have no date and don't show here": {
+    "one": "%1 task has no date and doesn't show here",
+    "other": "%1 tasks have no date and don't show here"
+  },
+  "%1 tasks without a time": {
+    "one": "%1 task without a time",
+    "other": "%1 tasks without a time"
+  },
+  "%1 this week": {
+    "one": "%1 this week",
+    "other": "%1 this week"
+  },
+  "%1 today": {
+    "one": "%1 today",
+    "other": "%1 today"
+  },
+  "%1 without a date": {
+    "one": "%1 without a date",
+    "other": "%1 without a date"
+  },
   "%1 · %2 tasks": {
     "one": "%1 · %2 task",
     "other": "%1 · %2 tasks"
   },
+  "(No section)": "(No section)",
   "A command to open Todoist links with, for example omarchy-launch-or-focus-webapp Todoist {url}. {url} is replaced with the link; without it, the link is added at the end. No shell: quotes and pipes aren't supported.": "A command to open Todoist links with, for example omarchy-launch-or-focus-webapp Todoist {url}. {url} is replaced with the link; without it, the link is added at the end. No shell: quotes and pipes aren't supported.",
   "A description can have at most 16383 characters.": "A description can have at most 16383 characters.",
   "A description can't have control characters other than line breaks and tabs.": "A description can't have control characters other than line breaks and tabs.",
@@ -71,6 +100,13 @@
   "Hide": "Hide",
   "HTTPS isn't supported on this CPU (foamy helpers need AES, carry-less multiply, AVX2, BMI2 and ADX on x86-64, or the crypto extensions on ARMv8)": "HTTPS isn't supported on this CPU (foamy helpers need AES, carry-less multiply, AVX2, BMI2 and ADX on x86-64, or the crypto extensions on ARMv8)",
   "Icon only": "Icon only",
+  "in %1 days": {
+    "one": "in %1 day",
+    "other": "in %1 days"
+  },
+  "in %1 h": "in %1 h",
+  "in %1 h %2 min": "in %1 h %2 min",
+  "in %1 min": "in %1 min",
   "Inbox": "Inbox",
   "Inbox is empty": "Inbox is empty",
   "Inbox · %1 tasks": {
@@ -83,11 +119,15 @@
   "Last view": "Last view",
   "Later": "Later",
   "Later in %1": "Later in %1",
+  "left today": "left today",
   "Loading…": "Loading…",
   "More information": "More information",
   "More options": "More options",
   "Moving a task out of its section needs the project's id.": "Moving a task out of its section needs the project's id.",
   "My projects": "My projects",
+  "Next": "Next",
+  "Next 7 days": "Next 7 days",
+  "Next deadline": "Next deadline",
   "Next week": "Next week",
   "No keyring is available to store the Todoist token (%1).": "No keyring is available to store the Todoist token (%1).",
   "No keyring is available to store the Todoist token.": "No keyring is available to store the Todoist token.",
@@ -103,6 +143,7 @@
   "Open Todoist": "Open Todoist",
   "Open Todoist settings": "Open Todoist settings",
   "Overdue": "Overdue",
+  "overdue": "overdue",
   "Panel": "Panel",
   "Pick a priority from 1 to 4.": "Pick a priority from 1 to 4.",
   "Priority": "Priority",
@@ -117,6 +158,7 @@
   "Saving…": "Saving…",
   "Search": "Search",
   "Search tasks": "Search tasks",
+  "Sections": "Sections",
   "Send 1 to 100 changes at a time.": "Send 1 to 100 changes at a time.",
   "Settings": "Settings",
   "Settings can't be saved: this widget has no bar entry.": "Settings can't be saved: this widget has no bar entry.",
@@ -157,6 +199,7 @@
     "one": "Today · %1 left",
     "other": "Today · %1 left"
   },
+  "Today's times": "Today's times",
   "Todoist": "Todoist",
   "Todoist answered HTTP %1.": "Todoist answered HTTP %1.",
   "Todoist didn't accept the API token.": "Todoist didn't accept the API token.",
@@ -201,6 +244,7 @@
     "one": "Week · %1 task",
     "other": "Week · %1 tasks"
   },
+  "When": "When",
   "Wide": "Wide",
   "Yesterday": "Yesterday"
 }

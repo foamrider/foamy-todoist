@@ -79,6 +79,8 @@ function dataKeys() {
     ...Model.DETAIL_KEYS,
     // The add field's placeholders (Model.addPlaceholder).
     ...Model.PLACEHOLDER_KEYS,
+    // How far ahead the overview's next task is (Model.aheadText).
+    ...Model.AHEAD_KEYS,
     // The editor's checks (Edit.change), the helper's own messages.
     ...Object.values(require('../Edit.js').ERRORS),
   ];

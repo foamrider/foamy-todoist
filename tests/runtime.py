@@ -518,7 +518,7 @@ ShellRoot {
     var areaBox = box(area);
     if (!rail.visible || Math.abs(railBox.right - card.right) > 0.5) off.push("rail " + JSON.stringify(railBox) + " not at the right edge of " + card.right);
     if (Math.abs(areaBox.right - (railBox.left - border)) > 0.5) off.push("list " + JSON.stringify(areaBox) + " not beside the rail");
-    var paneSpace = view.paneShown && !view.weekShown ? view.paneWidth + border : 0;
+    var paneSpace = view.paneOpen && !view.weekShown ? view.paneWidth + border : 0;
     if (Math.abs(areaBox.width - (card.right - railBox.width - border - paneSpace)) > 0.5) off.push("list width " + areaBox.width + " in " + card.right);
     if (!inside(areaBox, card)) off.push("list " + JSON.stringify(areaBox) + " outside the card");
     var labels = shell.findAll(rail, "railLabel");
@@ -547,8 +547,8 @@ ShellRoot {
       for (var k = 0; k < keys.length; k++)
         if (!inside(keys[k], areaBox) || (k > 0 && keys[k].right > keys[k - 1].left + 0.5)) off.push("Week columns " + JSON.stringify(keys));
     }
-    if (view.paneShown) {
-      var pane = box(view.editor);
+    if (view.paneShown || view.overviewShown) {
+      var pane = box(view.paneShown ? view.editor : shell.find(view, "overview"));
       if (!inside(pane, card) || pane.left > 0.5 || (!view.weekShown && Math.abs(pane.right + border - areaBox.left) > 0.5)) off.push("pane " + JSON.stringify(pane) + " not on the far left");
     }
     return off.join("; ");
@@ -579,8 +579,8 @@ ShellRoot {
   // Wide: a click on the pane's empty space takes the keys from its title
   // (the typed text saved) and keeps the selection; a click on the list's
   // space that isn't a row (below the rows, a heading, the top margin)
-  // clears it: no row, no cursor, the pane closed and the card back to its
-  // narrow width, the band's Search again, the pane's draft saved first.
+  // clears it: no row, no cursor, the pane on the overview and the card at
+  // 880 still, the band's Search again, the pane's draft saved first.
   // Then `done`.
   function listSpace(view, done) {
     var store = Plugin.TodoStore;
@@ -633,11 +633,10 @@ ShellRoot {
       if (!check(below < list.height - 12, "the list has room below its rows (" + JSON.stringify([list.contentHeight, list.height]) + ")")) return;
       ev.mouseClick(list, list.width / 2, below + 8, Qt.LeftButton, Qt.NoModifier, -1);
       var actions = function() { return JSON.stringify(view.band.shownTrailing.map(function(item) { return item.objectName; })); };
-      if (!check(view.paneTask === "" && view.cursor.index === -1 && shell.highlighted(view).length === 0 && editor.taskId === "" && !editor.visible && !view.fullWidth && one.cardWidth === 609 && !view.blocked && !view.taskInBand, "a click below the rows cleared the selection, closed the pane (" + JSON.stringify([view.paneTask, view.cursor.index, one.cardWidth]) + ")")) return;
-      // The band lays its buttons out again on the next turn of the event
-      // loop; the card shrinks back (animated) once the draft has gone out.
-      wait.waitFor(function() { return actions() === JSON.stringify(["addAction", "searchAction"]) && shell.calls("apply").length === from + 2 && !store.busy && one.popup.contentWidth === 609; }, 15000, function(ok2) {
-        if (!check(ok2 && store.model.byId[id].content === second && shell.popupPlacement(one, 609) === "", "no task in the pane: the band has Search again, the card 609 again; the pane's draft was saved first (" + actions() + ", " + JSON.stringify(shell.updatesSince(from)) + ", " + shell.popupPlacement(one, 609) + ")")) return;
+      if (!check(view.paneTask === "" && view.cursor.index === -1 && shell.highlighted(view).length === 0 && editor.taskId === "" && !editor.visible && view.overviewShown && shell.find(view, "overview").visible && one.cardWidth === 880 && !view.blocked && !view.taskInBand, "a click below the rows cleared the selection, the pane shows the overview (" + JSON.stringify([view.paneTask, view.cursor.index, one.cardWidth]) + ")")) return;
+      // The band lays its buttons out again on the next turn of the event loop.
+      wait.waitFor(function() { return actions() === JSON.stringify(["addAction", "searchAction"]) && shell.calls("apply").length === from + 2 && !store.busy; }, 15000, function(ok2) {
+        if (!check(ok2 && store.model.byId[id].content === second && shell.popupPlacement(one, 880) === "", "no task in the pane: the band has Search again, the card 880 still; the pane's draft was saved first (" + actions() + ", " + JSON.stringify(shell.updatesSince(from)) + ", " + shell.popupPlacement(one, 880) + ")")) return;
         // A heading between groups, and the list's top margin: the same.
         var headers = shell.builtHeaders(view);
         if (!check(headers.length > 0, "the list has a heading")) return;
@@ -648,22 +647,141 @@ ShellRoot {
         var area = shell.find(view, "listArea");
         ev.mouseClick(area, area.width / 2, 2, Qt.LeftButton, Qt.NoModifier, -1);
         if (!check(view.paneTask === "" && view.cursor.index === -1, "a click on the list's top margin cleared the selection")) return;
-        // A click on a row selects it: the pane opens, the card grows.
+        // A click on a row selects it: the pane shows it, the card keeps its width.
         var clicked = shell.builtRows(view)[1];
         var clickedSurface = shell.find(clicked, "taskSurface");
         ev.mouseClick(clickedSurface, clickedSurface.width * 0.3, clickedSurface.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-        if (!check(view.paneTask === clicked.entry.id && editor.visible && view.fullWidth && one.cardWidth === 880, "a click on a row: the pane on it, the card toward 880 (" + JSON.stringify([view.paneTask, one.cardWidth]) + ")")) return;
-        // Esc in the list: the selection clears first (the pane closes, the
-        // card toward 609), then a second Esc would close the popup.
+        if (!check(view.paneTask === clicked.entry.id && editor.visible && !view.overviewShown && one.cardWidth === 880 && one.popup.contentWidth === 880, "a click on a row: the pane on it, the card 880 (" + JSON.stringify([view.paneTask, one.cardWidth]) + ")")) return;
+        // Esc in the list: the selection clears first (the pane shows the
+        // overview again), then a second Esc would close the popup.
         view.focusList();
         ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-        if (!check(one.opened && view.paneTask === "" && view.cursor.index === -1 && !editor.visible && one.cardWidth === 609, "Esc in the list cleared the selection, the popup stays (" + JSON.stringify([one.opened, view.paneTask, one.cardWidth]) + ")")) return;
+        if (!check(one.opened && view.paneTask === "" && view.cursor.index === -1 && !editor.visible && view.overviewShown && one.cardWidth === 880, "Esc in the list cleared the selection, the overview is back, the popup stays (" + JSON.stringify([one.opened, view.paneTask, one.cardWidth]) + ")")) return;
         // A row still selects.
         view.goTo(view.firstRowStop);
         if (!check(view.paneTask !== "" && view.taskInBand, "the keys select a row again")) return;
         done();
       });
     });
+  }
+  // Wide's pane with no task selected: each view's overview, and what its
+  // parts do (Today, 12:00 on the store's clock). `view` is open on Today
+  // with nothing selected; it ends that way. Then `done`.
+  function overviewChecks(view, done) {
+    var store = Plugin.TodoStore;
+    var pane = shell.find(view, "overview");
+    var part = function(name) { return shell.find(pane, name); };
+    var shown = function(name) { var item = part(name); return !!item && item.visible; };
+    var click = function(item) { ev.mouseClick(item, item.width / 2, item.height / 2, Qt.LeftButton, Qt.NoModifier, -1); };
+    var wideStill = function() { return one.cardWidth === 880 && one.popup.contentWidth === 880; };
+    // Whether `texts` holds `wanted` in this order.
+    var inOrder = function(texts, wanted) { var at = 0; for (var text of texts) if (text === wanted[at]) at++; return at === wanted.length; };
+    // The list's header at its top (after a part scrolled it there).
+    var headerOnTop = function(test) {
+      var header = shell.builtHeaders(view).find(function(h) { return test(h.entry); });
+      return !!header && view.list.contentY > 0 && Math.abs(header.mapToItem(view.list, 0, 0).y) < 1;
+    };
+    // Each stage runs after a frame: the overview's layout is placed then.
+    var stages = [function() {
+      store.snapshot = shell.snapshot();
+      return true;
+    }, function() {
+      // Today: the date, the figures, Next, the timeline, the untimed count.
+      var todayTexts = shell.visibleTexts(pane);
+      if (!check(pane.visible && pane.summary.kind === "today" && inOrder(todayTexts, ["Wednesday 18 November", "4", "left today", "2", "overdue", "Next", "Review pull request #482", "14:00 · in 2 h", "Today's times", "09:30 Stand-up with the platform team", "14:00 Review pull request #482", "2 tasks without a time"]) && todayTexts.indexOf("with a time") < 0, "Today's overview (" + JSON.stringify(todayTexts) + ")")) return false;
+      // The first part at the list's top margin, as the editor's title.
+      var dateTop = part("overviewDate").mapToItem(view, 0, 0).y;
+      var listTop = view.list.mapToItem(view, 0, 0).y;
+      if (!check(Math.abs(dateTop - listTop) <= 1, "the date at the list's top (" + JSON.stringify([dateTop, listTop]) + ")")) return false;
+      var block3 = part("block-t3");
+      var block4 = part("block-t4");
+      var nowLine = part("nowLine");
+      if (!check(nowLine.visible && block3.y < nowLine.y && nowLine.y < block4.y && part("timeline").height > block4.y + block4.height, "the now line between 09:30 and 14:00 (" + JSON.stringify([block3.y, nowLine.y, block4.y]) + ")")) return false;
+      // Hover lights a part.
+      ev.mouseMove(block4, block4.width / 2, block4.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      if (!check(block4.lit && !block3.lit, "hover lights a block")) return false;
+      // A block: its task selected (the pane shows it, the cursor on its row).
+      click(block3);
+      if (!check(view.paneTask === "t3" && view.editor.visible && !pane.visible && view.cursorRow() && view.cursorRow().id === "t3" && wideStill(), "a timeline block selected its task (" + JSON.stringify([view.paneTask, view.cursorRow() && view.cursorRow().id]) + ")")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      return check(view.paneTask === "" && pane.visible && wideStill(), "Esc: the overview again");
+    }, function() {
+      // Tab: the keys on Next (the first stop), then the timeline; Esc gives
+      // them back; Enter on Next selects its task.
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(part("nextTask").activeFocus && view.blocked, "Tab: the keys on Next")) return false;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(part("block-t3").activeFocus, "Tab: the first block")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!pane.activeFocus && !view.blocked && one.opened, "Esc: the keys back to the list")) return false;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.paneTask === "t4" && view.editor.visible && !view.blocked && view.cursorRow().id === "t4", "Enter on Next selected t4, the keys with the list")) return false;
+      view.clearSelection();
+      // A project (with more tasks than fit, so the list can scroll).
+      var many = shell.snapshot();
+      for (var i = 0; i < 30; i++) {
+        many.tasks.push(Fixtures.task("w" + i, "Work item " + i, "work", { section_id: "s-review", child_order: 100 + i }));
+        many.tasks.push(Fixtures.task("m" + i, "Later item " + i, "home", { due: Fixtures.due(Fixtures.shift(shell.today, 3)), child_order: 100 + i }));
+      }
+      store.snapshot = many;
+      view.setView("project", "work");
+      return true;
+    }, function() {
+      var workTexts = shell.visibleTexts(pane);
+      if (!check(pane.summary.kind === "list" && inOrder(workTexts, ["Sections", "(No section)", "2", "Review", "31", "Ops", "3", "Launch", "1", "When", "1 overdue", "2 today", "Labels", "@code", "@office"]) && shown("subproject-launch"), "the project's overview (" + JSON.stringify(workTexts) + ")")) return false;
+      click(part("section-s-review"));
+      if (!check(headerOnTop(function(entry) { return entry.title === "Review"; }), "a section: the list at its heading (" + JSON.stringify([view.list.contentY, view.list.contentHeight]) + ")")) return false;
+      click(part("section-none"));
+      if (!check(view.list.contentY === 0, "(No section): the list at its top")) return false;
+      // A label: the list searched for it (the label only).
+      click(part("labelChip-office"));
+      if (!check(view.searching && view.query === "@office" && view.field.text === "@office" && JSON.stringify(view.rows.filter(function(r) { return r.kind === "task"; }).map(function(r) { return r.id; })) === JSON.stringify(["t1"]) && pane.visible && pane.summary.kind === "list" && !shown("overviewSections") && wideStill(), "a label searched @office (" + JSON.stringify([view.query, view.rows.length]) + ")")) return false;
+      view.leaveSearch();
+      return true;
+    }, function() {
+      click(part("subproject-launch"));
+      if (!check(view.view === "project" && view.projectId === "launch" && pane.visible, "a sub-project opened it")) return false;
+      // The Inbox: no Sections part.
+      view.setView("inbox");
+      if (!check(pane.visible && !shown("overviewSections") && shown("overviewWhen") && shown("labelChip-errand"), "the Inbox's overview")) return false;
+      view.setView("upcoming");
+      return true;
+    }, function() {
+      // Upcoming: tomorrow lit; a day lights and scrolls the list to it.
+      var upTexts = shell.visibleTexts(pane);
+      var day19 = part("day-2026-11-19");
+      var day21 = part("day-2026-11-21");
+      if (!check(pane.summary.kind === "upcoming" && day19.current && !day21.current && part("day-2026-11-25") !== null && inOrder(upTexts, ["Next 7 days", "2", "0", "31", "Next deadline", "Send the quarterly report to Finance", "Saturday · in 3 days", "35 tasks have no date and don't show here"]), "Upcoming's overview (" + JSON.stringify(upTexts) + ")")) return false;
+      click(day21);
+      if (!check(view.upcomingDay === "2026-11-21" && day21.current && !day19.current && headerOnTop(function(entry) { return entry.dayKey === "2026-11-21"; }), "a day: lit, the list at its heading (" + view.upcomingDay + ")")) return false;
+      // The next deadline: its task, overdue, so Overdue unfolds for its row.
+      click(part("deadlineTask"));
+      if (!check(view.paneTask === "t1" && view.overdueOpen && view.cursorRow() && view.cursorRow().id === "t1" && view.editor.visible, "the next deadline selected t1, Overdue open")) return false;
+      view.clearSelection();
+      // Search: When and Labels of the results; none at all: the zero.
+      view.startSearch();
+      view.field.text = "parcel";
+      view.query = "parcel";
+      if (!check(pane.visible && !shown("overviewSections") && shown("labelChip-errand"), "search's overview")) return false;
+      view.field.text = "zzzz";
+      view.query = "zzzz";
+      var noneTexts = shell.visibleTexts(pane);
+      if (!check(JSON.stringify(noneTexts) === JSON.stringify(["When", "0 tasks"]), "no results: When and the zero (" + JSON.stringify(noneTexts) + ")")) return false;
+      view.leaveSearch();
+      store.snapshot = shell.snapshot();
+      view.setView("today");
+      view.clearSelection();
+      view.focusList();
+      ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+      return check(pane.visible && wideStill(), "Today's overview again, 880 throughout");
+    }];
+    var run = function() {
+      if (!stages.length) { done(); return; }
+      var stage = stages.shift();
+      shell.afterFrame(view, function() { if (stage()) run(); });
+    };
+    run();
   }
   function builtRows(view) {
     return view.list.contentItem.children.filter(function(item) { return item.hasOwnProperty("entry") && item.visible && item.isTask; });
@@ -808,8 +926,8 @@ ShellRoot {
     case 79: return [function() { return store.description.state === "ready" && store.description.id === "t7"; }, 15000, "t7's description"];
     case 80: return [function() { return view.active && !view.wide && !view.pageShown; }, 20000, "Small's list again"];
     case 81: return [function() { return one.size === "wide"; }, 40000, "a saved large: Wide"];
-    case 82: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.size === "wide" && one.popup.heightLive && Math.abs(one.popup.cardItem.width - one.narrowWidth) < 1; }, 10000, "the Wide popup, narrow, settled"];
-    case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1" && one.popup.contentWidth === 880 && Math.abs(one.popup.cardItem.width - 880) < 1; }, 15000, "the pane's description, the card grown"];
+    case 82: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.size === "wide" && one.popup.heightLive && Math.abs(one.popup.cardItem.width - 880) < 1; }, 10000, "the Wide popup, settled"];
+    case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1" && one.popup.contentWidth === 880 && Math.abs(one.popup.cardItem.width - 880) < 1; }, 15000, "the pane's description"];
     case 84: return [function() { var v = one.popup.bodyItem; return v.editor.contentField.inputActiveFocus && store.description.state === "ready" && store.description.id === v.paneTask && shell.opened().length > shell.openedBefore && !store.launchRunning; }, 10000, "e put the caret in the pane, the description read, Open launched"];
     case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
     case 86: return [function() { return one.popup.bodyItem.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && one.popup.contentWidth === one.cardWidth; }, 20000, "the pane's text saved as the view changed, the card's width settled"];
@@ -818,12 +936,12 @@ ShellRoot {
     case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Wide popup closed"];
     case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Wide again, in Norwegian"];
     case 91: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && Kit.FoamyI18n.language === "en"; }, 15000, "the pane's text saved as the popup closed"];
-    case 92: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.rightToLeft && v.size === "wide" && v.rows.length > 0 && one.popup.contentWidth === 609; }, 15000, "Wide in Arabic, narrow"];
-    case 93: return [function() { return one.cardWidth === 880 && one.popup.contentWidth === 880; }, 10000, "Arabic: the card grown"];
-    case 94: return [function() { return one.cardWidth === 720 && one.popup.contentWidth === 720; }, 10000, "Arabic: the card narrowed to the room"];
+    case 92: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.rightToLeft && v.size === "wide" && v.rows.length > 0 && one.popup.contentWidth === 880; }, 15000, "Wide in Arabic"];
+    case 93: return [function() { return one.popup.bodyItem.paneShown; }, 10000, "Arabic: a task in the pane"];
+    case 94: return [function() { return one.popup.bodyItem.weekShown; }, 10000, "Arabic: the Week view"];
     case 95: return [function() { return !one.popup.visible && Kit.FoamyI18n.language === "en" && !Kit.FoamyI18n.rightToLeft; }, 10000, "the Arabic popup closed, English again"];
-    case 96: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && v.size === "wide"; }, 10000, "the Wide popup"];
-    case 97: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "wide" && Math.abs(l.popup.cardItem.width - l.narrowWidth) < 1; }, 10000, "the Wide popup from IPC"];
+    case 96: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && v.size === "wide" && one.popup.heightLive; }, 10000, "the Wide popup"];
+    case 97: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "wide" && Math.abs(l.popup.cardItem.width - 880) < 1; }, 10000, "the Wide popup from IPC"];
     case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
@@ -1140,9 +1258,9 @@ ShellRoot {
       if (!check(view.width > 540 && shell.find(view, "rail").visible, "wide: the rail shows (" + view.width + ")")) return;
       if (!check(!view.band.fieldShown && shell.find(view, "addRow") === null && !shell.find(view, "viewSwitch").visible, "wide: the title row in the band, no tabs, no add row")) return;
       if (!check(shell.find(view, "rail-week") !== null, "wide: Week in the rail")) return;
-      // No task selected: no pane; the card is the rail and the list, 609
-      // wide (880 less the pane and its divider) under the button.
-      if (!check(one.narrowWidth === 609 && !view.fullWidth && !view.editor.visible && view.paneTask === "" && shell.popupPlacement(one, 609) === "", "wide, no task: no pane, the card 609 under the button (" + shell.popupPlacement(one, 609) + ")")) return;
+      // No task selected: the pane shows the overview; the card is 880
+      // under the button.
+      if (!check(one.wideWidth === 880 && view.overviewShown && shell.find(view, "overview").visible && !view.editor.visible && view.paneTask === "" && shell.popupPlacement(one, 880) === "", "wide, no task: the overview in the pane, the card 880 under the button (" + shell.popupPlacement(one, 880) + ")")) return;
       if (!check(shell.find(view, "rail-work") !== null && shell.find(view, "rail-launch") !== null, "wide: the projects are in the rail")) return;
       // A snapshot the helper had to cut: a muted line says so.
       shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));
@@ -2046,23 +2164,24 @@ ShellRoot {
       break;
     case 82:
       var big = one.popup.bodyItem;
-      // Nothing selected on open: the narrow card, no pane.
-      if (!check(shell.popupPlacement(one, 609) === "", "the popup, 609 wide under the button (" + shell.popupPlacement(one, 609) + ")")) return;
+      // Nothing selected on open: 880 wide, the overview in the pane.
+      if (!check(shell.popupPlacement(one, 880) === "", "the popup, 880 wide under the button (" + shell.popupPlacement(one, 880) + ")")) return;
       if (!check(one.popup.maxHeight === Math.round(one.popup.screenH * 0.7) && one.popup.cardItem.height <= one.popup.maxHeight + 1, "at most 70% of the screen high (" + JSON.stringify([one.popup.cardItem.height, one.popup.maxHeight]) + ")")) return;
-      if (!check(big.size === "wide" && shell.find(big, "rail-week") !== null && big.band.visible && !big.editor.visible && !big.fullWidth && !big.clip, "the band, the rail with Week, no pane")) return;
-      var area0 = shell.find(big, "listArea");
-      shell.listBox = [area0.width, area0.mapToItem(big, 0, 0).x];
-      ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
-      if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
-      // The card grows to 880, animated: the view is laid out at the width
-      // to come (cut off beyond the card's edge meanwhile), so the list keeps
-      // its width and place in the card and the pane is uncovered beside it.
-      if (!check(big.fullWidth && one.cardWidth === 880 && one.popup.contentWidth < 880 && big.layoutWidth - big.width === 880 - one.popup.contentWidth && big.clip && big.editor.visible && Math.abs(area0.width - shell.listBox[0]) < 1 && Math.abs(big.editor.x - (area0.x + area0.width + Kit.FoamyStyle.borderWidth)) < 1, "↓: the card grows toward 880, the list as it was (" + JSON.stringify([one.popup.contentWidth, big.layoutWidth, area0.width, shell.listBox, big.editor.x]) + ")")) return;
+      if (!check(big.size === "wide" && shell.find(big, "rail-week") !== null && big.band.visible && !big.editor.visible && big.overviewShown, "the band, the rail with Week, the overview in the pane")) return;
+      shell.overviewChecks(big, function() {
+        var area0 = shell.find(big, "listArea");
+        shell.listBox = [area0.width, area0.mapToItem(big, 0, 0).x];
+        ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+        if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
+        // The card stays 880: the list keeps its width and place, the
+        // task's details in the overview's place beside it.
+        if (!check(one.cardWidth === 880 && one.popup.contentWidth === 880 && big.editor.visible && !big.overviewShown && Math.abs(area0.width - shell.listBox[0]) < 1 && Math.abs(big.editor.x - (area0.x + area0.width + Kit.FoamyStyle.borderWidth)) < 1, "↓: the card stays 880, the list as it was (" + JSON.stringify([one.popup.contentWidth, area0.width, shell.listBox, big.editor.x]) + ")")) return;
+      });
       break;
     case 83:
       var big1 = one.popup.bodyItem;
       var area1 = shell.find(big1, "listArea");
-      if (!check(shell.popupPlacement(one, 880) === "" && !big1.clip && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "grown: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
+      if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "a task in the pane: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
       // The pane: no Open icon and no "Task" caption; Open in Todoist is in
       // the band, in Search's place, and Search leads the ⋯ menu.
       var paneTexts = shell.visibleTexts(big1.editor);
@@ -2206,7 +2325,7 @@ ShellRoot {
       var ids = big2.weekColumns.map(function(col) { return col.entries.map(function(e) { return e.kind === "day" ? e.key : e.id; }); });
       if (!check(big2.weekShown && big2.week.visible && !big2.list.visible && JSON.stringify(ids) === JSON.stringify([["t1", "t2"], ["t3", "t4", "t5", "t6"], ["t10", "t11"], ["day:2026-11-21", "t12"]]), "the Week view's columns (" + JSON.stringify(ids) + ")")) return;
       if (!check(!big2.editor.visible, "no pane until a card is opened")) return;
-      if (!check(big2.fullWidth && one.cardWidth === 880 && one.popup.contentWidth === 880, "the Week view keeps the full width without the pane (" + JSON.stringify([big2.fullWidth, one.cardWidth, one.popup.contentWidth]) + ")")) return;
+      if (!check(!big2.overviewShown && one.cardWidth === 880 && one.popup.contentWidth === 880, "the Week view: 880, no overview (" + JSON.stringify([big2.overviewShown, one.cardWidth, one.popup.contentWidth]) + ")")) return;
       big2.goTo(big2.firstRowStop);
       if (!check(big2.cursorRow().id === "t1" && big2.weekColumn === 0, "the first card")) return;
       ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
@@ -2265,7 +2384,7 @@ ShellRoot {
       var overdueHead = shell.find(big4.week, "weekColumn-overdue");
       ev.mouseClick(overdueHead, overdueHead.width / 2, 6, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(!big4.weekPaneOpen && big4.cursor.index === -1, "a click on a column's heading closed it too")) return;
-      if (!check(big4.fullWidth && one.cardWidth === 880, "the Week view: the full width with nothing selected")) return;
+      if (!check(!big4.overviewShown && one.cardWidth === 880, "the Week view: 880 with nothing selected, no overview")) return;
       // Overdue with thousands of tasks: only the cards in view are built,
       // and the keys scroll to the cursor's card.
       var many = shell.snapshot();
@@ -2333,68 +2452,65 @@ ShellRoot {
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       break;
     case 92:
-      // Narrow, mirrored: the rail on the right, the list beside it.
-      if (!check(shell.rtlLayout(view) === "", "Arabic, narrow: " + shell.rtlLayout(view))) return;
+      // Mirrored: the rail on the right, the list beside it, the overview
+      // on the left.
+      if (!check(view.overviewShown && shell.rtlLayout(view) === "", "Arabic, the overview: " + shell.rtlLayout(view))) return;
       var rtlArea = shell.find(view, "listArea");
       shell.listBox = [rtlArea.width, view.width - rtlArea.mapToItem(view, 0, 0).x];
+      // The timeline's blocks mirror too: past the hours, on the right.
+      var rtlBlock = shell.find(view, "block-t3");
+      var rtlBlockBox = rtlBlock.mapToItem(shell.find(view, "timeline"), 0, 0);
+      if (!check(rtlBlock.visible && rtlBlockBox.x + rtlBlock.width < shell.find(view, "timeline").width - Kit.FoamyStyle.controlHeight + 1 && rtlBlockBox.x < Kit.FoamyStyle.controlHeight, "Arabic: the block left of the hours (" + JSON.stringify([rtlBlockBox.x, rtlBlock.width]) + ")")) return;
       view.goTo(view.firstRowStop);
-      // Growing: laid out at the width to come from the right edge, so the
-      // list keeps its width and place; the pane is uncovered on the left.
-      var rtlLeft = rtlArea.mapToItem(view, 0, 0).x;
-      if (!check(view.paneShown && one.cardWidth === 880 && one.popup.contentWidth < 880 && view.clip && Math.abs(rtlArea.width - shell.listBox[0]) < 0.5 && Math.abs(view.width - rtlLeft - shell.listBox[1]) < 0.5 && Math.abs(view.editor.mapToItem(view, 0, 0).x + view.paneWidth + Kit.FoamyStyle.borderWidth - rtlLeft) < 0.5, "Arabic, growing: the list as it was, the pane to its left (" + JSON.stringify([one.popup.contentWidth, rtlArea.width, rtlLeft, shell.listBox, view.editor.mapToItem(view, 0, 0).x]) + ")")) return;
       break;
     case 93:
-      var rtlGrown = shell.find(view, "listArea");
-      if (!check(!view.clip && shell.popupPlacement(one, 880) === "" && Math.abs(rtlGrown.width - shell.listBox[0]) < 0.5 && Math.abs(view.width - rtlGrown.mapToItem(view, 0, 0).x - shell.listBox[1]) < 0.5, "Arabic, grown to 880: the list where it was (" + JSON.stringify([shell.popupPlacement(one, 880), rtlGrown.width, shell.listBox]) + ")")) return;
+      // A task in the pane: the list keeps its width and place.
+      var rtlTask = shell.find(view, "listArea");
+      if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(rtlTask.width - shell.listBox[0]) < 0.5 && Math.abs(view.width - rtlTask.mapToItem(view, 0, 0).x - shell.listBox[1]) < 0.5, "Arabic, a task in the pane: 880, the list where it was (" + JSON.stringify([shell.popupPlacement(one, 880), rtlTask.width, shell.listBox]) + ")")) return;
       if (!check(shell.rtlLayout(view) === "", "Arabic, a task in the pane: " + shell.rtlLayout(view))) return;
-      // The room shrinks while it is open (another margin): the card is
-      // clamped to 720 and the list narrows with it, beside the rail.
-      shell.savedMargin = one.popup.margin;
-      one.popup.margin = 600;
+      view.setView("week");
       break;
     case 94:
-      // (The test's huge margin pushes the card down; only its width counts here.)
-      if (!check(Math.abs(one.popup.cardItem.width - 720) < 1 && shell.rtlLayout(view) === "", "Arabic, clamped to 720: " + JSON.stringify([one.popup.cardItem.width]) + " " + shell.rtlLayout(view))) return;
-      view.setView("week");
-      wait.waitFor(function() { return view.weekShown && view.weekColumns.length === 4; }, 5000, function(shown) {
-        if (!check(shown && shell.rtlLayout(view) === "", "Arabic, the Week view at 720: " + shell.rtlLayout(view))) return;
-        view.setView("today");
-        one.close();
-        one.popup.margin = shell.savedMargin;
-        shell.pickLanguage("en");
-      });
+      if (!check(view.weekColumns.length === 4 && one.popup.contentWidth === 880 && shell.rtlLayout(view) === "", "Arabic, the Week view: " + shell.rtlLayout(view))) return;
+      view.setView("today");
+      one.close();
+      shell.pickLanguage("en");
       break;
     case 95:
-      // Wide needs room for its narrow width (609) on the bar's screen; with
-      // less, Small. The full width is clamped to the room there.
+      // Wide needs room for 880 on the bar's screen; with less, Small.
       shell.savedMargin = one.popup.margin;
-      one.popup.margin = 655;
-      if (!check(one.popup.availableCardWidth === 610 && one.size === "wide", "room for 609: Wide (" + JSON.stringify([one.popup.availableCardWidth, one.size]) + ")")) return;
-      one.popup.margin = 656;
-      if (!check(one.popup.availableCardWidth === 608 && one.size === "standard", "no room for 609: Small (" + JSON.stringify([one.popup.availableCardWidth, one.size]) + ")")) return;
-      one.popup.margin = 600;
+      one.popup.margin = 520;
+      if (!check(one.popup.availableCardWidth === 880 && one.size === "wide", "room for 880: Wide (" + JSON.stringify([one.popup.availableCardWidth, one.size]) + ")")) return;
+      one.popup.margin = 521;
+      if (!check(one.popup.availableCardWidth === 878 && one.size === "standard" && one.cardWidth === Kit.FoamyStyle.popupWidth, "no room for 880: Small (" + JSON.stringify([one.popup.availableCardWidth, one.size]) + ")")) return;
+      one.popup.margin = shell.savedMargin;
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       break;
     case 96:
-      // (The test's huge margin pushes the card down; only its width counts here.)
-      if (!check(view.size === "wide" && one.popup.contentWidth === 609 && Math.abs(one.popup.cardItem.width - 609) < 1, "the popup is Wide, narrow (" + view.size + ", " + one.popup.contentWidth + ")")) return;
+      if (!check(view.size === "wide" && shell.popupPlacement(one, 880) === "", "the popup is Wide, 880 (" + view.size + ", " + shell.popupPlacement(one, 880) + ")")) return;
+      // Selecting and clearing never change the width.
       view.goTo(view.firstRowStop);
-      if (!check(view.fullWidth && one.cardWidth === 720, "a task selected: the full width, clamped to the room (" + one.cardWidth + ")")) return;
-      wait.waitFor(function() { return one.popup.contentWidth === 720; }, 5000, function(grown) {
-        if (!check(grown, "the card grew to 720 (" + one.popup.contentWidth + ")")) return;
-        one.close();
-        one.popup.margin = shell.savedMargin;
-        if (!check(one.size === "wide" && one.cardWidth === 609 && one.popup.contentWidth === 720 && one.popup.visible, "closing: the card keeps its width as it fades (" + JSON.stringify([one.cardWidth, one.popup.contentWidth]) + ")")) return;
-        // IPC toggle: the leader's popup, Wide.
-        var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
-        shell.ipcPanel = one.data.indexOf(ipc) >= 0 ? one : two;
-        if (!check(shell.ipcPanel === shell.leader(), "the leader owns IPC")) return;
-        wait.waitFor(function() { return !one.popup.visible; }, 5000, function() { ipc.toggle(); });
-      });
+      var withTask = [one.cardWidth, one.popup.contentWidth, view.paneShown];
+      view.clearSelection();
+      if (!check(JSON.stringify(withTask) === JSON.stringify([880, 880, true]) && one.cardWidth === 880 && one.popup.contentWidth === 880 && view.overviewShown, "880 with a task and without (" + JSON.stringify([withTask, one.cardWidth]) + ")")) return;
+      // Settings: 880 too, its sections in a column of the settings width, centred.
+      view.settingsRequested();
+      var section = shell.find(view.settingsPage, "accountSection");
+      var sectionX = section.mapToItem(view, 0, 0).x;
+      var column = Kit.FoamyStyle.popupWidthWide - Kit.FoamyStyle.padding * 2;
+      if (!check(view.editingSettings && one.cardWidth === 880 && one.popup.contentWidth === 880 && section.width === column && Math.abs(sectionX - (view.width - column) / 2) < 1, "settings in Wide: 880, the column " + column + " centred (" + JSON.stringify([one.cardWidth, section.width, sectionX]) + ")")) return;
+      view.settingsClosed();
+      if (!check(!view.editingSettings && one.popup.contentWidth === 880, "back from settings: 880")) return;
+      one.close();
+      // IPC toggle: the leader's popup, Wide.
+      var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
+      shell.ipcPanel = one.data.indexOf(ipc) >= 0 ? one : two;
+      if (!check(shell.ipcPanel === shell.leader(), "the leader owns IPC")) return;
+      wait.waitFor(function() { return !one.popup.visible; }, 5000, function() { ipc.toggle(); });
       break;
     case 97:
       var lead = shell.leader();
-      if (!check(shell.popupPlacement(lead, 609) === "", "IPC toggle: the leader's popup, 609 wide under its button (" + shell.popupPlacement(lead, 609) + ")")) return;
+      if (!check(shell.popupPlacement(lead, 880) === "", "IPC toggle: the leader's popup, 880 wide under its button (" + shell.popupPlacement(lead, 880) + ")")) return;
       // IPC add while Wide is open: the caret in the band's field.
       var ipcAdd = lead.data.find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.add === "function"; });
       ipcAdd.add();
@@ -2404,18 +2520,10 @@ ShellRoot {
       var leadView = lead2.popup.bodyItem;
       if (!check(lead2.opened && leadView.fieldOpen && !leadView.searching && leadView.size === "wide", "IPC add: the add field in the Wide popup")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      // Under reduced motion the width changes at once, both ways.
-      Commons.Style.reduceMotion = true;
-      leadView.goTo(leadView.firstRowStop);
-      var instantFull = lead2.popup.contentWidth;
-      leadView.clearSelection();
-      var instantNarrow = lead2.popup.contentWidth;
-      Commons.Style.reduceMotion = false;
-      if (!check(instantFull === 880 && instantNarrow === 609 && !leadView.clip, "reduced motion: 880 and back to 609 at once (" + JSON.stringify([instantFull, instantNarrow]) + ")")) return;
-      // The Week view from Today with nothing selected: the full width.
+      // The Week view from Today with nothing selected: 880.
       // Then another size: Today, and "Open on: Last view" opens Today.
       leadView.setView("week");
-      if (!check(store.lastView === "week" && leadView.fullWidth && lead2.cardWidth === 880, "Week is the last view, at the full width")) return;
+      if (!check(store.lastView === "week" && lead2.cardWidth === 880, "Week is the last view, at 880")) return;
       one.prefs.save("openOn", "last");
       one.prefs.save("panelWidth", "standard");
       break;

@@ -10,6 +10,9 @@ import "Preferences.js" as Schema
 FoamySettingsPage {
   id: page
   property var preferences: ({})
+  // The sections' width, centred on the page: Wide's page is the popup's
+  // 880 but keeps the settings width (TodoView sets it).
+  property real columnWidth: width
   signal saveRequested(string key, var value)
   function pref(key) {
     return Prefs.value(Schema.fields, preferences, key)
@@ -40,7 +43,8 @@ FoamySettingsPage {
   FoamySettingsSection {
     id: accountSection
     objectName: "accountSection"
-    width: parent.width
+    width: Math.min(parent.width, page.columnWidth)
+    x: (parent.width - width) / 2
     title: FoamyI18n.t("Account")
     info: page.store.signedIn ? "" : FoamyI18n.t("Find your API token in Todoist under Settings → Integrations → Developer.")
     // Signed in: who, and Sign out.
@@ -137,7 +141,8 @@ FoamySettingsPage {
   }
 
   FoamySettingsSection {
-    width: parent.width
+    width: Math.min(parent.width, page.columnWidth)
+    x: (parent.width - width) / 2
     title: FoamyI18n.t("Panel")
     info: FoamyI18n.t("A command to open Todoist links with, for example omarchy-launch-or-focus-webapp Todoist {url}. {url} is replaced with the link; without it, the link is added at the end. No shell: quotes and pipes aren't supported.")
     FoamyDropdown {
@@ -250,7 +255,8 @@ FoamySettingsPage {
   }
 
   FoamySettingsSection {
-    width: parent.width
+    width: Math.min(parent.width, page.columnWidth)
+    x: (parent.width - width) / 2
     title: FoamyI18n.t("Bar")
     FoamyDropdown {
       objectName: "barCount"

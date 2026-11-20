@@ -1,4 +1,8 @@
 {
+  "%1 later": {
+    "one": "%1 senere",
+    "other": "%1 senere"
+  },
   "%1 left today": {
     "one": "%1 igjen i dag",
     "other": "%1 igjen i dag"
@@ -11,10 +15,35 @@
     "one": "%1 forfalt",
     "other": "%1 forfalt"
   },
+  "%1 tasks": {
+    "one": "%1 oppgave",
+    "other": "%1 oppgaver"
+  },
+  "%1 tasks have no date and don't show here": {
+    "one": "%1 oppgave har ingen dato og vises ikke her",
+    "other": "%1 oppgaver har ingen dato og vises ikke her"
+  },
+  "%1 tasks without a time": {
+    "one": "%1 oppgave uten klokkeslett",
+    "other": "%1 oppgaver uten klokkeslett"
+  },
+  "%1 this week": {
+    "one": "%1 denne uken",
+    "other": "%1 denne uken"
+  },
+  "%1 today": {
+    "one": "%1 i dag",
+    "other": "%1 i dag"
+  },
+  "%1 without a date": {
+    "one": "%1 uten dato",
+    "other": "%1 uten dato"
+  },
   "%1 · %2 tasks": {
     "one": "%1 · %2 oppgave",
     "other": "%1 · %2 oppgaver"
   },
+  "(No section)": "(Ingen seksjon)",
   "A command to open Todoist links with, for example omarchy-launch-or-focus-webapp Todoist {url}. {url} is replaced with the link; without it, the link is added at the end. No shell: quotes and pipes aren't supported.": "En kommando som åpner Todoist-lenker, for eksempel omarchy-launch-or-focus-webapp Todoist {url}. {url} byttes ut med lenken; uten den legges lenken til på slutten. Ikke noe skall: anførselstegn og rør støttes ikke.",
   "A description can have at most 16383 characters.": "En beskrivelse kan ha høyst 16383 tegn.",
   "A description can't have control characters other than line breaks and tabs.": "En beskrivelse kan ikke ha andre kontrolltegn enn linjeskift og tabulatorer.",
@@ -71,6 +100,13 @@
   "Hide": "Skjul",
   "HTTPS isn't supported on this CPU (foamy helpers need AES, carry-less multiply, AVX2, BMI2 and ADX on x86-64, or the crypto extensions on ARMv8)": "HTTPS støttes ikke på denne prosessoren (foamy-hjelpere trenger AES, carry-less multiply, AVX2, BMI2 og ADX på x86-64, eller kryptoutvidelsene på ARMv8)",
   "Icon only": "Bare ikon",
+  "in %1 days": {
+    "one": "om %1 dag",
+    "other": "om %1 dager"
+  },
+  "in %1 h": "om %1 t",
+  "in %1 h %2 min": "om %1 t %2 min",
+  "in %1 min": "om %1 min",
   "Inbox": "Innboks",
   "Inbox is empty": "Innboksen er tom",
   "Inbox · %1 tasks": {
@@ -83,11 +119,15 @@
   "Last view": "Siste visning",
   "Later": "Senere",
   "Later in %1": "Senere i %1",
+  "left today": "igjen i dag",
   "Loading…": "Laster…",
   "More information": "Mer informasjon",
   "More options": "Flere valg",
   "Moving a task out of its section needs the project's id.": "Prosjektets ID trengs for å flytte en oppgave ut av seksjonen.",
   "My projects": "Mine prosjekter",
+  "Next": "Neste",
+  "Next 7 days": "Neste 7 dager",
+  "Next deadline": "Neste frist",
   "Next week": "Neste uke",
   "No keyring is available to store the Todoist token (%1).": "Ingen nøkkelring er tilgjengelig for å lagre Todoist-tokenet (%1).",
   "No keyring is available to store the Todoist token.": "Ingen nøkkelring er tilgjengelig for å lagre Todoist-tokenet.",
@@ -103,6 +143,7 @@
   "Open Todoist": "Åpne Todoist",
   "Open Todoist settings": "Åpne Todoist-innstillingene",
   "Overdue": "Forfalt",
+  "overdue": "forfalt",
   "Panel": "Panel",
   "Pick a priority from 1 to 4.": "Velg en prioritet fra 1 til 4.",
   "Priority": "Prioritet",
@@ -117,6 +158,7 @@
   "Saving…": "Lagrer…",
   "Search": "Søk",
   "Search tasks": "Søk i oppgaver",
+  "Sections": "Seksjoner",
   "Send 1 to 100 changes at a time.": "Send 1 til 100 endringer om gangen.",
   "Settings": "Innstillinger",
   "Settings can't be saved: this widget has no bar entry.": "Innstillingene kan ikke lagres: denne widgeten har ingen oppføring i linjen.",
@@ -157,6 +199,7 @@
     "one": "I dag · %1 igjen",
     "other": "I dag · %1 igjen"
   },
+  "Today's times": "Dagens tider",
   "Todoist": "Todoist",
   "Todoist answered HTTP %1.": "Todoist svarte HTTP %1.",
   "Todoist didn't accept the API token.": "Todoist godtok ikke API-tokenet.",
@@ -201,6 +244,7 @@
     "one": "Uke · %1 oppgave",
     "other": "Uke · %1 oppgaver"
   },
+  "When": "Når",
   "Wide": "Bred",
   "Yesterday": "I går"
 }

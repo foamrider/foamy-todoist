@@ -12,9 +12,10 @@ import "Model.js" as Model
 // the band's field), the tab row (Small) or the rail (Wide), the list, the
 // footer, and the settings page in place of all of it. Small opens a task
 // on the editor page in place of the list; Wide shows it in the details
-// pane beside the list, and has the Week view. Wide's card is as wide as
-// the rail and the list until a task is in the pane or the Week view shows
-// (`fullWidth`; Panel.qml sizes the card).
+// pane beside the list, and has the Week view. Wide's pane is always there
+// beside a list: the selected task's details, else an overview of the view
+// (Overview.qml; Tab goes into it). The Week view shows the pane over its
+// columns only while a card is open in it.
 //
 // The band field: + (or `a`) and Search (or `/`) open it, growing from
 // their button over the title row. Adding, it colours the Quick Add tokens
@@ -46,16 +47,6 @@ PanelKeyCatcher {
   // room).
   property string size: "standard"
   readonly property bool wide: size === "wide"
-  // Wide: the card's full width while the pane shows a task or the Week
-  // view shows; else the rail and the list.
-  readonly property bool fullWidth: wide && !editingSettings && (paneShown || weekShown)
-  // How much wider (negative: narrower) the card is still going while its
-  // width animates (Panel.qml). The body is laid out at the width to come
-  // (`layoutWidth`), so the rows never reflow as it moves: a growing card
-  // uncovers the pane, a shrinking one closes over empty space.
-  property real widthAhead: 0
-  readonly property real layoutWidth: width + widthAhead
-  clip: width < layoutWidth - 0.5
   property bool editingSettings: false
   property bool addOnOpen: false
   property var preferences: ({})
@@ -274,10 +265,10 @@ PanelKeyCatcher {
   }
   // A click on the list's space that isn't a row (below the last row, a
   // heading between groups, the Week view's empty column space), as in
-  // Todoist: no row selected, the cursor gone, the pane closed (the card
-  // back to the rail and the list's width, outside the Week view). The
-  // pane's draft is saved as it lets the task go (TaskEditor.show()).
-  // Clicks in the pane never reach the list.
+  // Todoist: no row selected, the cursor gone, the pane on the view's
+  // overview (closed over the Week view). The pane's draft is saved as it
+  // lets the task go (TaskEditor.show()). Clicks in the pane never reach
+  // the list.
   function clearSelection() {
     viewCursor.index = -1
     paneTask = ""
@@ -608,6 +599,74 @@ PanelKeyCatcher {
   property string paneTask: ""
   property bool weekPaneOpen: false
   readonly property bool paneShown: wide && !editingSettings && store.signedIn && store.loaded && paneTask !== "" && !!store.model.byId[paneTask] && (!weekShown || weekPaneOpen)
+  // The pane's surface: beside every list, over the Week view only with a task.
+  readonly property bool paneOpen: wide && !editingSettings && store.signedIn && store.loaded && (!weekShown || paneShown)
+  // No task in the pane: the overview of the view, built only then and
+  // while the view is live (as the rows).
+  readonly property bool overviewShown: paneOpen && !paneShown
+  readonly property var overviewData: live && overviewShown ? Model.overview(store.model, listView, store.today, {
+    hidden: store.sending,
+    hideOthers: store.hideOthers,
+    struck: store.struck,
+    weekStart: weekStart,
+    projectId: projectId,
+    query: query,
+    projectCounts: store.counts.projects,
+    nowMinutes: nowMinutes
+  }) : null
+  // The store's clock (tests set it), read again on each minute tick
+  // (the wall clock's date is the binding's dependency).
+  readonly property int nowMinutes: minutesOf(clock.date, store.now())
+  function minutesOf(tick, now) {
+    return now.getHours() * 60 + now.getMinutes()
+  }
+  // The overview's clicks. A task (a timeline block, Next, the next
+  // deadline): selected, as a click on its row (the pane shows it, the
+  // list scrolls to it; Upcoming opens its Overdue fold for it).
+  function selectTask(id) {
+    var task = Model.validId(id) ? store.model.byId[id] : null
+    if (!task)
+      return
+    focusList()
+    if (view === "upcoming" && !searching && task.due && task.due.day < store.today)
+      overdueOpen = true
+    var stop = stopOf(id)
+    if (stop >= 0)
+      goTo(stop)
+    else
+      paneTask = id
+  }
+  // A section ("" for the tasks without one): the list scrolls to it.
+  function showSection(id) {
+    var key = "header:section:" + id
+    for (let i = 0; i < rows.length; i++)
+      if (id === "" ? rows[i].kind === "task" : rows[i].key === key) {
+        taskList.positionViewAtIndex(i, ListView.Beginning)
+        return
+      }
+  }
+  // A label: the list filtered by it, through search (`@name`, its spaces
+  // escaped as Quick Add reads them).
+  function searchLabel(name) {
+    startSearch()
+    var text = "@" + String(name).replace(/ /g, "\\ ")
+    addField.text = text
+    addField.cursorPosition = text.length
+    query = text
+  }
+  // An Upcoming day: lit (the list's add goes to it), the list at its first
+  // task (the day's heading when it has one), else at the next day's.
+  function showDay(day) {
+    if (!Model.validDate(day))
+      return
+    upcomingDay = day
+    for (let i = 0; i < rows.length; i++)
+      if (rows[i].kind === "task" && rows[i].dueDay >= day && rows[i].dueDay > store.today) {
+        const header = i > 0 && rows[i - 1].kind === "header" ? i - 1 : i
+        taskList.positionViewAtIndex(header, ListView.Beginning)
+        return
+      }
+  }
   // A click on a row, Enter or `e`: the editor page (Small), or the pane on
   // it (Wide; `focusField` puts the caret in it).
   function openTask(id, focusField) {
@@ -770,7 +829,7 @@ PanelKeyCatcher {
     step(dy !== 0 ? dy : dx)
   }
   // Esc: the details pane closes first (the Week view's; in a list the
-  // selection clears, and the card narrows); then the panel.
+  // selection clears, and the pane shows the overview); then the panel.
   onCloseRequested: {
     if (weekShown && weekPaneOpen)
       weekPaneOpen = false
@@ -779,11 +838,12 @@ PanelKeyCatcher {
     else
       root.closeView()
   }
-  // Tab: the next panel; in Wide, into the details pane.
+  // Tab: the next panel; in Wide, into the details pane (the task's
+  // fields, or the overview's first click target).
   onTabRequested: function (direction) {
     if (paneShown && taskEditor.task)
       taskEditor.focusFirst()
-    else
+    else if (!(overviewShown && overviewPane.focusFirst()))
       root.switchPanel(direction)
   }
   onTextKey: function (text, modifiers) {
@@ -967,7 +1027,7 @@ PanelKeyCatcher {
     } else
       Qt.callLater(focusList)
   }
-  blocked: editingSettings || pageShown || heroBand.menuOpen || fieldFocused || taskEditor.activeFocus || taskEditor.menuOpen
+  blocked: editingSettings || pageShown || heroBand.menuOpen || fieldFocused || taskEditor.activeFocus || taskEditor.menuOpen || overviewPane.activeFocus
   // A minute tick for "Updated …" while the popup is open.
   FoamyWallClock {
     id: clock
@@ -993,7 +1053,7 @@ PanelKeyCatcher {
   readonly property real listChrome: FoamyStyle.gap + (errorLine.visible ? errorLine.height + FoamyStyle.gapSmall : 0) + FoamyStyle.gap
   readonly property real railHeight: Math.min(railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
   // The pane (also over the Week view, which then grows to show it).
-  readonly property real paneHeight: paneShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : 0
+  readonly property real paneHeight: paneShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : overviewShown ? Math.min(overviewPane.implicitHeight, maxListHeight) : 0
   readonly property real bodyHeight: wide ? Math.max(railHeight, listChrome + listHeight, paneHeight) : (tabsBox.visible ? tabsBox.height : 0) + listChrome + listHeight
   implicitHeight: editingSettings ? settingsView.implicitHeight : pageShown ? taskEditor.implicitHeight : heroBand.implicitHeight + bodyHeight + (panelFooter.visible ? panelFooter.implicitHeight : 0)
 
@@ -1218,11 +1278,9 @@ PanelKeyCatcher {
     visible: !root.editingSettings && !root.pageShown
     anchors.top: tabsBox.visible ? tabsBox.bottom : heroBand.bottom
     anchors.bottom: panelFooter.visible ? panelFooter.top : parent.bottom
-    // Laid out at the width to come (layoutWidth) from the reading start:
-    // anchored, not placed by x, so RTL puts the rail on the right and the
-    // part still to be uncovered (the pane) past the left edge.
+    // Anchored, not placed by x, so RTL puts the rail on the right.
     anchors.left: parent.left
-    width: root.layoutWidth
+    anchors.right: parent.right
 
     // The rail (Wide): views, then the projects.
     Flickable {
@@ -1344,7 +1402,7 @@ PanelKeyCatcher {
       anchors.leftMargin: rail.visible ? FoamyStyle.borderWidth : 0
       // Beside it, the details pane at the reading end (over the Week
       // view, which keeps its width).
-      width: content.width - (rail.visible ? rail.width + FoamyStyle.borderWidth : 0) - (root.paneShown && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0)
+      width: content.width - (rail.visible ? rail.width + FoamyStyle.borderWidth : 0) - (root.paneOpen && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0)
       height: parent.height
 
       // The list's space that isn't a row (the margins, the error lines,
@@ -1637,13 +1695,12 @@ PanelKeyCatcher {
     }
   }
 
-  // ---- the editor (the page in Small, the pane in Wide) --------------------------------
-  // Panel.qml's narrowWidth leaves this out (the list keeps its width).
+  // ---- the details pane (Wide) and the editor (the page in Small) ------------------------
   readonly property real paneWidth: Commons.Style.space(270)
   // The pane's surface at the body's reading end: over the Week view it
   // covers that part. Anchored, so RTL puts it on the left.
   Rectangle {
-    visible: root.paneShown
+    visible: root.paneOpen
     anchors.right: content.right
     anchors.top: content.top
     width: root.paneWidth + FoamyStyle.borderWidth
@@ -1671,6 +1728,41 @@ PanelKeyCatcher {
     width: root.wide ? root.paneWidth : root.width
     height: root.wide ? content.height : root.height
     onBack: root.closeTask()
+    onKeysReturned: root.focusList()
+  }
+  Overview {
+    id: overviewPane
+    objectName: "overview"
+    visible: root.overviewShown
+    z: 5
+    anchors.right: content.right
+    y: content.y
+    width: root.paneWidth
+    height: content.height
+    summary: root.overviewData
+    today: root.store.today
+    litDay: root.view === "upcoming" && !root.searching ? root.addDay : ""
+    format: root.formatDate
+    translate: root.translate
+    onTaskPicked: function (id) {
+      root.leaveField()
+      root.selectTask(id)
+    }
+    onSectionPicked: function (id) {
+      root.leaveField()
+      root.showSection(id)
+    }
+    onProjectPicked: function (id) {
+      root.leaveField()
+      root.setView("project", id)
+    }
+    onLabelPicked: function (name) {
+      root.searchLabel(name)
+    }
+    onDayPicked: function (day) {
+      root.leaveField()
+      root.showDay(day)
+    }
     onKeysReturned: root.focusList()
   }
 
@@ -1777,6 +1869,8 @@ PanelKeyCatcher {
     visible: root.editingSettings
     width: parent.width
     height: parent.height
+    // Wide's page is 880, its column the settings width (the kit's wide one).
+    columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width
     preferences: root.preferences
     saving: root.saving
     error: root.settingsError

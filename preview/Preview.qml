@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-task", "wide-week", "wide-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-task", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -26,6 +26,13 @@ Item {
   }
   function applyState() {
     var store = Plugin.TodoStore
+    // 11:50 today: Today's overview has a task ahead ("Next") and a past
+    // one, and the "now" line inside its timeline.
+    store.now = function () {
+      var now = new Date()
+      now.setHours(11, 50, 0, 0)
+      return now
+    }
     var view = previewPopup.ensureBody()
     if (!view)
       return
@@ -45,17 +52,17 @@ Item {
       store.unconfirmed = {
         "t4": true
       }
-    view.editingSettings = previewState.indexOf("settings") === 0
+    view.editingSettings = previewState.indexOf("settings") >= 0
     view.preferences = previewState === "settings-open-command" ? {
       openCommand: "omarchy-launch-or-focus-webapp Todoist {url}"
     } : ({})
     store.launchError = previewState === "footer-error" ? FoamyI18n.t("Can't open Todoist") : ""
     view.prepare()
-    var next = previewState === "inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
+    var next = previewState === "inbox" || previewState === "wide-inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
     view.setView(next, "work")
     if (previewState === "error")
       store.error = FoamyI18n.t("Can't reach Todoist. Check your connection.")
-    if (previewState === "search")
+    if (previewState === "search" || previewState === "wide-search")
       Qt.callLater(function () {
         view.startSearch()
         view.field.text = "the"
@@ -134,11 +141,8 @@ Item {
     anchorItem: preview.anchorItem
     bar: preview.bar
     open: true
-    // As Panel.qml: Wide is narrow (880 less the pane and its divider)
-    // until the view asks for the full width.
-    readonly property Plugin.TodoView view: previewPopup.bodyItem as Plugin.TodoView
-    readonly property bool full: view !== null && view.fullWidth
-    contentWidth: previewPopup.fittedContentWidth(!preview.wide ? FoamyStyle.popupWidth : Commons.Style.space(880) - (full ? 0 : Commons.Style.space(270) + FoamyStyle.borderWidth))
+    // As Panel.qml: Wide is always 880.
+    contentWidth: previewPopup.fittedContentWidth(preview.wide ? Commons.Style.space(880) : FoamyStyle.popupWidth)
     maxHeight: preview.wide ? Math.round(previewPopup.screenH * 0.7) : 0
     body: Component {
       Plugin.TodoView {
