@@ -14,7 +14,6 @@ The host is Omarchy 4.5, the installed /usr/share/omarchy/shell
 
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -71,6 +70,8 @@ ShellRoot {
   property string paneFrom: ""
   property string paneText: ""
   property real oneLineX: 0
+  // The popup's margin before a step narrows its room.
+  property int savedMargin: 0
   property bool othersChecked: false
   // The store's wall clock: moved by setting `clock.at`, which (like a real
   // clock) notifies nothing, so only the store's own checks see it.
@@ -155,10 +156,34 @@ ShellRoot {
     reply.tasks = reply.tasks.map(function(task) { return changes[task.id] ? Object.assign({}, task, changes[task.id]) : task; });
     return reply;
   }
-  // The Large overlay (the leading bar instance draws it), or null.
-  function overlay() {
-    var leader = one && one.member.isLeader ? one : two;
-    return leader ? leader.overlay.item : null;
+  // The bar instance that leads (and owns IPC).
+  function leader() {
+    return one && one.member.isLeader ? one : two;
+  }
+  // The editor's Complete and Open buttons: "" when they share one line
+  // inside their row; else where they are.
+  function buttonsOnOneLine(editor) {
+    var row = shell.find(editor, "editButtons");
+    var done = shell.find(editor, "editComplete");
+    var open = shell.find(editor, "editOpen");
+    if (Math.abs(done.y - open.y) < 1 && open.x + open.width <= row.width + 1) return "";
+    return JSON.stringify({ complete: [done.x, done.y, done.width], open: [open.x, open.y, open.width], row: row.width });
+  }
+  // The popup's card under its bar button: "" when the host placed it
+  // there (`width` wide, centred on the button, clamped to the margins, just
+  // below the bar); else what is off.
+  function popupPlacement(panel, width) {
+    var popup = panel.popup;
+    var button = popup.anchorItem;
+    var origin = popup.cardOrigin;
+    var centre = button.mapToItem(popup.anchorWindow.contentItem, 0, 0).x + button.width / 2;
+    var x = Math.round(Math.max(popup.margin, Math.min(centre - width / 2, popup.screenW - width - popup.margin)));
+    var off = [];
+    if (button.objectName !== "todoistButton") off.push("anchored to " + button);
+    if (popup.contentWidth !== width || Math.abs(popup.cardItem.width - width) > 1) off.push("width " + popup.contentWidth + "/" + popup.cardItem.width + ", not " + width);
+    if (origin.x !== x) off.push("x " + origin.x + ", not " + x);
+    if (origin.y !== Math.round(popup.barThickness + popup.gap)) off.push("y " + origin.y + ", not under the bar");
+    return off.join("; ");
   }
   function snapshot(drop) {
     var reply = Fixtures.snapshot(shell.today);
@@ -462,19 +487,22 @@ ShellRoot {
     case 79: return [function() { return store.description.state === "ready" && store.description.id === "t7"; }, 15000, "t7's description"];
     case 80: return [function() { return view.wide && one.size === "wide"; }, 20000, "Wide"];
     case 81: return [function() { return one.size === "large"; }, 10000, "Large"];
-    case 82: return [function() { var o = shell.overlay(); return store.overlayOpen && o !== null && o.view.active; }, 10000, "the overlay"];
+    case 82: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.size === "large" && Math.abs(one.popup.cardItem.width - 880) < 1; }, 10000, "the Large popup"];
     case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1"; }, 15000, "the pane's description"];
-    case 84: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus && store.description.state === "ready" && store.description.id === o.view.paneTask; }, 10000, "e put the caret in the pane, the description read"];
+    case 84: return [function() { var v = one.popup.bodyItem; return v.editor.contentField.inputActiveFocus && store.description.state === "ready" && store.description.id === v.paneTask; }, 10000, "e put the caret in the pane, the description read"];
     case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
-    case 86: return [function() { return shell.overlay().view.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 20000, "the pane's text saved as the view changed"];
+    case 86: return [function() { return one.popup.bodyItem.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 20000, "the pane's text saved as the view changed"];
     case 87: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
-    case 88: return [function() { var o = shell.overlay(); return o && o.view.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
-    case 89: return [function() { return shell.overlay() === null; }, 10000, "the overlay is gone"];
-    case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the Wide popup"];
-    case 91: return [function() { var o = shell.overlay(); return o !== null && o.view.active; }, 10000, "the overlay from IPC"];
-    case 92: return [function() { return !store.overlayOpen && one.size === "standard" && one.prefs.value("openOn") === "last" && shell.overlay() === null; }, 10000, "another size closed the overlay"];
-    case 93: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 94: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 88: return [function() { return one.popup.bodyItem.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
+    case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Large popup closed"];
+    case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Large again, in Norwegian"];
+    case 91: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && Kit.FoamyI18n.language === "en"; }, 15000, "the pane's text saved as the popup closed"];
+    case 92: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && v.size === "wide"; }, 10000, "the Wide popup"];
+    case 93: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "large" && Math.abs(l.popup.cardItem.width - 880) < 1; }, 10000, "the Large popup from IPC"];
+    case 94: return [function() { var v = shell.leader().popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1; }, 10000, "IPC add in the open Large popup"];
+    case 95: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
+    case 96: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
+    case 97: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -1555,25 +1583,30 @@ ShellRoot {
       view.openTask("t4", true);
       var section = shell.find(view.editor, "editSection");
       if (!check(view.editor.columns === 2 && section.visible && JSON.stringify(section.options.map(function(o) { return o.label; })) === JSON.stringify(["No section", "Review", "Ops"]) && !shell.find(view, "rail").visible, "wide: two columns, the project's sections, no rail")) return;
+      var pageOpen = shell.find(view.editor, "editOpen");
+      if (!check(pageOpen.text === "Open in Todoist" && pageOpen.tooltipText === "" && shell.buttonsOnOneLine(view.editor) === "", "the page: Complete and Open in Todoist on one line (" + shell.buttonsOnOneLine(view.editor) + ")")) return;
       view.editor.back();
       one.prefs.save("panelWidth", "large");
       break;
     case 81:
-      // Large: a click on the bar opens the overlay (the popup closes).
+      // Large: a click on the bar opens the popup under the button, wider.
       shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t1", description: "One", truncated: false } }));
+      one.close();
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       break;
     case 82:
-      var overlay = shell.overlay();
-      var big = overlay.view;
-      if (!check(!one.opened && overlay.targetScreen === one.barScreen && store.overlayScreen === one.barScreen, "on the bar's monitor; the popup closed")) return;
-      if (!check(overlay.card.width === 880 && Math.abs(overlay.card.x - (overlay.width - 880) / 2) < 1 && overlay.card.height <= overlay.height * 0.7 + 1, "centred, 880 wide, at most 70% high (" + JSON.stringify([overlay.card.x, overlay.card.width, overlay.card.height, overlay.width]) + ")")) return;
+      var big = one.popup.bodyItem;
+      if (!check(shell.popupPlacement(one, 880) === "", "the popup, 880 wide under the button (" + shell.popupPlacement(one, 880) + ")")) return;
+      if (!check(one.popup.maxHeight === Math.round(one.popup.screenH * 0.7) && one.popup.cardItem.height <= one.popup.maxHeight + 1, "at most 70% of the screen high (" + JSON.stringify([one.popup.cardItem.height, one.popup.maxHeight]) + ")")) return;
       if (!check(big.size === "large" && shell.find(big, "rail-week") !== null && big.band.visible && big.editor.visible && shell.find(big.editor, "editorEmpty").text === "No task selected", "the band, the rail with Week, the pane's empty state")) return;
       ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
       if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
       break;
     case 83:
-      var big1 = shell.overlay().view;
+      var big1 = one.popup.bodyItem;
+      // The pane's Complete and Open (as "Todoist") share one line.
+      var paneOpenButton = shell.find(big1.editor, "editOpen");
+      if (!check(shell.buttonsOnOneLine(big1.editor) === "" && paneOpenButton.text === "Todoist" && paneOpenButton.tooltipText === "Open in Todoist" && paneOpenButton.Accessible.name === "Open in Todoist", "the pane's buttons on one line, Open named in full (" + shell.buttonsOnOneLine(big1.editor) + ")")) return;
       if (!check(big1.editor.descriptionField.text === "One" && big1.editor.contentField.text === store.model.byId.t1.content, "the pane: the task and its description")) return;
       // Hover lights a row; the pane stays. ↓ moves both.
       big1.cursor.hover(big1.firstRowStop + 2);
@@ -1587,10 +1620,10 @@ ShellRoot {
       big1.cursor.emitTextKey(big1, "e");
       break;
     case 84:
-      var big2 = shell.overlay().view;
+      var big2 = one.popup.bodyItem;
       if (!check(big2.blocked, "the pane has the keys")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      if (!check(!big2.blocked && !big2.editor.activeFocus && store.overlayOpen, "Esc gave the keys back to the list")) return;
+      if (!check(!big2.blocked && !big2.editor.activeFocus && one.opened, "Esc gave the keys back to the list")) return;
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
       if (!check(big2.editor.contentField.inputActiveFocus, "Tab goes into the pane")) return;
       // Tab through the pane: each focused control scrolls into view; the
@@ -1643,7 +1676,7 @@ ShellRoot {
       if (!check(big2.paneTask === otherRow.entry.id && big2.editor.contentField.text === store.model.byId[otherRow.entry.id].content && !big2.blocked && !big2.editor.activeFocus, "the click moved the pane, the keys back to the list (" + big2.paneTask + ", " + JSON.stringify(big2.editor.contentField.text) + ")")) return;
       break;
     case 85:
-      var big5 = shell.overlay().view;
+      var big5 = one.popup.bodyItem;
       var paneSent = shell.updatesSince(shell.callsBefore);
       if (!check(JSON.stringify(paneSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]) && store.model.byId[shell.paneFrom].content === shell.paneText, "the typed text was saved for its own task (" + JSON.stringify(paneSent) + ")")) return;
       // A draft that can't be sent (a deadline that isn't a day), then
@@ -1682,7 +1715,7 @@ ShellRoot {
       });
       break;
     case 86:
-      var big2 = shell.overlay().view;
+      var big2 = one.popup.bodyItem;
       var weekSent = shell.updatesSince(shell.callsBefore);
       if (!check(JSON.stringify(weekSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]), "the view change saved the typed text (" + JSON.stringify(weekSent) + ")")) return;
       var ids = big2.weekColumns.map(function(col) { return col.entries.map(function(e) { return e.kind === "day" ? e.key : e.id; }); });
@@ -1709,7 +1742,7 @@ ShellRoot {
       ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
       break;
     case 87:
-      var big3 = shell.overlay().view;
+      var big3 = one.popup.bodyItem;
       var sent5 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent5) === JSON.stringify({ commands: [{ op: "due", id: "t2", date: shell.today }] }), "Ctrl+→ moved t2 to today (" + JSON.stringify(sent5) + ")")) return;
       if (!check(big3.weekColumn === 1 && big3.cursorRow().id === "t2", "the cursor followed it to Today")) return;
@@ -1722,11 +1755,11 @@ ShellRoot {
       if (!check(big3.weekPaneOpen && big3.editor.visible && big3.editor.taskId === "t2" && Math.abs(big3.week.width - shell.find(big3, "listArea").width) < 1, "Enter opened the pane over the week")) return;
       break;
     case 88:
-      var big4 = shell.overlay().view;
+      var big4 = one.popup.bodyItem;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big4.blocked && big4.weekPaneOpen, "Esc: the keys back, the pane stays")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      if (!check(!big4.weekPaneOpen && !big4.editor.visible && store.overlayOpen, "Esc: the pane closes")) return;
+      if (!check(!big4.weekPaneOpen && !big4.editor.visible && one.opened, "Esc: the pane closes")) return;
       // Overdue with thousands of tasks: only the cards in view are built,
       // and the keys scroll to the cursor's card.
       var many = shell.snapshot();
@@ -1751,38 +1784,87 @@ ShellRoot {
       if (!check(big4.weekColumn === 0 && big4.weekCard === big4.weekCards(1) - 1, "←: that row in Overdue (" + big4.weekCard + ")")) return;
       store.snapshot = shell.snapshot();
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      if (!check(!store.overlayOpen, "Esc: the overlay closes")) return;
+      if (!check(!one.opened, "Esc: the popup closes")) return;
       break;
     case 89:
-      // Large where the screen has no room: Wide, in the popup.
-      one.screenWidth = 800;
-      if (!check(one.size === "wide", "too narrow for Large: Wide (" + one.size + ")")) return;
+      // Large again, in Norwegian: the pane's buttons still on one line.
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t1", description: "One", truncated: false } }));
+      shell.pickLanguage("no");
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-      if (!check(one.opened && !store.overlayOpen, "the popup opened")) return;
+      Qt.callLater(function() { var v = one.popup.bodyItem; if (v) v.goTo(v.firstRowStop); });
       break;
     case 90:
-      if (!check(view.size === "wide" && view.wide && view.width > 540, "the popup is Wide (" + view.size + ")")) return;
-      one.close();
-      one.screenWidth = 1920;
-      // IPC toggle: the overlay on the focused monitor.
-      var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
-      ipc.toggle();
-      if (!check(store.overlayOpen && store.overlayScreen === null, "IPC toggle opened the overlay for the focused monitor")) return;
+      var big6 = one.popup.bodyItem;
+      var noOpen = shell.find(big6.editor, "editOpen");
+      if (!check(shell.find(big6.editor, "editComplete").text === "Fullfør" && noOpen.text === "Todoist" && noOpen.tooltipText === "Åpne i Todoist" && shell.buttonsOnOneLine(big6.editor) === "", "Norwegian: the pane's buttons on one line (" + shell.buttonsOnOneLine(big6.editor) + ")")) return;
+      // Typed in the pane, then a click outside the popup: it closes, and
+      // the text is saved for its task.
+      shell.paneFrom = big6.paneTask;
+      shell.paneText = store.model.byId[shell.paneFrom].content + " later";
+      var closeChange = {};
+      closeChange[shell.paneFrom] = { content: shell.paneText };
+      var closeResults = {};
+      closeResults[shell.paneFrom] = "ok";
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith(closeChange), { results: closeResults })));
+      shell.callsBefore = shell.calls("apply").length;
+      big6.editor.contentField.focusInput();
+      big6.editor.contentField.cursorPosition = big6.editor.contentField.text.length;
+      for (var p6 of " later") ev.keyClickChar(p6, Qt.NoModifier, -1);
+      ev.mouseClick(one.popup, 20, one.popup.height - 20, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(!one.opened, "a click outside closed the popup")) return;
+      shell.pickLanguage("en");
       break;
     case 91:
-      var overlay2 = shell.overlay();
-      if (!check(overlay2.targetScreen === Quickshell.screens[0], "on the focused monitor")) return;
-      // The Week view, then another size: the overlay goes, and "Open on:
-      // Last view" opens Today.
-      overlay2.view.setView("week");
+      var closeSent = shell.updatesSince(shell.callsBefore);
+      if (!check(JSON.stringify(closeSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]), "closing saved the typed text (" + JSON.stringify(closeSent) + ")")) return;
+      // Large where the popup has no room on the bar's screen: Wide; with
+      // no room for Wide either, Small.
+      shell.savedMargin = one.popup.margin;
+      one.popup.margin = 600;
+      if (!check(one.popup.availableCardWidth === one.popup.screenW - 1200 && one.size === "wide", "no room for Large: Wide (" + one.size + ")")) return;
+      one.popup.margin = 700;
+      if (!check(one.size === "standard", "no room for Wide: Small (" + one.size + ")")) return;
+      one.popup.margin = 600;
+      ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      break;
+    case 92:
+      // (The test's huge margin pushes the card down; only its width counts here.)
+      if (!check(view.size === "wide" && one.popup.contentWidth === 560 && Math.abs(one.popup.cardItem.width - 560) < 1, "the popup is Wide (" + view.size + ", " + one.popup.contentWidth + ")")) return;
+      one.close();
+      one.popup.margin = shell.savedMargin;
+      if (!check(one.size === "large", "room again: Large")) return;
+      // IPC toggle: the leader's popup, Large.
+      var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
+      shell.ipcPanel = one.data.indexOf(ipc) >= 0 ? one : two;
+      if (!check(shell.ipcPanel === shell.leader(), "the leader owns IPC")) return;
+      ipc.toggle();
+      break;
+    case 93:
+      var lead = shell.leader();
+      if (!check(shell.popupPlacement(lead, 880) === "", "IPC toggle: the leader's popup, 880 wide under its button (" + shell.popupPlacement(lead, 880) + ")")) return;
+      // IPC add while Large is open: the caret in the band's field.
+      var ipcAdd = lead.data.find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.add === "function"; });
+      ipcAdd.add();
+      break;
+    case 94:
+      var lead2 = shell.leader();
+      var leadView = lead2.popup.bodyItem;
+      if (!check(lead2.opened && leadView.fieldOpen && !leadView.searching && leadView.size === "large", "IPC add: the add field in the Large popup")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // The Week view, then another size: Today, and "Open on: Last view"
+      // opens Today.
+      leadView.setView("week");
       if (!check(store.lastView === "week", "Week is the last view")) return;
       one.prefs.save("openOn", "last");
       one.prefs.save("panelWidth", "standard");
       break;
-    case 92:
+    case 95:
+      var lead3 = shell.leader();
+      if (!check(lead3.popup.bodyItem.view === "today" && lead3.popup.bodyItem.size === "standard", "another size: the Week view became Today (" + lead3.popup.bodyItem.view + ")")) return;
+      lead3.close();
       one.open();
       break;
-    case 93:
+    case 96:
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
       one.close();
       one.prefs.save("openOn", "today");
@@ -1793,7 +1875,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 94:
+    case 97:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();
@@ -1820,32 +1902,6 @@ ShellRoot {
 }
 """
 
-# Offscreen stand-in for the host's Ui/OverlayWindow (a PanelWindow, which
-# needs a layer shell), written into the run's Ui directory in its place: a
-# FakePanelWindow (the harness's, drawn into the simulated screen in the
-# test's own window) with the same API. The focused monitor is the first
-# screen; the content shows at once (no scale to wait for).
-FAKE_OVERLAY_WINDOW = r"""import QtQuick
-import Quickshell
-
-FakePanelWindow {
-  id: window
-  property bool shown: false
-  property int shownLayer: 0
-  property int shownKeyboardFocus: 0
-  property var targetScreen: null
-  readonly property var targetMonitor: targetScreen
-  readonly property bool contentReady: shown && !!targetScreen
-  readonly property bool contentRevealed: contentReady
-  function focusedScreen() {
-    return Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
-  }
-  onShownChanged: targetScreen = shown ? focusedScreen() : null
-  visible: shown && !!targetScreen
-  screen: targetScreen
-}
-"""
-
 # Stands in for xdg-open and a custom open command: logs its name and argv
 # (tab-separated), and fails with the status in $FOAMY_OUT/open-fail when
 # that file isn't empty.
@@ -1857,20 +1913,13 @@ exit 0
 
 
 def offscreen_copy(dest):
-    """The plugin as the offscreen shell can load it: a copy whose
-    TodoOverlay.qml has no WlrLayershell lines (the stand-in window below is
-    not a layer surface; the harness drops them the same way)."""
+    """The plugin as the offscreen shell loads it: a copy without the helper
+    and its build files."""
     shutil.copytree(
         plugin,
         dest,
         ignore=shutil.ignore_patterns(".git", "native", "rust", "bin", "target", "*.png", "THIRD_PARTY_NOTICES.md"),
     )
-    overlay = dest / "TodoOverlay.qml"
-    lines = overlay.read_text().splitlines(keepends=True)
-    kept = [line for line in lines if not re.match(r"\s*WlrLayershell\.\w+\s*:", line)]
-    if len(kept) == len(lines):
-        raise SystemExit("TodoOverlay.qml changed shape: no WlrLayershell line to drop")
-    overlay.write_text("".join(kept).replace("import Quickshell.Wayland\n", ""))
     return dest
 
 
@@ -1882,10 +1931,6 @@ run = harness.Run(
     prefix="foamy-todoist-runtime-",
     fakebin={"xdg-open": FAKE_OPENER, "todoist-open": FAKE_OPENER},
 )
-# The host's OverlayWindow (a layer-shell PanelWindow) gives way to the
-# stand-in; a run's Ui files are links to the host, so the link goes first.
-(run.root / "Ui/OverlayWindow.qml").unlink()
-(run.root / "Ui/OverlayWindow.qml").write_text(FAKE_OVERLAY_WINDOW)
 try:
     (run.out / "reply-status.json").write_text(json.dumps({"ok": True, "state": "signed_out", "user": None}))
     run.env["FAKE_HELPER"] = FAKE_HELPER

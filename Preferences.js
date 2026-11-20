@@ -16,7 +16,7 @@ var fields = [
   // The number in the bar: tasks left today, or nothing (icon only).
   { key: "barCount", type: "enum", options: ["today", "none"], defaultValue: "today" },
   // The size: Small (the 420 px popup), Wide (560 px, with the rail) or
-  // Large (a centred overlay with the rail and the details pane). The key
+  // Large (the 880 px popup with the rail and the details pane). The key
   // keeps its old name, so a saved "standard" or "wide" needs no migration.
   { key: "panelWidth", type: "enum", options: ["standard", "wide", "large"], defaultValue: "standard" },
   // Enter in the add field: add and close the panel, or add and keep the

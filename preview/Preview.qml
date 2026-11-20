@@ -1,14 +1,13 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import qs.Ui
+import qs.Commons as Commons
 import "../kit"
 import ".." as Plugin
 import "../Model.js" as Model
 import "Fixtures.js" as Fixtures
 
 // Offscreen previews (foamy-kit preview/render.py): sample data, no helper.
-// The Large states draw the overlay's card centred on the screen (the
-// overlay window itself is a layer surface the harness can't show).
+// Every size is the popup under the bar button, as Panel.qml sizes it.
 Item {
   id: preview
   required property QtObject bar
@@ -17,7 +16,7 @@ Item {
   property string previewState: "today"
   readonly property bool large: previewState.indexOf("large") === 0
   readonly property bool wide: previewState.indexOf("wide") === 0
-  readonly property var popup: large ? largeHolder : previewPopup
+  readonly property var popup: previewPopup
 
   function sample() {
     var reply = Fixtures.snapshot(Model.dayKey(new Date()))
@@ -28,7 +27,7 @@ Item {
   }
   function applyState() {
     var store = Plugin.TodoStore
-    var view = preview.large ? largeView : previewPopup.ensureBody()
+    var view = previewPopup.ensureBody()
     if (!view)
       return
     var signedIn = previewState !== "signed-out" && previewState !== "settings-signed-out"
@@ -124,40 +123,14 @@ Item {
     id: previewPopup
     anchorItem: preview.anchorItem
     bar: preview.bar
-    open: !preview.large
-    wide: preview.wide
+    open: true
+    contentWidth: previewPopup.fittedContentWidth(preview.large ? Commons.Style.space(880) : preview.wide ? FoamyStyle.popupWidthWide : FoamyStyle.popupWidth)
+    maxHeight: preview.large ? Math.round(previewPopup.screenH * 0.7) : 0
     body: Component {
       Plugin.TodoView {
-        size: preview.wide ? "wide" : "standard"
+        size: preview.large ? "large" : preview.wide ? "wide" : "standard"
         onSettingsRequested: editingSettings = true
         onSettingsClosed: editingSettings = false
-      }
-    }
-  }
-  // Large: the overlay's card (TodoOverlay.qml), centred on the screen.
-  Item {
-    id: largeHolder
-    readonly property Item cardItem: largeCard
-    visible: preview.large
-    width: 1920
-    height: 1080
-    BorderSurface {
-      id: largeCard
-      width: 880
-      height: Math.min(largeView.implicitHeight + largeCard.borderTop + largeCard.borderBottom, Math.round(parent.height * 0.7))
-      anchors.centerIn: parent
-      radius: FoamyStyle.radius
-      color: FoamyPalette.background
-      borderSpec: FoamyStyle.popupBorderSpec
-      clip: true
-      Plugin.TodoView {
-        id: largeView
-        x: largeCard.borderLeft
-        y: largeCard.borderTop
-        width: largeCard.width - largeCard.borderLeft - largeCard.borderRight
-        height: largeCard.height - largeCard.borderTop - largeCard.borderBottom
-        size: "large"
-        active: preview.large
       }
     }
   }

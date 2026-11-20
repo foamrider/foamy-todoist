@@ -324,29 +324,6 @@ QtObject {
       failed(reply, code)
   }
 
-  // ---- the Large overlay (once per shell) ------------------------------------------
-  // One overlay across all bar instances; the leading instance draws it
-  // (Panel.qml), on `overlayScreen` (null: the focused monitor).
-  // `overlayPage` is what it opens on: "" (the list), "settings" or "add".
-  property bool overlayOpen: false
-  property var overlayScreen: null
-  property string overlayPage: ""
-  function showOverlay(screen, page) {
-    overlayScreen = screen || null
-    overlayPage = page || ""
-    overlayOpen = true
-  }
-  function hideOverlay() {
-    overlayOpen = false
-    overlayPage = ""
-  }
-  function toggleOverlay(screen) {
-    if (overlayOpen)
-      hideOverlay()
-    else
-      showOverlay(screen, "")
-  }
-
   // ---- adding -------------------------------------------------------------------
   property int addRequests: 0
   // A request's end: ok (the task exists, maybe with a warning) or not.

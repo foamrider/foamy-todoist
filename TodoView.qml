@@ -30,8 +30,8 @@ import "Model.js" as Model
 PanelKeyCatcher {
   id: root
   property bool active: true
-  // "standard" (Small), "wide" or "large" (the overlay; Panel.qml decides
-  // when the screen has room).
+  // "standard" (Small), "wide" or "large" (Panel.qml decides when the
+  // screen has room).
   property string size: "standard"
   readonly property bool wide: size !== "standard"
   readonly property bool large: size === "large"

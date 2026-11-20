@@ -789,7 +789,11 @@ FocusScope {
         }
       }
 
+      // The pane is too narrow for "Open in Todoist" beside Complete: there
+      // the button says "Todoist" (the footer's word), with the whole name
+      // in its tooltip and for screen readers.
       Flow {
+        objectName: "editButtons"
         Layout.fillWidth: true
         spacing: FoamyStyle.gap
         FoamyButton {
@@ -802,7 +806,9 @@ FocusScope {
         FoamyButton {
           objectName: "editOpen"
           focusable: true
-          text: FoamyI18n.t("Open in Todoist")
+          text: editor.pane ? FoamyI18n.t("Todoist") : FoamyI18n.t("Open in Todoist")
+          tooltipText: editor.pane ? FoamyI18n.t("Open in Todoist") : ""
+          Accessible.name: FoamyI18n.t("Open in Todoist")
           iconName: "external-link"
           onClicked: editor.store.openView("task", editor.taskId)
         }

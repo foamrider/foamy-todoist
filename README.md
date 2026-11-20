@@ -24,13 +24,11 @@ Three sizes (**Size** in Settings):
 - **Wide**: the 560 px popup, where the screen has room (else Small). It
   has no tabs: a rail on the left lists the three views, then **My
   projects** (sub-projects indented one step) with their open tasks.
-- **Large**: a window in the middle of the screen, about 880 px wide and as
-  tall as its content up to 70% of the screen (the list scrolls inside). It
-  opens on the monitor of the bar you clicked (from IPC, on the focused
-  one), one at a time however many monitors show the bar. Three panes: the
-  rail (with **Week** after Upcoming), the list, and on the right the
-  task's details. A click outside or Esc closes it. On a screen narrower
-  than about 960 px it opens Wide instead.
+- **Large**: the popup under the bar again, 880 px wide and as tall as its
+  content up to 70% of the screen (the list scrolls inside). Three panes:
+  the rail (with **Week** after Upcoming), the list, and on the right the
+  task's details. Its settings page is Wide's width. Where the screen has
+  no room for 880 px beside the popup's margins, it opens Wide instead.
 
 The band at the top holds the Todoist mark, the title, the current view and
 its count, and three buttons: **+** (add a task, `a`), **Search** (`/`) and
@@ -178,10 +176,10 @@ Esc gives the keys back to the list. Its caption says "Saving…" or
   and saving it replaces Todoist's.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
-- **Complete** and **Open in Todoist** are at the bottom. Completing the
-  task (here, or with its row's ring or Space) saves what you typed first.
-  A task completed or deleted elsewhere meanwhile: the page says it is no
-  longer in Todoist.
+- **Complete** and **Open in Todoist** (in the details pane: **Todoist**)
+  are at the bottom. Completing the task (here, or with its row's ring or
+  Space) saves what you typed first. A task completed or deleted elsewhere
+  meanwhile: the page says it is no longer in Todoist.
 
 Ctrl+O on a task opens it in Todoist.
 
@@ -272,12 +270,11 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
   failure the wait doubles, up to 30 minutes, and never ends before
   Todoist's own retry time when it asks to slow down.
 
-IPC (`omarchy-shell foamy.todoist <function>`): `toggle` (the panel; Large
-opens on the focused monitor), `add` (opens the panel with the add field
-open and the caret in it) and `refresh`. To open the panel or the add field
-with keys, bind them in Hyprland, for example in
-`~/.config/hypr/bindings.conf` (pick your own keys in place of `MODS` and
-`KEY`):
+IPC (`omarchy-shell foamy.todoist <function>`): `toggle` (the panel),
+`add` (opens the panel with the add field open and the caret in it) and
+`refresh`. To open the panel or the add field with keys, bind them in
+Hyprland, for example in `~/.config/hypr/bindings.conf` (pick your own
+keys in place of `MODS` and `KEY`):
 
 ```ini
 bindd = MODS, KEY, Todoist, exec, omarchy-shell foamy.todoist toggle
