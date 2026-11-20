@@ -9,16 +9,18 @@ import "Edit.js" as Edit
 
 // The task editor, one component used two ways. `mode` "page" (Small and
 // Wide): a sub-view in place of the list, built like the settings page
-// (the compact band with Back, the task as the title, "Saving…", Open in
-// Todoist); Esc or Back returns. "pane" (Large): the details pane beside
-// the list, always showing the selected task; Esc gives the keys back to
-// the list (`keysReturned`).
+// (the compact band with Back, the task's place as the title, "Saving…",
+// Open in Todoist); Esc or Back returns. "pane" (Large): the details pane
+// beside the list, always showing the selected task; Esc gives the keys
+// back to the list (`keysReturned`).
 //
 // It reads like the task, after Todoist's task view: the completion ring
 // and the title, the description under it, then the properties (Project,
 // Date, Deadline, Priority, Labels) as captioned value rows. Every part is
 // edited where it is: the title and description are quiet fields; a value
 // row opens its menu, or (Date, Deadline) a one-line field in its place.
+// At rest the title reads as the list shows it (Model.plainText: a link's
+// text, no Markdown marks); with the keys it holds Todoist's raw text.
 // In the Wide page the properties sit in a column of their own (`split`).
 //
 // Each part saves on its own: a text field when it loses the keys, on
@@ -84,8 +86,9 @@ FocusScope {
   // Each text field's confirmed value: what Todoist held when the field
   // last followed the task (shown, or changed in Todoist while untouched),
   // or the newest save of the field that worked. Never an unconfirmed
-  // request's value: baselineOf() adds the saves in flight. Read
-  // imperatively (dirty()), never bound, so it is mutated in place.
+  // request's value: baselineOf() adds the saves in flight. Replaced on
+  // each change (confirm()), never mutated, so the title's rest state
+  // (titleRendered) follows it.
   property var confirmed: ({})
   // What each choice (place, priority, labels) asked for last, for Retry.
   property var attempts: ({})
@@ -148,13 +151,18 @@ FocusScope {
   function initialOf(key) {
     return Edit.initial(baseNow(), key, descBase())
   }
+  function confirm(key, value) {
+    var next = Object.assign({}, confirmed)
+    next[key] = value
+    confirmed = next
+  }
   // A text field set to what Todoist holds (no save of it in flight): it
   // is the confirmed value now (read back from the field, which may turn
   // CRLF into LF).
   function setText(key, value) {
     var input = inputOf(key)
     input.text = value
-    confirmed[key] = input.text
+    confirm(key, input.text)
   }
   // What the field is measured against: what its newest save in flight
   // sent (typing on from it is the next change, typing back to the old
@@ -288,7 +296,7 @@ FocusScope {
         // (The store's queue runs one job at a time, so replies come in
         // order.)
         if (input)
-          editor.confirmed[save.key] = save.sent
+          editor.confirm(save.key, save.sent)
       }
       // A newer save of the field is in flight: its reply decides what the
       // field shows (it holds this one's change too).
@@ -460,6 +468,23 @@ FocusScope {
     var day = draft !== null ? draft.trim() : task ? task.deadline || "" : ""
     return Model.dayWords(day, formatDate, translate, store.today) || day
   }
+  // The task's place, "Project" or "Project › Section", as the saves in
+  // flight leave it: the Project row and the page's band say it.
+  readonly property var placeProject: base ? store.model.projects[base.projectId] || null : null
+  readonly property string placeLabel: {
+    if (!base)
+      return ""
+    var section = base.sectionId ? store.model.sections[base.sectionId] : null
+    return (placeProject ? placeProject.name : "") + (section ? " › " + section.name : "")
+  }
+  // The title at rest: as the list shows it (plain text), in the field's
+  // place, while the field doesn't have the keys and holds neither an
+  // unsaved change nor a failed save (those show the raw text). Only when
+  // that differs from the raw text; else the field shows itself.
+  readonly property string titlePlain: Model.plainText(contentInput.text)
+  readonly property bool titleRendered: !contentInput.inputActiveFocus && titlePlain !== contentInput.text && errorOf("content") === "" && !touched("content")
+  onTitleRenderedChanged: if (titleRendered)
+    contentInput.contentY = 0
   function roleColor(role) {
     return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "success" ? FoamyPalette.success : role === "info" ? FoamyPalette.info : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
   }
@@ -489,14 +514,14 @@ FocusScope {
   readonly property real sideWidth: Commons.Style.space(240)
   implicitHeight: (pane ? paneTop.height : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
 
-  // The page's band: Back, the task, "Saving…", Open in Todoist.
+  // The page's band: Back, the task's place, "Saving…", Open in Todoist.
   FoamyHeroBand {
     id: pageBand
     objectName: "editorBand"
     visible: !editor.pane
     compact: true
     width: parent.width
-    compactTitle: editor.task ? editor.task.text : ""
+    compactTitle: editor.placeLabel
     saving: editor.saving
     onBack: editor.back()
     compactTrailing: [
@@ -708,27 +733,64 @@ FocusScope {
           // The title wraps, as in Todoist; it is one line of text all the
           // same: Enter saves instead of breaking it (a pasted line break is
           // refused with why, as Todoist refuses it).
-          SafeTextArea {
-            id: contentInput
-            objectName: "editContent"
+          Item {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop
-            quiet: true
-            minimumHeight: 0
-            maximumHeight: FoamyStyle.controlHeight * 4
-            font.pixelSize: FoamyStyle.font.heading
-            font.weight: Font.DemiBold
-            maximumLength: 1000
-            translate: FoamyI18n.t
-            Accessible.name: FoamyI18n.t("Task")
-            onTextEdited: editor.setError("content", "")
-            onEditingFinished: editor.saveField("content")
-            onKeyPressed: function (event) {
-              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                event.accepted = true
-                editor.saveField("content")
-              } else
-                editor.fieldKey("content", event)
+            implicitHeight: contentInput.height
+            SafeTextArea {
+              id: contentInput
+              objectName: "editContent"
+              width: parent.width
+              // At rest the rendered title sets the height; the field's own
+              // text, caret and selection are see-through under it, so hover,
+              // a click (the caret where it lands in the raw text) and Tab
+              // reach the field as before.
+              height: editor.titleRendered ? Math.min(maximumHeight, titleText.implicitHeight) : implicitHeight
+              color: editor.titleRendered ? "transparent" : contentInput.foreground
+              selectedTextColor: editor.titleRendered ? "transparent" : contentInput.foreground
+              selectionColor: editor.titleRendered ? "transparent" : contentInput.selectionTint
+              quiet: true
+              minimumHeight: 0
+              maximumHeight: FoamyStyle.controlHeight * 4
+              font.pixelSize: FoamyStyle.font.heading
+              font.weight: Font.DemiBold
+              maximumLength: 1000
+              translate: FoamyI18n.t
+              Accessible.name: FoamyI18n.t("Task")
+              onTextEdited: editor.setError("content", "")
+              onEditingFinished: editor.saveField("content")
+              onKeyPressed: function (event) {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                  event.accepted = true
+                  editor.saveField("content")
+                } else
+                  editor.fieldKey("content", event)
+              }
+              // At rest the raw text stays at its top, so a click lands on
+              // the line under it (the field scrolls to its caret otherwise).
+              onContentYChanged: if (editor.titleRendered && contentY !== 0)
+                contentY = 0
+            }
+            // The rendered title: the field's paddings, font and wrapping,
+            // its lines up to the field's height (then …). The field carries
+            // the name and value for assistive technology.
+            PlainText {
+              id: titleText
+              objectName: "editTitleText"
+              visible: editor.titleRendered
+              width: parent.width
+              leftPadding: contentInput.leftPadding
+              rightPadding: contentInput.rightPadding
+              topPadding: contentInput.topPadding
+              bottomPadding: contentInput.bottomPadding
+              text: editor.titleRendered ? editor.titlePlain : ""
+              font.family: contentInput.font.family
+              font.pixelSize: contentInput.font.pixelSize
+              font.weight: contentInput.font.weight
+              color: contentInput.foreground
+              maximumLineCount: Math.max(1, Math.floor((contentInput.maximumHeight - contentInput.topPadding - contentInput.bottomPadding) / titleLine.height))
+              elide: Text.ElideRight
+              Accessible.ignored: true
             }
           }
         }
@@ -842,11 +904,9 @@ FocusScope {
           ValueRow {
             id: placeRow
             objectName: "editPlace"
-            readonly property var project: editor.base ? editor.store.model.projects[editor.base.projectId] : null
-            readonly property var section: editor.base && editor.base.sectionId ? editor.store.model.sections[editor.base.sectionId] : null
             iconName: "hash"
-            iconColor: editor.roleColor(project ? Model.colorRole(project.color) : "muted")
-            text: (project ? project.name : "") + (section ? " › " + section.name : "")
+            iconColor: editor.roleColor(editor.placeProject ? Model.colorRole(editor.placeProject.color) : "muted")
+            text: editor.placeLabel
             accessibleName: FoamyI18n.t("Project") + ": " + text
             onActivated: function (keyboard) {
               editor.openPlaceMenu(keyboard)

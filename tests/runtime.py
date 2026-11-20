@@ -1390,7 +1390,7 @@ ShellRoot {
     case 70:
       var editor = view.editor;
       if (!check(shell.opened().length === shell.openedBefore, "nothing opened in Todoist")) return;
-      if (!check(!view.band.visible && editor.visible && shell.find(editor, "editorBand").compactTitle === "Review pull request #482" && !view.footer.visible, "the page: the task as the title, no band, no footer")) return;
+      if (!check(!view.band.visible && editor.visible && shell.find(editor, "editorBand").compactTitle === "Work › Review" && !view.footer.visible, "the page: the task's place as the title, no band, no footer (" + shell.find(editor, "editorBand").compactTitle + ")")) return;
       if (!check(shell.calls("task").length === shell.callsBefore + 1 && JSON.parse(shell.calls("task").pop().slice("task ".length)).id === "t4", "the description is read with the task command")) return;
       if (!check(editor.contentField.text === "Review **pull request** #482" && editor.descriptionField.text === "Check the tests\nthen merge" && editor.descriptionField.enabled, "the fields hold the task: the raw text, the description (" + JSON.stringify([editor.contentField.text, editor.descriptionField.text]) + ")")) return;
       if (!check(shell.valueText(editor, "dueRow") === "Today 14:00" && !editor.dueField.visible, "the date in the panel's words, the field closed (" + shell.valueText(editor, "dueRow") + ")")) return;
@@ -1399,7 +1399,7 @@ ShellRoot {
       // It reads like the task: the title, the captions and their values,
       // no help text and no form buttons (the description is a field).
       var shown = shell.visibleTexts(editor);
-      var expected = ["Review pull request #482", "Project", "Work › Review", "Date", "Today 14:00", "Deadline", "Priority", "P3", "Labels", "@code"];
+      var expected = ["Work › Review", "Review pull request #482", "Project", "Work › Review", "Date", "Today 14:00", "Deadline", "Priority", "P3", "Labels", "@code"];
       if (!check(JSON.stringify(shown) === JSON.stringify(expected), "the page shows the task, no help text (" + JSON.stringify(shown) + ")")) return;
       if (!check(shell.find(editor, "editComplete") === null && shell.find(editor, "editButtons") === null, "no Complete or Open buttons in the form")) return;
       // The title and description are quiet: no fill or border at rest.
@@ -1407,20 +1407,55 @@ ShellRoot {
       // Open in Todoist: an icon in the page's band.
       var bandOpen = editor.openButton;
       if (!check(bandOpen.objectName === "editOpen" && bandOpen.visible && bandOpen.iconName === "external-link" && bandOpen.tooltipText === "Open in Todoist" && bandOpen.Accessible.name === "Open in Todoist" && shell.find(shell.find(editor, "editorBand"), "editOpen") === bandOpen, "Open in Todoist is an icon in the band")) return;
+      // At rest the title reads as the list shows it, in the field's place
+      // and font; the field holds Todoist's raw text under it.
+      var title = editor.contentField;
+      var titleText = shell.find(editor, "editTitleText");
+      var atRest = function() { return titleText.visible && Qt.colorEqual(title.color, "transparent"); };
+      if (!check(atRest() && titleText.text === "Review pull request #482" && titleText.text === store.model.byId.t4.text && title.text === "Review **pull request** #482", "at rest: the title as the list shows it (" + JSON.stringify([titleText.text, title.text]) + ")")) return;
+      if (!check(Math.abs(titleText.mapToItem(editor, 0, 0).y - title.mapToItem(editor, 0, 0).y) < 1 && Math.abs(titleText.height - title.height) < 1 && titleText.leftPadding === title.leftPadding && titleText.font.pixelSize === title.font.pixelSize && titleText.font.weight === title.font.weight, "in the field's place and font")) return;
+      // A click on it: the raw text, the caret in it; leaving: rendered
+      // again (nothing sent); Shift+Tab back: the raw text.
+      var applyBefore = shell.calls("apply").length;
+      ev.mouseClick(titleText, titleText.width / 3, titleText.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(title.inputActiveFocus && !atRest() && Qt.colorEqual(title.color, title.foreground) && title.cursorPosition > 0 && title.cursorPosition <= title.text.length, "a click: the raw text with the caret (" + title.cursorPosition + ")")) return;
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(editor.descriptionField.inputActiveFocus && atRest() && titleText.text === "Review pull request #482" && shell.calls("apply").length === applyBefore, "Tab away: rendered again, nothing sent")) return;
+      ev.keyClick(Qt.Key_Tab, Qt.ShiftModifier, -1);
+      if (!check(title.inputActiveFocus && !atRest(), "Shift+Tab back: the raw text")) return;
+      // A save refused at once (a line break): the raw text, without the
+      // keys too; Esc drops it, and leaving shows it rendered.
+      title.text = "Review **pull request**\n#482";
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(!title.inputActiveFocus && editor.errorOf("content") !== "" && shell.find(editor, "contentError").visible && !atRest(), "a refused title: the raw text with its error")) return;
+      ev.keyClick(Qt.Key_Tab, Qt.ShiftModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(title.text === "Review **pull request** #482" && editor.errorOf("content") === "" && atRest() && view.pageShown, "Esc dropped it; rendered again")) return;
+      // A change not saved (the field holds it without the keys): the raw text.
+      title.text = "Review **it**";
+      if (!check(editor.touched("content") && !atRest(), "an unsaved change: the raw text")) return;
+      editor.revert("content");
+      if (!check(atRest() && shell.calls("apply").length === applyBefore, "reverted: rendered, nothing sent")) return;
       // The task text: only it is sent.
-      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR" } }), { results: { t4: "ok" } })));
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the **PR**" } }), { results: { t4: "ok" } })));
       shell.callsBefore = shell.calls("apply").length;
       editor.contentField.focusInput();
       editor.contentField.selectAll();
-      for (var e1 of "Review the PR") ev.keyClickChar(e1, Qt.NoModifier, -1);
+      for (var e1 of "Review the **PR**") ev.keyClickChar(e1, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       if (!check(editor.saving && shell.find(editor, "editorBand").saving, "Saving… while it runs")) return;
+      if (!check(title.inputActiveFocus && !atRest(), "Enter keeps the keys: the raw text")) return;
+      // Leaving while it saves: what the field holds, rendered (Todoist
+      // still has the old title).
+      ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+      if (!check(editor.saving && atRest() && titleText.text === "Review the PR" && store.model.byId.t4.content === "Review **pull request** #482", "left while it saves: the field's text, rendered (" + titleText.text + ")")) return;
       break;
     case 71:
       var editor1 = view.editor;
       var sent1 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
-      if (!check(JSON.stringify(sent1) === JSON.stringify({ commands: [{ op: "update", id: "t4", content: "Review the PR" }] }), "only the text was sent (" + JSON.stringify(sent1) + ")")) return;
-      if (!check(editor1.contentField.text === "Review the PR" && store.model.byId.t4.content === "Review the PR" && editor1.errorOf("content") === "" && !editor1.saving, "saved: the field shows Todoist's value")) return;
+      if (!check(JSON.stringify(sent1) === JSON.stringify({ commands: [{ op: "update", id: "t4", content: "Review the **PR**" }] }), "only the text was sent (" + JSON.stringify(sent1) + ")")) return;
+      if (!check(editor1.contentField.text === "Review the **PR**" && store.model.byId.t4.content === "Review the **PR**" && shell.find(editor1, "editTitleText").text === "Review the PR" && editor1.errorOf("content") === "" && !editor1.saving, "saved: the field shows Todoist's value")) return;
       // No deadline: the caption alone, with +; + opens a one-line field.
       // A deadline that isn't a day: said at once, nothing sent, the field
       // stays open; Esc drops it and closes the field.
@@ -1436,7 +1471,7 @@ ShellRoot {
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(editor1.deadlineField.text === "" && !deadlineError.visible && !editor1.deadlineField.visible && deadlinePlus.activeFocus && view.pageShown, "Esc dropped the change, closed the field, the keys on its +")) return;
       // A save Todoist refuses: the error under the date, with Retry, the text kept.
-      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR" } }), { results: { t4: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f500" } } })));
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the **PR**" } }), { results: { t4: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f500" } } })));
       var dueRow1 = shell.find(editor1, "dueRow");
       ev.mouseClick(dueRow1, dueRow1.width / 2, dueRow1.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(editor1.dueField.visible && editor1.dueField.inputActiveFocus && editor1.dueField.text === "today 14:00" && !dueRow1.visible, "the date row opened its field with Todoist's words")) return;
@@ -1454,7 +1489,7 @@ ShellRoot {
       if (!check(shell.find(dueBlock, "fieldErrorText").text === "Todoist answered HTTP 500." && shell.find(dueBlock, "fieldRetry").visible && editor2.dueField.text === "next monday", "refused: why, Retry, the text kept")) return;
       if (!check(!editor2.dueField.visible && shell.valueText(editor2, "dueRow") === "next monday", "the field closed; the row shows the kept text (" + shell.valueText(editor2, "dueRow") + ")")) return;
       if (!check(store.error === "", "the list's error line stays clear (" + store.error + ")")) return;
-      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR", due: Fixtures.due("2026-11-23", false, "next monday") } }), { results: { t4: "ok" } })));
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the **PR**", due: Fixtures.due("2026-11-23", false, "next monday") } }), { results: { t4: "ok" } })));
       shell.find(dueBlock, "fieldRetry").clicked();
       break;
     case 73:
@@ -1462,7 +1497,7 @@ ShellRoot {
       if (!check(shell.calls("apply").length === shell.callsBefore + 3 && editor3.errorOf("due") === "" && editor3.dueField.text === "next monday" && shell.valueText(editor3, "dueRow") === "Monday", "Retry sent it again; saved (" + shell.valueText(editor3, "dueRow") + ")")) return;
       // Priority: Enter on its row opens the menu of the four; a pick sends
       // it alone (P1 is the API's 4).
-      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR", priority: 4 } }), { results: { t4: "ok" } })));
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the **PR**", priority: 4 } }), { results: { t4: "ok" } })));
       var priorityRow = shell.find(editor3, "editPriority");
       priorityRow.forceActiveFocus();
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
@@ -1475,7 +1510,7 @@ ShellRoot {
       var sent4 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent4) === JSON.stringify({ commands: [{ op: "update", id: "t4", priority: 4 }] }) && shell.valueText(editor4, "editPriority") === "P1" && !editor4.menu.opened, "P1 sent alone (" + JSON.stringify(sent4) + ")")) return;
       // + at the Labels caption: the personal labels the task doesn't have; one picked sends the whole list.
-      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the PR", priority: 4, labels: ["code", "calls"] } }), { results: { t4: "ok" } })));
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the **PR**", priority: 4, labels: ["code", "calls"] } }), { results: { t4: "ok" } })));
       var plusLabel = shell.find(editor4, "addLabel");
       ev.mouseClick(plusLabel, plusLabel.width / 2, plusLabel.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       var offered = editor4.menu.entries.map(function(entry) { return entry.text; });
@@ -1691,7 +1726,7 @@ ShellRoot {
       if (!check(paneOpenButton.objectName === "paneOpen" && paneOpenButton.visible && paneOpenButton.iconName === "external-link" && paneOpenButton.tooltipText === "Open in Todoist" && paneOpenButton.Accessible.name === "Open in Todoist", "the pane's Open in Todoist is an icon")) return;
       var paneTop = paneOpenButton.mapToItem(big1.editor, 0, 0).y;
       var titleTop = big1.editor.contentField.mapToItem(big1.editor, 0, 0).y;
-      if (!check(paneTop < titleTop && paneTexts.indexOf("Task") < 0 && paneTexts[0] === "Project", "at the pane's top; no Task caption (" + JSON.stringify(paneTexts) + ")")) return;
+      if (!check(paneTop < titleTop && paneTexts.indexOf("Task") < 0 && paneTexts[0] === store.model.byId.t1.text && paneTexts[1] === "Project", "at the pane's top; no Task caption (" + JSON.stringify(paneTexts) + ")")) return;
       if (!check(big1.editor.descriptionField.text === "One" && big1.editor.contentField.text === store.model.byId.t1.content, "the pane: the task and its description")) return;
       // Hover lights a row; the pane stays. ↓ moves both.
       big1.cursor.hover(big1.firstRowStop + 2);
