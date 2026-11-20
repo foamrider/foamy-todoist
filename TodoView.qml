@@ -1046,7 +1046,8 @@ PanelKeyCatcher {
       id: addField
       objectName: "addField"
       anchors.fill: parent
-      font.pixelSize: FoamyStyle.font.heading
+      // The band's title size (the band can't set it: its field is fieldBox).
+      font.pixelSize: FoamyStyle.font.title
       placeholderText: fieldBox.placeholder
       translate: FoamyI18n.t
       maximumLength: 500
