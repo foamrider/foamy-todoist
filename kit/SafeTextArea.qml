@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 5e864fcd564ac4f4a9e268afaaf8530df5901fc0c1ea81262332e7dfc393a095 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 ffb8c27c56b5afd077064cfa808ee87f0920c306759370cbc1f27f78a3b05657 — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.Commons
@@ -42,7 +42,8 @@ import qs.Ui
 //   the end.
 // - textEdited fires on every change the user makes (typing, paste, cut,
 //   undo, redo); editingFinished when the field loses the focus.
-// - Styled like SafeTextField (foamy radius, control fill and border).
+// - Styled like SafeTextField (foamy radius, control fill and border), with
+//   its `quiet` mode for text edited in place.
 //   clipboardScript resolves relative to FoamyClipboard.qml unless absolute.
 
 Flickable {
@@ -63,6 +64,20 @@ Flickable {
   readonly property bool _focused: editor.activeFocus
   readonly property bool _hot: editor.hovered || hasCursor
   readonly property var _borderSpec: Border.controlSpec(_focused ? "focus" : (_hot ? "hover-cursor" : "normal"), foreground, accent)
+  // Quiet: text edited in place (a title that reads as text). At rest it
+  // has no fill and no border; hover, the cursor or the focus show the
+  // usual field. The border keeps its width, so the text never moves.
+  property bool quiet: false
+  readonly property bool _resting: quiet && !_focused && !_hot
+  readonly property var _restingBorder: ({
+      "color": "transparent",
+      "widths": _borderSpec.widths,
+      "gradient": {
+        "colors": [],
+        "angle": 0,
+        "enabled": false
+      }
+    })
   property alias background: editor.background
   property bool editorReady: false
   // A scroll view around the field (FoamySettingsPage's focus follow)
@@ -241,8 +256,8 @@ Flickable {
   topPadding: FoamyStyle.controlPaddingY + Border.top(_borderSpec)
   bottomPadding: FoamyStyle.controlPaddingY + Border.bottom(_borderSpec)
   background: BorderSurface {
-    color: Style.controlFill(root._focused, root._hot, root.foreground, root.accent)
-    borderSpec: root._borderSpec
+    color: root._resting ? "transparent" : Style.controlFill(root._focused, root._hot, root.foreground, root.accent)
+    borderSpec: root._resting ? root._restingBorder : root._borderSpec
     radius: root.cornerRadius
   }
 

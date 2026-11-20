@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 425d37440922d9348da0b8fb05ac10b7dcdcd49ba8795623030701dace7ad394 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 7d0b9afb3874ce7463c04cd3e87d3740d39be4b20c9a2befbe7a231719533a0f — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Layouts
 
@@ -23,6 +23,8 @@ import QtQuick.Layouts
 //
 // Settings pages use the compact form (FoamySettingsPage does it for you):
 //   FoamyHeroBand { compact: true; saving: …; onBack: … }
+// A sub-view built like it (an editor page) may add icon actions at the
+// trailing end: compactTrailing: [ FoamyAction { iconName: "external-link"; … } ]
 //
 // Centred variant (a panel about one big value: clock, weather):
 //   FoamyHeroBand {
@@ -213,6 +215,9 @@ Item {
   property string compactTitle: FoamyI18n.t("Settings")
   property bool saving: false
   property alias backButton: settingsHeader.backButton
+  // Icon actions at the compact form's trailing end, after "Saving…" (a
+  // sub-view's "Open in …"): FoamySettingsHeader.trailing.
+  property alias compactTrailing: settingsHeader.trailing
   signal back
 
   // --- hero slot -------------------------------------------------------------------
