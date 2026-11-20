@@ -12,7 +12,8 @@ import "Edit.js" as Edit
 // band with Back, the task's place as the title, "Saving…", Open in
 // Todoist); Esc or Back returns. "pane" (Wide): the details pane beside the
 // list, shown while a task is selected; Esc gives the keys back to the list
-// (`keysReturned`).
+// (`keysReturned`). The pane has no band: the panel's footer says
+// "Saving…", then "Saved" for a moment (`savedShown`).
 //
 // It reads like the task, after Todoist's task view: the completion ring
 // and the title, the description under it, then the properties (Project,
@@ -52,8 +53,16 @@ FocusScope {
   readonly property bool gone: taskId !== "" && task === null
   readonly property var desc: store.description.id === taskId && taskId !== "" ? store.description : null
   readonly property bool saving: Object.keys(pending).length > 0
-  // A save worked since the task was shown (the pane says "Saved").
-  property bool savedOnce: false
+  // A save of the shown task just worked: "Saved" in the panel's footer
+  // (the pane's) for `savedNotice` ms. Long enough to read, short enough
+  // that the freshness line comes back soon; no kit token is a notice time.
+  readonly property int savedNotice: 2000
+  readonly property bool savedShown: savedNoticeTimer.running
+  readonly property alias savedTimer: savedNoticeTimer
+  Timer {
+    id: savedNoticeTimer
+    interval: editor.savedNotice
+  }
   readonly property bool menuOpen: picker.opened
   readonly property alias contentField: contentInput
   readonly property alias dueField: dueInput
@@ -291,7 +300,7 @@ FocusScope {
       editor.pending = rest
       var input = editor.inputOf(save.key)
       if (ok) {
-        editor.savedOnce = true
+        savedNoticeTimer.restart()
         // Todoist has it, also while a newer save of the field runs: if
         // that one is refused, the field is measured against this value.
         // (The store's queue runs one job at a time, so replies come in
@@ -346,7 +355,7 @@ FocusScope {
       keysReturned()
     store.releaseSaves(Object.keys(pending).map(Number))
     pending = ({})
-    savedOnce = false
+    savedNoticeTimer.stop()
     shownId = taskId
     picker.close()
     opened = ""
@@ -511,7 +520,7 @@ FocusScope {
   // The ring's column: the title's and the description's text line up after it.
   readonly property real ringSize: FoamyStyle.font.iconLarge
   readonly property real gutter: ringSize + FoamyStyle.gapSmall
-  implicitHeight: (pane ? paneTop.height : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
+  implicitHeight: (pane ? 0 : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
 
   // The page's band: Back, the task's place, "Saving…", Open in Todoist.
   FoamyHeroBand {
@@ -536,27 +545,8 @@ FocusScope {
       }
     ]
   }
-  // The pane's top: "Saving…" or "Saved" (Open in Todoist is in the panel's band).
-  Item {
-    id: paneTop
-    visible: editor.pane
-    width: parent.width
-    height: editor.pane ? FoamyStyle.actionSize + FoamyStyle.gap * 2 : 0
-    PlainText {
-      objectName: "paneStatus"
-      visible: editor.task !== null && text !== ""
-      anchors.left: parent.left
-      anchors.leftMargin: FoamyStyle.padding
-      anchors.verticalCenter: parent.verticalCenter
-      text: editor.saving ? FoamyI18n.t("Saving…") : editor.savedOnce ? FoamyI18n.t("Saved") : ""
-      wrapMode: Text.NoWrap
-      font.pixelSize: FoamyStyle.font.bodySmall
-      color: FoamyPalette.mutedText
-    }
-  }
-
-  // A click on the editor's empty space outside its scroll (the pane's top,
-  // the page's band) takes the keys from a field and goes no further: over
+  // A click on the editor's empty space outside its scroll (the page's
+  // band) takes the keys from a field and goes no further: over
   // the Week view it would reach the cards under the pane.
   FoamyClickAway {
     anchors.fill: parent
@@ -614,7 +604,7 @@ FocusScope {
     id: scroll
     objectName: "editorScroll"
     visible: editor.task !== null
-    anchors.top: editor.pane ? paneTop.bottom : pageBand.bottom
+    anchors.top: editor.pane ? parent.top : pageBand.bottom
     anchors.bottom: parent.bottom
     width: parent.width
     contentWidth: width
@@ -639,7 +629,9 @@ FocusScope {
         Layout.alignment: Qt.AlignTop
         Layout.leftMargin: FoamyStyle.padding - FoamyStyle.gapSmall
         Layout.rightMargin: FoamyStyle.padding - FoamyStyle.gapSmall
-        Layout.topMargin: editor.pane ? 0 : FoamyStyle.gapLarge
+        // The pane: the list's top margin, so the title lines up with its
+        // first row.
+        Layout.topMargin: editor.pane ? FoamyStyle.gap : FoamyStyle.gapLarge
         Layout.bottomMargin: FoamyStyle.gap
         spacing: FoamyStyle.gapSmall
 

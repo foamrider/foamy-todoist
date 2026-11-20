@@ -152,11 +152,13 @@ started before it, the caret at its end; without one, the field closes.
 **Editing**: a click on a task, Enter or `e` opens it in the editor. In
 Small the editor takes the panel's place, like the settings page:
 **Back** (or Esc, or ← on Back) returns to the list with the task under the
-cursor. In Wide it is the details pane on the right, which shows the
-selected task (the one the keys or a click moved to; pointing at a row
-doesn't change it): `e` or a click on a part puts the caret there, Tab
-moves through the parts, and Esc gives the keys back to the list. Its top
-says "Saving…" or "Saved". A click on the list's space that isn't a row
+cursor. Its band says "Saving…" while a change is sent. In Wide it is
+the details pane on the right (the left in right-to-left languages), which
+shows the selected task (the one the keys or a click moved to; pointing at
+a row doesn't change it): `e` or a click on a part puts the caret there,
+Tab moves through the parts, and Esc gives the keys back to the list.
+While a change is sent, the footer says "Saving…" in place of "Updated …",
+then "Saved" for two seconds. A click on the list's space that isn't a row
 (below the last row, a heading, the Week view's empty column space), or
 Esc in the list, clears the selection: no row is selected and the pane closes (outside the Week
 view the popup narrows again); what you typed in the pane is saved first.

@@ -599,14 +599,28 @@ ShellRoot {
       for (var c of suffix) ev.keyClickChar(c, Qt.NoModifier, -1);
       return text;
     };
+    // No strip above the title: it starts at the list's top margin, level
+    // with the list's first row.
+    var headTop = shell.find(editor, "editorHead").mapToItem(view, 0, 0).y;
+    var listTop = view.list.mapToItem(view, 0, 0).y;
+    var paneTop = editor.mapToItem(view, 0, 0).y;
+    if (!check(Math.abs(headTop - listTop) <= 1 && Math.abs(headTop - paneTop - Kit.FoamyStyle.gap) <= 1, "the pane's title at the list's top (" + JSON.stringify([headTop, listTop, paneTop]) + ")")) return;
+    var footerStatus = shell.find(view, "foamyFooterStatus");
+    var updatedText = footerStatus.text;
+    if (!check(updatedText.indexOf("Updated") === 0 && !editor.savedShown, "the footer says how fresh the list is (" + updatedText + ")")) return;
     var from = shell.calls("apply").length;
     var first = typed(" here");
     var stop = view.cursor.index;
-    // The pane's top, beside "Saving…": nothing there takes a click.
+    // The pane's top margin: nothing there takes a click.
     ev.mouseClick(editor, editor.width / 2, 4, Qt.LeftButton, Qt.NoModifier, -1);
     if (!check(!editor.contentField.inputActiveFocus && !view.blocked && view.paneTask === id && view.cursor.index === stop && view.taskInBand, "a click in the pane's empty space took the keys, kept the selection")) return;
+    if (!check(editor.saving && footerStatus.text === "Saving…" && !view.footer.statusError, "the footer says Saving… while it runs (" + footerStatus.text + ")")) return;
     wait.waitFor(function() { return shell.calls("apply").length === from + 1 && !store.busy && !editor.saving; }, 15000, function(ok) {
       if (!check(ok && store.model.byId[id].content === first, "and saved the typed text (" + JSON.stringify(shell.updatesSince(from)) + ")")) return;
+      // "Saved" for a moment (the timer's run), then the freshness line again.
+      if (!check(footerStatus.text === "Saved" && editor.savedTimer.running && editor.savedTimer.interval === editor.savedNotice, "then Saved (" + footerStatus.text + ")")) return;
+      editor.savedTimer.stop();
+      if (!check(footerStatus.text.indexOf("Updated") === 0, "and the freshness line when its moment ends (" + footerStatus.text + ")")) return;
       var second = typed(" there");
       var list = view.list;
       var below = list.contentHeight - list.contentY;
