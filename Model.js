@@ -871,7 +871,7 @@ function upcomingRows(model, today, options, flat) {
   return result
 }
 
-// ---- the Week view (Large) -------------------------------------------------------
+// ---- the Week view (Wide) --------------------------------------------------------
 
 // Four columns, [{key, entries, cards}]: "overdue" (oldest first), "today",
 // "tomorrow" and "later", the seven days after tomorrow, each day under a

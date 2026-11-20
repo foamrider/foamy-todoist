@@ -1,8 +1,8 @@
 # Foamy Todoist
 
 An Omarchy bar plugin for Todoist: the tasks left today in the bar, and a
-panel with your Inbox, Today, Upcoming and (in the Wide and Large sizes)
-each of your projects. Add tasks with Todoist's own Quick Add syntax,
+panel with your Inbox, Today, Upcoming and (in the Wide size) each of
+your projects. Add tasks with Todoist's own Quick Add syntax,
 complete them with a click or Space, and change a task's text, date,
 deadline, project, priority, labels and description in the panel.
 
@@ -16,24 +16,30 @@ many of them are overdue.
 
 ## The panel
 
-Three sizes (**Size** in Settings):
+Two sizes (**Size** in Settings), both the popup under the bar:
 
-- **Small**: the 420 px popup under the bar. A row of tabs under the band
-  picks **Inbox**, **Today** or **Upcoming**, with their counts (Today's in
-  red while something is overdue).
-- **Wide**: the 560 px popup, where the screen has room (else Small). It
-  has no tabs: a rail on the left lists the three views, then **My
-  projects** (sub-projects indented one step) with their open tasks.
-- **Large**: the popup under the bar again, 880 px wide and as tall as its
-  content up to 70% of the screen (the list scrolls inside). Three panes:
-  the rail (with **Week** after Upcoming), the list, and on the right the
-  task's details. Its settings page is Wide's width. Where the screen has
-  no room for 880 px beside the popup's margins, it opens Wide instead.
+- **Small**: 420 px. A row of tabs under the band picks **Inbox**,
+  **Today** or **Upcoming**, with their counts (Today's in red while
+  something is overdue).
+- **Wide**: no tabs. A rail on the left lists the views (with **Week** after
+  Upcoming), then **My projects** (sub-projects indented one step) with
+  their open tasks; the list is beside it. With no task selected the popup
+  is only as wide as the rail and the list (609 px). Selecting a task (a
+  click on it, or the keys resting on it) opens its details on the right
+  and the popup grows to 880 px; clearing the selection closes them and it
+  shrinks back. The Week view is always 880 px. The width change is
+  animated (instant with reduced motion), and the list keeps its width, so
+  the rows don't reflow. The popup stays centred under the bar button, or
+  against the screen's edge, so the list slides with it as it grows. It is
+  as tall as its content up to 70% of the screen (the list scrolls inside),
+  never wider than the screen, and its settings page is 560 px. Where the
+  screen has no room for 609 px beside the popup's margins, it opens Small
+  instead.
 
 The band at the top holds the Todoist mark, the title, the current view and
 its count, and three buttons: **+** (add a task, `a`), **Search** (`/`) and
 ⋯ (**Open in Todoist** opens the current view in the browser; **Settings**
-is last). In Large, while the details pane shows a task, the middle button
+is last). In Wide, while the details pane shows a task, the middle button
 is **Open in Todoist** for that task and **Search** is the first entry in
 ⋯ (`/` still searches). Nothing has the cursor when the panel opens.
 
@@ -53,17 +59,17 @@ is **Open in Todoist** for that task and **Search** is the first entry in
   before the time. Today's sections show their counts on the right too. The band counts the tasks of the next seven days. A task
   added in Upcoming gets the day of the day group the cursor was last in,
   else tomorrow.
-- **A project** (Wide, Large): its tasks without a section first, then each
+- **A project** (Wide): its tasks without a section first, then each
   section.
-- **Week** (Large): four columns, **Overdue**, **Today**, **Tomorrow** and
+- **Week** (Wide): four columns, **Overdue**, **Today**, **Tomorrow** and
   **Later** (the seven days after tomorrow, each day under a small
   heading). A card shows the task, its time and its project. ↑/↓ move in a
   column, ←/→ across (← from the first column goes to the rail), Space
   completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move it a
   day earlier or later (never before today; recurring tasks stay, as with
   `t`). Enter, `e` or a click opens the details over the right part of the
-  view; Esc closes them. Another size shows Today instead, and so does
-  **Open on: Last view**.
+  view; Esc closes them. Small shows Today instead, and so does **Open on:
+  Last view**.
 
 Each row has a ring in the priority's colour (p1 red, p2 orange, p3 accent,
 p4 grey), the task (Markdown links show their text), and a line with what
@@ -144,24 +150,24 @@ search. Leaving search (Esc, another view) puts back an add draft you had
 started before it, the caret at its end; without one, the field closes.
 
 **Editing**: a click on a task, Enter or `e` opens it in the editor. In
-Small and Wide the editor takes the panel's place, like the settings page:
+Small the editor takes the panel's place, like the settings page:
 **Back** (or Esc, or ← on Back) returns to the list with the task under the
-cursor. In Large it is the details pane on the right, which always shows
-the selected task (the one the keys or a click moved to; pointing at a row
+cursor. In Wide it is the details pane on the right, which shows the
+selected task (the one the keys or a click moved to; pointing at a row
 doesn't change it): `e` or a click on a part puts the caret there, Tab
 moves through the parts, and Esc gives the keys back to the list. Its top
 says "Saving…" or "Saved". A click on the list's space that isn't a row
-(below the last row, a heading, the Week view's empty column space) clears
-the selection: no row is selected and the pane is empty (over the Week
-view it closes); what you typed in the pane is saved first. A click on
+(below the last row, a heading, the Week view's empty column space), or
+Esc in the list, clears the selection: no row is selected and the pane closes (outside the Week
+view the popup narrows again); what you typed in the pane is saved first.
+A task completed or deleted elsewhere closes the pane too. A click on
 empty space anywhere in the panel takes the keys from a text field, which
 saves as when you leave it.
 
 The editor reads like the task, as Todoist's task view does: the ring and
 the title, the description under it, then the task's **Project**, **Date**,
-**Deadline**, **Priority** and **Labels**, each under a small caption. In
-Wide these sit in a column of their own on the right. Each part is edited
-where it is. Each property is one click target, its caption and value
+**Deadline**, **Priority** and **Labels**, each under a small caption. Each
+part is edited where it is. Each property is one click target, its caption and value
 together, as in Todoist: a click anywhere in it, or Enter on it (one Tab
 stop each), changes it.
 
@@ -195,7 +201,7 @@ stop each), changes it.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
 - The **ring** beside the title completes the task. **Open in Todoist** is
-  an icon in the band: the page's, or in Large the panel's (in Search's
+  an icon in the band: the page's, or in Wide the panel's (in Search's
   place).
   Completing the task (here, or with its row's ring or Space) saves what
   you typed first. A task completed or deleted elsewhere meanwhile: the
@@ -243,19 +249,19 @@ project's view moves the task there only when the text names no project: a
 | ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list |
 | ↑ ↓ j k | the list | move; ↑ on the first row goes to the tabs (the rail), ↑ from there to ⋯, Search and + |
 | Space | a row | complete (again: undo) |
-| Enter, e | a row | open the task in the editor (Large: the caret in the details pane) |
+| Enter, e | a row | open the task in the editor (Wide: the caret in the details pane) |
 | Ctrl+O | a row | open the task in Todoist |
 | t | a row | move to tomorrow (not for recurring tasks) |
 | / | the list | search |
 | ← → | the tabs | pick a view (Enter or Space shows it) |
-| ↑ ↓, Enter | the rail (Wide, Large) | pick a view or project; ← from the list goes to the rail |
+| ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |
 | ↑ ↓ ← → | the Week view | move in a column, across columns |
 | Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
 | Enter, Space | a value in the editor | change it (a menu, or the date field) |
 | Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
-| Tab | the list (Large) | into the details pane |
+| Tab | the list (Wide) | into the details pane |
 | r, s | the list | refresh, Settings |
-| Esc | the list | close (Week view: close the details first) |
+| Esc | the list | close (Wide: close the details pane first; in a list that clears the selection) |
 | Tab, Shift+Tab | the list, or an empty field | the next or previous panel (in a field with text: nothing) |
 
 ## Settings
@@ -266,7 +272,8 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
   Find it in Todoist under Settings → Integrations → Developer (**Open
   Todoist settings** goes there). The token is checked with Todoist before
   it is stored. Signed in, the page shows who, and **Sign out**.
-- **Size**: Small (default), Wide or Large (see "The panel").
+- **Size**: Small (default) or Wide (see "The panel"). A **Large** saved by
+  an earlier version opens as Wide.
 - **After adding a task**: Close the panel (default) or Keep the field
   open: what Enter in the add field does; Shift+Enter does the other.
 - **Open on**: Today, Inbox, Upcoming or Last view (kept until the shell

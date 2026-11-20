@@ -12,9 +12,8 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-editor", "large", "large-week", "large-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-task", "wide-week", "wide-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
-  readonly property bool large: previewState.indexOf("large") === 0
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
 
@@ -52,7 +51,7 @@ Item {
     } : ({})
     store.launchError = previewState === "footer-error" ? FoamyI18n.t("Can't open Todoist") : ""
     view.prepare()
-    var next = previewState === "inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("large-week") === 0 ? "week" : "today"
+    var next = previewState === "inbox" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
     view.setView(next, "work")
     if (previewState === "error")
       store.error = FoamyI18n.t("Can't reach Todoist. Check your connection.")
@@ -93,13 +92,12 @@ Item {
       Qt.callLater(function () {
         view.goTo(view.firstRowStop + 2)
       })
-    // The editor: the page (Small, Wide), the pane (Large); the Date
-    // field open, a refused save under the date, the keys on the empty
-    // Deadline section (its fill as on hover, and the keys' ring; the
-    // renderer can't hover).
-    if (previewState === "editor" || previewState === "wide-editor" || previewState === "editor-error" || previewState === "editor-date-open" || previewState === "editor-section-cursor")
+    // The editor: the page (Small), the pane (Wide); the Date field open,
+    // a refused save under the date, the keys on the empty Deadline section
+    // (its fill as on hover, and the keys' ring; the renderer can't hover).
+    if (previewState === "editor" || previewState === "editor-error" || previewState === "editor-date-open" || previewState === "editor-section-cursor")
       Qt.callLater(function () {
-        view.openTask(previewState === "wide-editor" ? "t1" : "t4", false)
+        view.openTask("t4", false)
         if (previewState === "editor-error")
           Qt.callLater(function () {
             view.editor.setError("due", FoamyI18n.t("Todoist answered HTTP %1.", ["500"]))
@@ -113,15 +111,16 @@ Item {
             view.editor.closeField("deadline", true)
           })
       })
-    if (previewState === "large")
+    // Wide: a task in the pane (the full width); the Week view (always full).
+    if (previewState === "wide-task")
       Qt.callLater(function () {
         view.goTo(view.firstRowStop)
       })
-    if (previewState.indexOf("large-week") === 0)
+    if (previewState.indexOf("wide-week") === 0)
       Qt.callLater(function () {
         view.goTo(view.firstRowStop)
         view.weekMove(1, 0)
-        if (previewState === "large-week-pane")
+        if (previewState === "wide-week-pane")
           view.openTask(view.cursorRow().id, false)
       })
   }
@@ -135,11 +134,15 @@ Item {
     anchorItem: preview.anchorItem
     bar: preview.bar
     open: true
-    contentWidth: previewPopup.fittedContentWidth(preview.large ? Commons.Style.space(880) : preview.wide ? FoamyStyle.popupWidthWide : FoamyStyle.popupWidth)
-    maxHeight: preview.large ? Math.round(previewPopup.screenH * 0.7) : 0
+    // As Panel.qml: Wide is narrow (880 less the pane and its divider)
+    // until the view asks for the full width.
+    readonly property Plugin.TodoView view: previewPopup.bodyItem as Plugin.TodoView
+    readonly property bool full: view !== null && view.fullWidth
+    contentWidth: previewPopup.fittedContentWidth(!preview.wide ? FoamyStyle.popupWidth : Commons.Style.space(880) - (full ? 0 : Commons.Style.space(270) + FoamyStyle.borderWidth))
+    maxHeight: preview.wide ? Math.round(previewPopup.screenH * 0.7) : 0
     body: Component {
       Plugin.TodoView {
-        size: preview.large ? "large" : preview.wide ? "wide" : "standard"
+        size: preview.wide ? "wide" : "standard"
         onSettingsRequested: editingSettings = true
         onSettingsClosed: editingSettings = false
       }

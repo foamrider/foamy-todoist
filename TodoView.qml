@@ -8,11 +8,13 @@ import "kit/FoamyPrefs.js" as Prefs
 import "Preferences.js" as Schema
 import "Model.js" as Model
 
-// The panel, in all three sizes: the band (the title row; + and Search
-// grow the band's field), the tab row (Small) or the rail (Wide and
-// Large), the list, the footer, and the settings page in place of all of
-// it. Small and Wide open a task on the editor page in place of the list;
-// Large shows it in the details pane beside the list, and has the Week view.
+// The panel, in both sizes: the band (the title row; + and Search grow
+// the band's field), the tab row (Small) or the rail (Wide), the list, the
+// footer, and the settings page in place of all of it. Small opens a task
+// on the editor page in place of the list; Wide shows it in the details
+// pane beside the list, and has the Week view. Wide's card is as wide as
+// the rail and the list until a task is in the pane or the Week view shows
+// (`fullWidth`; Panel.qml sizes the card).
 //
 // The band field: + (or `a`) and Search (or `/`) open it, growing from
 // their button over the title row. Adding, it colours the Quick Add tokens
@@ -22,7 +24,7 @@ import "Model.js" as Model
 // when it loses the keys; one with text stays open.
 //
 // One cursor (FoamyCursor) over the stops, in on-screen order: +, Search
-// (Open, while the Large pane shows a task), ⋯ (the band's, while its
+// (Open, while the Wide pane shows a task), ⋯ (the band's, while its
 // field is closed), the tabs or the rail, each list row that does something
 // (the Week view's grid is one stop), the footer's Todoist button and
 // Refresh. Nothing has the cursor on open. While a field, the editor or a
@@ -40,11 +42,20 @@ PanelKeyCatcher {
   // popup.
   property bool shown: false
   readonly property bool live: active || shown
-  // "standard" (Small), "wide" or "large" (Panel.qml decides when the
-  // screen has room).
+  // "standard" (Small) or "wide" (Panel.qml decides when the screen has
+  // room).
   property string size: "standard"
-  readonly property bool wide: size !== "standard"
-  readonly property bool large: size === "large"
+  readonly property bool wide: size === "wide"
+  // Wide: the card's full width while the pane shows a task or the Week
+  // view shows; else the rail and the list.
+  readonly property bool fullWidth: wide && !editingSettings && (paneShown || weekShown)
+  // How much wider (negative: narrower) the card is still going while its
+  // width animates (Panel.qml). The body is laid out at the width to come
+  // (`layoutWidth`), so the rows never reflow as it moves: a growing card
+  // uncovers the pane, a shrinking one closes over empty space.
+  property real widthAhead: 0
+  readonly property real layoutWidth: width + widthAhead
+  clip: width < layoutWidth - 0.5
   property bool editingSettings: false
   property bool addOnOpen: false
   property var preferences: ({})
@@ -106,7 +117,7 @@ PanelKeyCatcher {
   }
 
   // ---- the view ---------------------------------------------------------------------
-  // inbox, today, upcoming, project (Wide and Large) or week (Large).
+  // inbox, today, upcoming, project or week (Wide).
   property string view: "today"
   property string projectId: ""
   property bool searching: false
@@ -165,7 +176,7 @@ PanelKeyCatcher {
   function setView(next, project) {
     if (next === "project" && (!wide || !Model.validId(project)))
       return
-    if (next === "week" && !large)
+    if (next === "week" && !wide)
       return
     // Search ends with the view (its query never becomes an add draft); an
     // add draft stays, whatever changed the view.
@@ -184,15 +195,15 @@ PanelKeyCatcher {
     if (weekShown)
       weekHome()
   }
-  // The Week view is Large's: another size shows Today instead.
-  onLargeChanged: if (!large && view === "week")
+  // The Week view is Wide's: Small shows Today instead.
+  onWideChanged: if (!wide && view === "week")
     setView("today")
   readonly property var viewKeys: ["inbox", "today", "upcoming"]
 
   // ---- cursor stops ------------------------------------------------------------------
   // The band's buttons are stops only while its field is closed.
   readonly property int addStop: 0
-  // Search, or Open while the Large pane shows a task (taskInBand).
+  // Search, or Open while the Wide pane shows a task (taskInBand).
   readonly property int searchStop: 1
   readonly property int menuStop: 2
   readonly property int switchStop: wide ? -1 : 3
@@ -243,7 +254,7 @@ PanelKeyCatcher {
         return
       }
   }
-  // The keys' way to a stop (hover only lights it): in Large the details
+  // The keys' way to a stop (hover only lights it): in Wide the details
   // pane follows the row it lands on.
   function goTo(stop) {
     if (addField.inputActiveFocus)
@@ -258,14 +269,15 @@ PanelKeyCatcher {
   }
   function followPane() {
     var row = cursorRow()
-    if (large && row && row.kind === "task" && (!weekShown || weekPaneOpen))
+    if (wide && row && row.kind === "task" && (!weekShown || weekPaneOpen))
       paneTask = row.id
   }
   // A click on the list's space that isn't a row (below the last row, a
   // heading between groups, the Week view's empty column space), as in
-  // Todoist: no row selected, the cursor gone, the pane's empty state (the
-  // Week view's pane closes). The pane's draft is saved as it lets the task
-  // go (TaskEditor.show()). Clicks in the pane never reach the list.
+  // Todoist: no row selected, the cursor gone, the pane closed (the card
+  // back to the rail and the list's width, outside the Week view). The
+  // pane's draft is saved as it lets the task go (TaskEditor.show()).
+  // Clicks in the pane never reach the list.
   function clearSelection() {
     viewCursor.index = -1
     paneTask = ""
@@ -423,7 +435,7 @@ PanelKeyCatcher {
       viewCursor.index = last >= firstRowStop ? last : -1
   }
 
-  // ---- the Week view's cursor (Large) ----------------------------------------------------
+  // ---- the Week view's cursor (Wide) -----------------------------------------------------
   // A column, and a card in it (its tasks, headings left out). It follows
   // its task when the columns change (Ctrl+→ moves it to the next one).
   property int weekColumn: 0
@@ -501,7 +513,7 @@ PanelKeyCatcher {
     followPane()
   }
 
-  // ---- the rail (Wide and Large) -------------------------------------------------------
+  // ---- the rail (Wide) -----------------------------------------------------------------
   readonly property var railEntries: {
     var counts = store.counts
     var out = [
@@ -528,7 +540,7 @@ PanelKeyCatcher {
         count: -1
       }
     ]
-    if (large)
+    if (wide)
       out.push({
         kind: "view",
         value: "week",
@@ -587,20 +599,21 @@ PanelKeyCatcher {
     ] : []).concat(Model.railProjects(store.model, {}))
 
   // ---- the editor -------------------------------------------------------------------
-  // Small and Wide: the task open on the editor page ("" shows the list).
+  // Small: the task open on the editor page ("" shows the list).
   property string editingTask: ""
-  readonly property bool pageShown: !large && editingTask !== "" && !editingSettings
-  // Large: the task the details pane shows (the list's selection; in the
-  // Week view, the card the pane was opened on).
+  readonly property bool pageShown: !wide && editingTask !== "" && !editingSettings
+  // Wide: the task the details pane shows (the list's selection; in the
+  // Week view, the card the pane was opened on). The pane shows only while
+  // that task is in the snapshot: none selected, or gone, closes it.
   property string paneTask: ""
   property bool weekPaneOpen: false
-  readonly property bool paneShown: large && !editingSettings && store.signedIn && store.loaded && (!weekShown || weekPaneOpen)
-  // A click on a row, Enter or `e`: the editor page (Small, Wide), or the
-  // pane on it (Large; `focusField` puts the caret in it).
+  readonly property bool paneShown: wide && !editingSettings && store.signedIn && store.loaded && paneTask !== "" && !!store.model.byId[paneTask] && (!weekShown || weekPaneOpen)
+  // A click on a row, Enter or `e`: the editor page (Small), or the pane on
+  // it (Wide; `focusField` puts the caret in it).
   function openTask(id, focusField) {
     if (!Model.validId(id) || !store.model.byId[id])
       return
-    if (large) {
+    if (wide) {
       paneTask = id
       if (weekShown)
         weekPaneOpen = true
@@ -718,9 +731,9 @@ PanelKeyCatcher {
   function openViewInTodoist() {
     store.openView(view === "week" ? "upcoming" : view, projectId)
   }
-  // Large, a task in the pane: Open (that task) takes Search's place in the
+  // Wide, a task in the pane: Open (that task) takes Search's place in the
   // band and Search moves to the top of the ⋯ menu; `/` still searches.
-  readonly property bool taskInBand: large && paneShown && taskEditor.task !== null
+  readonly property bool taskInBand: paneShown && taskEditor.task !== null
   function openPaneTask() {
     if (taskInBand)
       store.openView("task", paneTask)
@@ -756,16 +769,19 @@ PanelKeyCatcher {
     }
     step(dy !== 0 ? dy : dx)
   }
-  // Esc: the Week view's pane closes first; then the panel.
+  // Esc: the details pane closes first (the Week view's; in a list the
+  // selection clears, and the card narrows); then the panel.
   onCloseRequested: {
     if (weekShown && weekPaneOpen)
       weekPaneOpen = false
+    else if (!weekShown && paneShown)
+      clearSelection()
     else
       root.closeView()
   }
-  // Tab: the next panel; in Large, into the details pane.
+  // Tab: the next panel; in Wide, into the details pane.
   onTabRequested: function (direction) {
-    if (large && paneShown && taskEditor.task)
+    if (paneShown && taskEditor.task)
       taskEditor.focusFirst()
     else
       root.switchPanel(direction)
@@ -891,7 +907,7 @@ PanelKeyCatcher {
     var next = openOn === "last" ? store.lastView : openOn
     if (next === "project" && !(wide && store.model.projects[store.lastProject]))
       next = "today"
-    if (next === "week" && !large)
+    if (next === "week" && !wide)
       next = "today"
     // The draft comes back with why its add failed (the reply may have
     // come after the popup closed); setView clears the error otherwise.
@@ -958,8 +974,8 @@ PanelKeyCatcher {
     enabled: root.active
   }
 
-  implicitWidth: large ? Commons.Style.space(880) : wide ? FoamyStyle.popupWidthWide : FoamyStyle.popupWidth
-  readonly property real maxListHeight: FoamyStyle.rowHeight * (large ? 18 : 13)
+  implicitWidth: wide ? Commons.Style.space(880) : FoamyStyle.popupWidth
+  readonly property real maxListHeight: FoamyStyle.rowHeight * (wide ? 18 : 13)
   // Row heights are fixed per kind, so the list's height is known without
   // building its (lazy) rows.
   function heightOf(row) {
@@ -978,7 +994,7 @@ PanelKeyCatcher {
   readonly property real railHeight: Math.min(railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
   // The pane (also over the Week view, which then grows to show it).
   readonly property real paneHeight: paneShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : 0
-  readonly property real bodyHeight: large ? Math.max(railHeight, listChrome + listHeight, paneHeight) : wide ? Math.max(railHeight, listChrome + listHeight) : (tabsBox.visible ? tabsBox.height : 0) + listChrome + listHeight
+  readonly property real bodyHeight: wide ? Math.max(railHeight, listChrome + listHeight, paneHeight) : (tabsBox.visible ? tabsBox.height : 0) + listChrome + listHeight
   implicitHeight: editingSettings ? settingsView.implicitHeight : pageShown ? taskEditor.implicitHeight : heroBand.implicitHeight + bodyHeight + (panelFooter.visible ? panelFooter.implicitHeight : 0)
 
   // ---- the band ----------------------------------------------------------------------------
@@ -1008,7 +1024,7 @@ PanelKeyCatcher {
     iconName: "todoist"
     meta: root.meta
     // +, Search and ⋯ (Open in Todoist, then Settings): three buttons. With
-    // a task in the Large pane: +, Open (the task) and ⋯ (Search first).
+    // a task in the Wide pane: +, Open (the task) and ⋯ (Search first).
     maxButtons: 3
     field: fieldBox
     fieldOrigin: root.searching ? searchAction : addAction
@@ -1199,7 +1215,7 @@ PanelKeyCatcher {
     anchors.bottom: panelFooter.visible ? panelFooter.top : parent.bottom
     width: parent.width
 
-    // The rail (Wide, Large): views, then the projects.
+    // The rail (Wide): views, then the projects.
     Flickable {
       id: rail
       objectName: "rail"
@@ -1311,9 +1327,9 @@ PanelKeyCatcher {
       objectName: "listArea"
       anchors.left: rail.visible ? rail.right : parent.left
       anchors.leftMargin: rail.visible ? FoamyStyle.borderWidth : 0
-      anchors.right: parent.right
-      // Large: the details pane on the right (over the Week view, which keeps its width).
-      anchors.rightMargin: root.paneShown && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0
+      // Laid out at the width to come (layoutWidth); the details pane on
+      // the right (over the Week view, which keeps its width).
+      width: root.layoutWidth - x - (root.paneShown && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0)
       height: parent.height
 
       // The list's space that isn't a row (the margins, the error lines,
@@ -1388,14 +1404,14 @@ PanelKeyCatcher {
           width: ListView.view.width
           height: root.heightOf(modelData)
           hasCursor: root.stopOfRow[index] >= 0 && viewCursor.index === root.stopOfRow[index]
-          selected: root.large && modelData.kind === "task" && root.paneTask === modelData.id
+          selected: root.paneShown && modelData.kind === "task" && root.paneTask === modelData.id
           onHovered: if (!root.fieldFocused && root.stopOfRow[index] >= 0)
             viewCursor.hover(root.stopOfRow[index])
           onCompleteRequested: {
             root.leaveField()
             root.completeTask(modelData.id)
           }
-          // Small and Wide: the editor page; Large: the pane shows it.
+          // Small: the editor page; Wide: the pane shows it.
           onOpenRequested: {
             root.leaveField()
             if (root.stopOfRow[index] >= 0)
@@ -1408,7 +1424,7 @@ PanelKeyCatcher {
           }
         }
       }
-      // The Week view (Large): four columns in the list's place.
+      // The Week view (Wide): four columns in the list's place.
       WeekView {
         id: weekView
         objectName: "weekView"
@@ -1604,12 +1620,13 @@ PanelKeyCatcher {
     }
   }
 
-  // ---- the editor (the page in Small and Wide, the pane in Large) ----------------------
+  // ---- the editor (the page in Small, the pane in Wide) --------------------------------
+  // Panel.qml's narrowWidth leaves this out (the list keeps its width).
   readonly property real paneWidth: Commons.Style.space(270)
   // The pane's surface: over the Week view it covers the right part.
   Rectangle {
-    visible: root.paneShown && !root.editingSettings
-    x: root.width - root.paneWidth - FoamyStyle.borderWidth
+    visible: root.paneShown
+    x: root.layoutWidth - root.paneWidth - FoamyStyle.borderWidth
     y: content.y
     width: root.paneWidth + FoamyStyle.borderWidth
     height: content.height
@@ -1624,16 +1641,15 @@ PanelKeyCatcher {
   TaskEditor {
     id: taskEditor
     objectName: "taskEditor"
-    visible: root.large ? root.paneShown : root.pageShown
+    visible: root.wide ? root.paneShown : root.pageShown
     z: 5
-    mode: root.large ? "pane" : "page"
-    split: root.size === "wide"
+    mode: root.wide ? "pane" : "page"
     projects: root.placeProjects
-    taskId: root.large ? (root.paneShown ? root.paneTask : "") : root.pageShown ? root.editingTask : ""
-    x: root.large ? root.width - root.paneWidth : 0
-    y: root.large ? content.y : 0
-    width: root.large ? root.paneWidth : root.width
-    height: root.large ? content.height : root.height
+    taskId: root.wide ? (root.paneShown ? root.paneTask : "") : root.pageShown ? root.editingTask : ""
+    x: root.wide ? root.layoutWidth - root.paneWidth : 0
+    y: root.wide ? content.y : 0
+    width: root.wide ? root.paneWidth : root.width
+    height: root.wide ? content.height : root.height
     onBack: root.closeTask()
     onKeysReturned: root.focusList()
   }

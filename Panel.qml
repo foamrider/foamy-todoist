@@ -10,10 +10,13 @@ import "Preferences.js" as Schema
 // TodoStore singleton; every instance pushes the saved settings into it,
 // the leader owns the IPC target, and any instance can save settings.
 //
-// Sizes: all three are this bar's popup under the Todoist button; Large is
-// only wider (880) and capped at 70% of the screen's height. Where Large
-// doesn't fit the popup's room on this bar's screen it falls back to Wide,
-// and Wide to Small.
+// Sizes: both are this bar's popup under the Todoist button. Small is 420
+// with tabs. Wide (the rail and the list) is `narrowWidth` while no task is
+// selected, and grows to `fullWidth` (880) while the details pane shows a
+// task or the Week view shows; it is capped at 70% of the screen's height
+// and its settings page is 560. The width change animates (FoamyMotion.grow,
+// instant under reduced motion). Where the popup has no room for Wide's
+// narrow width on this bar's screen, Small.
 Ui.Panel {
   id: root
   ipcTarget: "foamy.todoist"
@@ -30,7 +33,8 @@ Ui.Panel {
     bar: root.bar
     moduleName: root.moduleName
     fields: Schema.fields
-    settings: root.settings
+    // A saved "large" reads as "wide" (the next save of a setting writes it so).
+    settings: Schema.current(root.settings)
   }
   FoamyMember {
     id: member
@@ -48,16 +52,51 @@ Ui.Panel {
       root.pushSettings()
     }
   }
-  Component.onCompleted: pushSettings()
+  Component.onCompleted: {
+    pushSettings()
+    shownWidth = cardWidth
+  }
 
   // The size setting, and what the popup has room for on this bar's
   // screen (the host's width there: the screen minus its margins).
   readonly property string sizeSetting: prefsQueue.value("panelWidth")
-  readonly property int largeWidth: Style.space(880)
+  readonly property int fullWidth: Style.space(880)
+  // Wide without the pane: the full width less the pane (TodoView's
+  // paneWidth) and its divider, so the list keeps its width, and its rows
+  // their layout, when the pane opens or closes.
+  readonly property int narrowWidth: fullWidth - Style.space(270) - FoamyStyle.borderWidth
   readonly property real room: panelPopup.availableCardWidth
-  // What a click on this bar opens: "large", "wide" or "standard".
-  readonly property string size: sizeSetting === "large" && room >= largeWidth ? "large" : (sizeSetting === "wide" || sizeSetting === "large") && room >= FoamyStyle.popupWidthWide ? "wide" : "standard"
-  readonly property bool wide: size !== "standard"
+  // What a click on this bar opens: "wide" or "standard".
+  readonly property string size: sizeSetting === "wide" && room >= narrowWidth ? "wide" : "standard"
+  readonly property bool wide: size === "wide"
+  // The card's width: Small's, the settings page's, or Wide's narrow or
+  // full width (the view asks for it: TodoView.fullWidth), never wider than
+  // the popup's room (the host clamps it and keeps it under the button).
+  readonly property TodoView view: panelPopup.bodyItem as TodoView
+  readonly property bool full: wide && view !== null && view.fullWidth
+  readonly property int cardWidth: panelPopup.fittedContentWidth(!wide ? FoamyStyle.popupWidth : settingsState.editing ? FoamyStyle.popupWidthWide : full ? fullWidth : narrowWidth)
+  // The width drawn: it follows cardWidth while the popup is open (animated
+  // once the card has settled after opening, KeyboardPanel.heightLive;
+  // FoamyMotion.grow is 0 under reduced motion, so the change is instant)
+  // and is held while the card fades out, so it never changes width as it
+  // goes. The host keeps the card centred under the button (clamped to the
+  // screen's margins), so its leading edge moves as it grows: by half the
+  // change, by all of it against the screen's right edge, not at all
+  // against its left. The view inside doesn't move or reflow
+  // (TodoView.layoutWidth): the rows slide with the card.
+  property real shownWidth: 0
+  Behavior on shownWidth {
+    enabled: root.opened && panelPopup.heightLive
+    NumberAnimation {
+      duration: FoamyMotion.grow
+      easing.type: Easing.Bezier
+      easing.bezierCurve: FoamyMotion.easeOut
+    }
+  }
+  onCardWidthChanged: if (root.opened || !panelPopup.visible)
+    shownWidth = cardWidth
+  onOpenedChanged: if (root.opened)
+    shownWidth = cardWidth
 
   // The next open puts the caret in the add field whatever the setting says (IPC `add`).
   property bool addOnOpen: false
@@ -144,16 +183,16 @@ Ui.Panel {
     bar: root.bar
     owner: root
     open: root.opened
-    // Large is 880 (its settings page: Wide's 560), never wider than the
-    // screen has room for, and at most 70% of the screen's height; the
-    // host keeps it under the button.
-    contentWidth: panelPopup.fittedContentWidth(root.size === "large" && !settingsState.editing ? root.largeWidth : root.wide ? FoamyStyle.popupWidthWide : FoamyStyle.popupWidth)
-    maxHeight: root.size === "large" ? Math.round(panelPopup.screenH * 0.7) : 0
+    contentWidth: Math.round(root.shownWidth)
+    maxHeight: root.wide ? Math.round(panelPopup.screenH * 0.7) : 0
     body: Component {
       TodoView {
         active: root.opened
         shown: panelPopup.visible
         size: root.size
+        // How much wider (or narrower) the card is still going (none while
+        // it fades out at the width it had).
+        widthAhead: root.opened ? root.cardWidth - panelPopup.contentWidth : 0
         preferences: prefsQueue.effectiveSettings
         saving: prefsQueue.busy
         settingsError: prefsQueue.error !== "" ? FoamyI18n.t(prefsQueue.error) : ""

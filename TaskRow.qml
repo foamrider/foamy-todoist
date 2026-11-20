@@ -9,7 +9,7 @@ Item {
   id: row
   required property var entry
   property bool hasCursor: false
-  // The task the Large details pane shows.
+  // The task the Wide details pane shows.
   property bool selected: false
   property bool interactive: true
   readonly property string kind: entry ? entry.kind : ""

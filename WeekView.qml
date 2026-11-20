@@ -4,7 +4,7 @@ import QtQuick.Controls as Controls
 import "kit"
 import "Model.js" as Model
 
-// The Week view (Large only): four columns, Overdue, Today, Tomorrow and
+// The Week view (Wide only): four columns, Overdue, Today, Tomorrow and
 // Later (the seven days after tomorrow, each day under a small heading),
 // from Model.weekColumns. A card: the priority ring (complete), the task,
 // and a line with the time and the project.

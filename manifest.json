@@ -44,8 +44,7 @@
         "defaultValue": "standard",
         "options": [
           "standard",
-          "wide",
-          "large"
+          "wide"
         ]
       },
       {

@@ -48,6 +48,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtTest
 import Quickshell
+import qs.Commons as Commons
 import Quickshell.Io
 import "harness"
 import "plugin" as Plugin
@@ -74,6 +75,8 @@ ShellRoot {
   property real oneLineX: 0
   // The popup's margin before a step narrows its room.
   property int savedMargin: 0
+  // Wide's list before the pane opened: its width and x in the view.
+  property var listBox: []
   property bool othersChecked: false
   // The store's wall clock: moved by setting `clock.at`, which (like a real
   // clock) notifies nothing, so only the store's own checks see it.
@@ -347,7 +350,7 @@ ShellRoot {
       done();
     });
   }
-  // The editor's menus (Wide, t7 open): each field's context menu, then a
+  // The editor's menus (Small's page, t7 open): each field's context menu, then a
   // project menu taller than its room; back to the list, then done().
   function editorMenus(view, done) {
     view.openTask("t7", true);
@@ -508,11 +511,12 @@ ShellRoot {
   function builtHeaders(view) {
     return view.list.contentItem.children.filter(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry.kind === "header"; });
   }
-  // Large: a click on the pane's empty space takes the keys from its title
+  // Wide: a click on the pane's empty space takes the keys from its title
   // (the typed text saved) and keeps the selection; a click on the list's
   // space that isn't a row (below the rows, a heading, the top margin)
-  // clears it: no row, no cursor, the pane's empty state and the band's
-  // Search again, the pane's draft saved first. Then `done`.
+  // clears it: no row, no cursor, the pane closed and the card back to its
+  // narrow width, the band's Search again, the pane's draft saved first.
+  // Then `done`.
   function listSpace(view, done) {
     var store = Plugin.TodoStore;
     var editor = view.editor;
@@ -543,12 +547,12 @@ ShellRoot {
       var below = list.contentHeight - list.contentY;
       if (!check(below < list.height - 12, "the list has room below its rows (" + JSON.stringify([list.contentHeight, list.height]) + ")")) return;
       ev.mouseClick(list, list.width / 2, below + 8, Qt.LeftButton, Qt.NoModifier, -1);
-      var empty = shell.find(editor, "editorEmpty");
       var actions = function() { return JSON.stringify(view.band.shownTrailing.map(function(item) { return item.objectName; })); };
-      if (!check(view.paneTask === "" && view.cursor.index === -1 && shell.highlighted(view).length === 0 && editor.taskId === "" && empty.visible && empty.text === "No task selected" && !view.blocked && !view.taskInBand, "a click below the rows cleared the selection (" + JSON.stringify([view.paneTask, view.cursor.index]) + ")")) return;
-      // The band lays its buttons out again on the next turn of the event loop.
-      wait.waitFor(function() { return actions() === JSON.stringify(["addAction", "searchAction"]) && shell.calls("apply").length === from + 2 && !store.busy; }, 15000, function(ok2) {
-        if (!check(ok2 && store.model.byId[id].content === second, "no task in the pane: the band has Search again; the pane's draft was saved first (" + actions() + ", " + JSON.stringify(shell.updatesSince(from)) + ")")) return;
+      if (!check(view.paneTask === "" && view.cursor.index === -1 && shell.highlighted(view).length === 0 && editor.taskId === "" && !editor.visible && !view.fullWidth && one.cardWidth === 609 && !view.blocked && !view.taskInBand, "a click below the rows cleared the selection, closed the pane (" + JSON.stringify([view.paneTask, view.cursor.index, one.cardWidth]) + ")")) return;
+      // The band lays its buttons out again on the next turn of the event
+      // loop; the card shrinks back (animated) once the draft has gone out.
+      wait.waitFor(function() { return actions() === JSON.stringify(["addAction", "searchAction"]) && shell.calls("apply").length === from + 2 && !store.busy && one.popup.contentWidth === 609; }, 15000, function(ok2) {
+        if (!check(ok2 && store.model.byId[id].content === second && shell.popupPlacement(one, 609) === "", "no task in the pane: the band has Search again, the card 609 again; the pane's draft was saved first (" + actions() + ", " + JSON.stringify(shell.updatesSince(from)) + ", " + shell.popupPlacement(one, 609) + ")")) return;
         // A heading between groups, and the list's top margin: the same.
         var headers = shell.builtHeaders(view);
         if (!check(headers.length > 0, "the list has a heading")) return;
@@ -559,6 +563,16 @@ ShellRoot {
         var area = shell.find(view, "listArea");
         ev.mouseClick(area, area.width / 2, 2, Qt.LeftButton, Qt.NoModifier, -1);
         if (!check(view.paneTask === "" && view.cursor.index === -1, "a click on the list's top margin cleared the selection")) return;
+        // A click on a row selects it: the pane opens, the card grows.
+        var clicked = shell.builtRows(view)[1];
+        var clickedSurface = shell.find(clicked, "taskSurface");
+        ev.mouseClick(clickedSurface, clickedSurface.width * 0.3, clickedSurface.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+        if (!check(view.paneTask === clicked.entry.id && editor.visible && view.fullWidth && one.cardWidth === 880, "a click on a row: the pane on it, the card toward 880 (" + JSON.stringify([view.paneTask, one.cardWidth]) + ")")) return;
+        // Esc in the list: the selection clears first (the pane closes, the
+        // card toward 609), then a second Esc would close the popup.
+        view.focusList();
+        ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+        if (!check(one.opened && view.paneTask === "" && view.cursor.index === -1 && !editor.visible && one.cardWidth === 609, "Esc in the list cleared the selection, the popup stays (" + JSON.stringify([one.opened, view.paneTask, one.cardWidth]) + ")")) return;
         // A row still selects.
         view.goTo(view.firstRowStop);
         if (!check(view.paneTask !== "" && view.taskInBand, "the keys select a row again")) return;
@@ -648,7 +662,7 @@ ShellRoot {
     case 15: return [function() { return shell.calls("add").length === shell.callsBefore + 1 && !view.addBusy && !store.busy; }, 15000, "the add from the field"];
     case 17: return [function() { var opened = shell.ipcPanel && shell.ipcPanel.popup.bodyItem; return opened && opened.active && opened.fieldFocused; }, 10000, "the popup opened by IPC add"];
     case 18: return [function() { return store.error !== "" && !store.busy; }, 15000, "the failed sync"];
-    case 19: return [function() { return one.wide && view.wide; }, 10000, "the wide setting"];
+    case 19: return [function() { return one.wide && view.wide && one.popup.contentWidth === one.cardWidth; }, 10000, "the wide setting, the card's width settled"];
     case 20: return [function() { return store.model.truncated && !store.busy; }, 15000, "a truncated snapshot"];
     case 21: return [function() { return !!store.unconfirmed && store.unconfirmed.t2 === true && store.syncing; }, 15000, "a failed completion is unconfirmed while the sync runs"];
     case 22: return [function() { return !store.busy && !store.unconfirmed.t2; }, 15000, "the sync after the failed completion"];
@@ -707,21 +721,21 @@ ShellRoot {
     case 77: return [function() { return store.current !== null && store.current.command === "task"; }, 15000, "the slow description read runs"];
     case 78: return [function() { return !store.busy; }, 15000, "the late reply came"];
     case 79: return [function() { return store.description.state === "ready" && store.description.id === "t7"; }, 15000, "t7's description"];
-    case 80: return [function() { return view.wide && one.size === "wide"; }, 20000, "Wide"];
-    case 81: return [function() { return one.size === "large"; }, 40000, "Large"];
-    case 82: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.size === "large" && Math.abs(one.popup.cardItem.width - 880) < 1; }, 10000, "the Large popup"];
-    case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1"; }, 15000, "the pane's description"];
+    case 80: return [function() { return view.active && !view.wide && !view.pageShown; }, 20000, "Small's list again"];
+    case 81: return [function() { return one.size === "wide"; }, 40000, "a saved large: Wide"];
+    case 82: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.size === "wide" && one.popup.heightLive && Math.abs(one.popup.cardItem.width - one.narrowWidth) < 1; }, 10000, "the Wide popup, narrow, settled"];
+    case 83: return [function() { return store.description.state === "ready" && store.description.id === "t1" && one.popup.contentWidth === 880 && Math.abs(one.popup.cardItem.width - 880) < 1; }, 15000, "the pane's description, the card grown"];
     case 84: return [function() { var v = one.popup.bodyItem; return v.editor.contentField.inputActiveFocus && store.description.state === "ready" && store.description.id === v.paneTask && shell.opened().length > shell.openedBefore && !store.launchRunning; }, 10000, "e put the caret in the pane, the description read, Open launched"];
     case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
-    case 86: return [function() { return one.popup.bodyItem.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 20000, "the pane's text saved as the view changed"];
+    case 86: return [function() { return one.popup.bodyItem.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && one.popup.contentWidth === one.cardWidth; }, 20000, "the pane's text saved as the view changed, the card's width settled"];
     case 87: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
     case 88: return [function() { return one.popup.bodyItem.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
-    case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Large popup closed"];
-    case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Large again, in Norwegian"];
+    case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Wide popup closed"];
+    case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Wide again, in Norwegian"];
     case 91: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && Kit.FoamyI18n.language === "en"; }, 15000, "the pane's text saved as the popup closed"];
     case 92: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && v.size === "wide"; }, 10000, "the Wide popup"];
-    case 93: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "large" && Math.abs(l.popup.cardItem.width - 880) < 1; }, 10000, "the Large popup from IPC"];
-    case 94: return [function() { var v = shell.leader().popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1; }, 10000, "IPC add in the open Large popup"];
+    case 93: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return l.opened && v && v.active && v.size === "wide" && Math.abs(l.popup.cardItem.width - l.narrowWidth) < 1; }, 10000, "the Wide popup from IPC"];
+    case 94: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 95: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 96: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
     case 97: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
@@ -1036,7 +1050,10 @@ ShellRoot {
     case 19:
       if (!check(view.width > 540 && shell.find(view, "rail").visible, "wide: the rail shows (" + view.width + ")")) return;
       if (!check(!view.band.fieldShown && shell.find(view, "addRow") === null && !shell.find(view, "viewSwitch").visible, "wide: the title row in the band, no tabs, no add row")) return;
-      if (!check(shell.find(view, "rail-week") === null, "wide: no Week in the rail")) return;
+      if (!check(shell.find(view, "rail-week") !== null, "wide: Week in the rail")) return;
+      // No task selected: no pane; the card is the rail and the list, 609
+      // wide (880 less the pane and its divider) under the button.
+      if (!check(one.narrowWidth === 609 && !view.fullWidth && !view.editor.visible && view.paneTask === "" && shell.popupPlacement(one, 609) === "", "wide, no task: no pane, the card 609 under the button (" + shell.popupPlacement(one, 609) + ")")) return;
       if (!check(shell.find(view, "rail-work") !== null && shell.find(view, "rail-launch") !== null, "wide: the projects are in the rail")) return;
       // A snapshot the helper had to cut: a muted line says so.
       shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));
@@ -1873,83 +1890,90 @@ ShellRoot {
           if (!check(gone.visible && gone.text === "This task is no longer in Todoist." && view.editor.backButton.visible, "a task that went: said, Back stays")) return;
           view.editor.back();
           store.snapshot = shell.snapshot();
-          one.prefs.save("panelWidth", "wide");
         });
       });
       break;
     case 80:
-      // Wide: Todoist's split. The title and description on the left, the
-      // properties in a column on a tinted surface at the trailing edge.
+      // Small's page: one column, the title and description, then the
+      // properties under them (no side column: Wide has no page).
       view.openTask("t4", true);
-      var wideEditor = view.editor;
-      // "" when the split is laid out; else where things are.
-      var splitOff = function() {
-        var side = shell.find(wideEditor, "editorSide");
-        var head = shell.find(wideEditor, "editorHead");
-        var props = shell.find(wideEditor, "editorProperties");
-        var sideX = side.mapToItem(wideEditor, 0, 0).x;
-        var propsX = props.mapToItem(wideEditor, 0, 0).x;
-        var headEnd = head.mapToItem(wideEditor, head.width, 0).x;
-        var propsY = props.mapToItem(wideEditor, 0, 0).y;
-        var headY = head.mapToItem(wideEditor, 0, 0).y;
-        var ok = wideEditor.split && side.visible && Math.abs(sideX + side.width - wideEditor.width) < 1 && side.width === wideEditor.sideWidth && propsX >= sideX && headEnd <= sideX + 1 && Math.abs(propsY - headY) < Kit.FoamyStyle.gapLarge + 1 && !Qt.colorEqual(side.color, "transparent");
-        return ok ? "" : JSON.stringify([sideX, side.width, propsX, headEnd, propsY, headY]);
+      var pageEditor = view.editor;
+      // "" when the column is laid out; else where things are.
+      var columnOff = function() {
+        var head = shell.find(pageEditor, "editorHead");
+        var props = shell.find(pageEditor, "editorProperties");
+        var propsY = props.mapToItem(pageEditor, 0, 0).y;
+        var headY = head.mapToItem(pageEditor, 0, 0).y;
+        var ok = view.pageShown && pageEditor.mode === "page" && shell.find(pageEditor, "editorSide") === null && propsY >= headY + head.height - 1;
+        return ok ? "" : JSON.stringify([view.pageShown, pageEditor.mode, propsY, headY, head.height]);
       };
-      // The layout settles on the next frame after the size change.
-      wait.waitFor(function() { return splitOff() === ""; }, 3000, function(laidOut) {
-      if (!check(laidOut && !shell.find(view, "rail").visible, "wide: the properties beside the title, on their own tint (" + splitOff() + ")")) return;
+      wait.waitFor(function() { return columnOff() === ""; }, 3000, function(laidOut) {
+      if (!check(laidOut, "Small's page: one column (" + columnOff() + ")")) return;
       // The project: its row opens a menu of the projects and their
       // sections, the task's place checked; a pick saves the move alone.
-      if (!check(shell.valueText(wideEditor, "editPlace") === "Work › Review", "the project row: Work › Review (" + shell.valueText(wideEditor, "editPlace") + ")")) return;
-      var placeRow = shell.find(wideEditor, "editPlace");
+      if (!check(shell.valueText(pageEditor, "editPlace") === "Work › Review", "the project row: Work › Review (" + shell.valueText(pageEditor, "editPlace") + ")")) return;
+      var placeRow = shell.find(pageEditor, "editPlace");
       ev.mouseClick(placeRow, placeRow.width / 2, placeRow.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-      var places = wideEditor.menu.entries.map(function(entry) { return entry.text + (entry.checked ? "*" : ""); });
-      if (!check(wideEditor.menu.opened && JSON.stringify(places.slice(0, 4)) === JSON.stringify(["Inbox", "Work", "Work › Review*", "Work › Ops"]), "the project menu: projects and sections, the place checked (" + JSON.stringify(places) + ")")) return;
+      var places = pageEditor.menu.entries.map(function(entry) { return entry.text + (entry.checked ? "*" : ""); });
+      if (!check(pageEditor.menu.opened && JSON.stringify(places.slice(0, 4)) === JSON.stringify(["Inbox", "Work", "Work › Review*", "Work › Ops"]), "the project menu: projects and sections, the place checked (" + JSON.stringify(places) + ")")) return;
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { section_id: "s-ops" } }), { results: { t4: "ok" } })));
       shell.callsBefore = shell.calls("apply").length;
-      wideEditor.menu.activate(3);
-      wait.waitFor(function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && !wideEditor.saving; }, 15000, function(ok) {
+      pageEditor.menu.activate(3);
+      wait.waitFor(function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && !pageEditor.saving; }, 15000, function(ok) {
         var moved = shell.updatesSince(shell.callsBefore);
-        if (!check(ok && JSON.stringify(moved) === JSON.stringify([{ op: "update", id: "t4", section_id: "s-ops" }]) && shell.valueText(wideEditor, "editPlace") === "Work › Ops", "the pick moved it to Ops alone (" + JSON.stringify(moved) + ")")) return;
+        if (!check(ok && JSON.stringify(moved) === JSON.stringify([{ op: "update", id: "t4", section_id: "s-ops" }]) && shell.valueText(pageEditor, "editPlace") === "Work › Ops", "the pick moved it to Ops alone (" + JSON.stringify(moved) + ")")) return;
         // Open in Todoist: the band's icon opens the task.
         shell.openedBefore = shell.opened().length;
-        var bandOpen = wideEditor.openButton;
+        var bandOpen = pageEditor.openButton;
         ev.mouseClick(bandOpen, bandOpen.width / 2, bandOpen.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
         wait.waitFor(function() { return shell.opened().length === shell.openedBefore + 1 && !store.launchRunning; }, 15000, function(ok2) {
           var launched = ok2 ? shell.opened()[shell.openedBefore] : [];
           if (!check(ok2 && launched.indexOf(Model.webUrl("task", "t4")) >= 0, "the band's icon opened the task (" + JSON.stringify(launched) + ")")) return;
           // The ring beside the title completes the task and leaves the page.
-          var ring = wideEditor.ring;
+          var ring = pageEditor.ring;
           if (!check(ring.Accessible.name === "Complete" && ring.activeFocusOnTab, "the ring is named and on the Tab path")) return;
           ev.mouseClick(ring, ring.width / 2, ring.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
           if (!check(store.struck.t4 === true && !view.pageShown, "the ring completed it, back to the list")) return;
           // Undone within its window: nothing is sent.
           store.toggleComplete("t4");
           if (!check(!store.struck.t4 && shell.calls("apply").length === shell.callsBefore + 1, "and undone, nothing sent")) return;
-          shell.editorMenus(view, function() { one.prefs.save("panelWidth", "large"); });
+          // The size as a version before this one saved it: "large".
+          shell.editorMenus(view, function() { shell.entry = Object.assign({}, shell.entry, { panelWidth: "large" }); });
         });
       });
       });
       break;
     case 81:
-      // Large: a click on the bar opens the popup under the button, wider.
+      // A saved "large" (the size Wide took over) reads as Wide: no error,
+      // no stored problem, the settings page shows Wide, the entry as it was.
+      if (!check(shell.entry.panelWidth === "large" && one.sizeSetting === "wide" && one.prefs.value("panelWidth") === "wide" && one.prefs.error === "" && JSON.stringify(one.prefs.storedProblems) === "{}" && shell.find(view.settingsPage, "panelWidth").value === "wide", "a saved large reads as Wide, quietly (" + JSON.stringify([shell.entry.panelWidth, one.prefs.error, one.prefs.storedProblems]) + ")")) return;
+      // Wide: a click on the bar opens the popup under the button.
       shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t1", description: "One", truncated: false } }));
       // The popup's pointer over its band, as a user's on the bar: no row is
-      // under it when Large opens (only the keys move the cursor below).
+      // under it when Wide opens (only the keys move the cursor below).
       ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
       one.close();
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       break;
     case 82:
       var big = one.popup.bodyItem;
-      if (!check(shell.popupPlacement(one, 880) === "", "the popup, 880 wide under the button (" + shell.popupPlacement(one, 880) + ")")) return;
+      // Nothing selected on open: the narrow card, no pane.
+      if (!check(shell.popupPlacement(one, 609) === "", "the popup, 609 wide under the button (" + shell.popupPlacement(one, 609) + ")")) return;
       if (!check(one.popup.maxHeight === Math.round(one.popup.screenH * 0.7) && one.popup.cardItem.height <= one.popup.maxHeight + 1, "at most 70% of the screen high (" + JSON.stringify([one.popup.cardItem.height, one.popup.maxHeight]) + ")")) return;
-      if (!check(big.size === "large" && shell.find(big, "rail-week") !== null && big.band.visible && big.editor.visible && shell.find(big.editor, "editorEmpty").text === "No task selected", "the band, the rail with Week, the pane's empty state")) return;
+      if (!check(big.size === "wide" && shell.find(big, "rail-week") !== null && big.band.visible && !big.editor.visible && !big.fullWidth && !big.clip, "the band, the rail with Week, no pane")) return;
+      var area0 = shell.find(big, "listArea");
+      shell.listBox = [area0.width, area0.mapToItem(big, 0, 0).x];
       ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
       if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
+      // The card grows to 880, animated: the view is laid out at the width
+      // to come (cut off beyond the card's edge meanwhile), so the list keeps
+      // its width and place in the card and the pane is uncovered beside it.
+      if (!check(big.fullWidth && one.cardWidth === 880 && one.popup.contentWidth < 880 && big.layoutWidth - big.width === 880 - one.popup.contentWidth && big.clip && big.editor.visible && Math.abs(area0.width - shell.listBox[0]) < 1 && Math.abs(big.editor.x - (area0.x + area0.width + Kit.FoamyStyle.borderWidth)) < 1, "↓: the card grows toward 880, the list as it was (" + JSON.stringify([one.popup.contentWidth, big.layoutWidth, area0.width, shell.listBox, big.editor.x]) + ")")) return;
       break;
     case 83:
       var big1 = one.popup.bodyItem;
+      var area1 = shell.find(big1, "listArea");
+      if (!check(shell.popupPlacement(one, 880) === "" && !big1.clip && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "grown: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
       // The pane: no Open icon and no "Task" caption; Open in Todoist is in
       // the band, in Search's place, and Search leads the ⋯ menu.
       var paneTexts = shell.visibleTexts(big1.editor);
@@ -2093,6 +2117,7 @@ ShellRoot {
       var ids = big2.weekColumns.map(function(col) { return col.entries.map(function(e) { return e.kind === "day" ? e.key : e.id; }); });
       if (!check(big2.weekShown && big2.week.visible && !big2.list.visible && JSON.stringify(ids) === JSON.stringify([["t1", "t2"], ["t3", "t4", "t5", "t6"], ["t10", "t11"], ["day:2026-11-21", "t12"]]), "the Week view's columns (" + JSON.stringify(ids) + ")")) return;
       if (!check(!big2.editor.visible, "no pane until a card is opened")) return;
+      if (!check(big2.fullWidth && one.cardWidth === 880 && one.popup.contentWidth === 880, "the Week view keeps the full width without the pane (" + JSON.stringify([big2.fullWidth, one.cardWidth, one.popup.contentWidth]) + ")")) return;
       big2.goTo(big2.firstRowStop);
       if (!check(big2.cursorRow().id === "t1" && big2.weekColumn === 0, "the first card")) return;
       ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
@@ -2151,6 +2176,7 @@ ShellRoot {
       var overdueHead = shell.find(big4.week, "weekColumn-overdue");
       ev.mouseClick(overdueHead, overdueHead.width / 2, 6, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(!big4.weekPaneOpen && big4.cursor.index === -1, "a click on a column's heading closed it too")) return;
+      if (!check(big4.fullWidth && one.cardWidth === 880, "the Week view: the full width with nothing selected")) return;
       // Overdue with thousands of tasks: only the cards in view are built,
       // and the keys scroll to the cursor's card.
       var many = shell.snapshot();
@@ -2181,7 +2207,7 @@ ShellRoot {
       // The closed popup keeps its view, but builds no list behind it.
       var hidden = one.popup.bodyItem;
       if (!check(hidden && hidden.weekShown && hidden.weekColumns.length === 0 && hidden.rows.length === 0, "a closed popup builds no Week columns or rows (" + (hidden ? JSON.stringify([hidden.weekColumns.length, hidden.rows.length]) : "no view") + ")")) return;
-      // Large again, in Norwegian: the pane's buttons still on one line.
+      // Wide again, in Norwegian.
       shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t1", description: "One", truncated: false } }));
       shell.pickLanguage("no");
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
@@ -2213,44 +2239,57 @@ ShellRoot {
     case 91:
       var closeSent = shell.updatesSince(shell.callsBefore);
       if (!check(JSON.stringify(closeSent) === JSON.stringify([{ op: "update", id: shell.paneFrom, content: shell.paneText }]), "closing saved the typed text (" + JSON.stringify(closeSent) + ")")) return;
-      // Large where the popup has no room on the bar's screen: Wide; with
-      // no room for Wide either, Small.
+      // Wide needs room for its narrow width (609) on the bar's screen; with
+      // less, Small. The full width is clamped to the room there.
       shell.savedMargin = one.popup.margin;
-      one.popup.margin = 600;
-      if (!check(one.popup.availableCardWidth === one.popup.screenW - 1200 && one.size === "wide", "no room for Large: Wide (" + one.size + ")")) return;
-      one.popup.margin = 700;
-      if (!check(one.size === "standard", "no room for Wide: Small (" + one.size + ")")) return;
+      one.popup.margin = 655;
+      if (!check(one.popup.availableCardWidth === 610 && one.size === "wide", "room for 609: Wide (" + JSON.stringify([one.popup.availableCardWidth, one.size]) + ")")) return;
+      one.popup.margin = 656;
+      if (!check(one.popup.availableCardWidth === 608 && one.size === "standard", "no room for 609: Small (" + JSON.stringify([one.popup.availableCardWidth, one.size]) + ")")) return;
       one.popup.margin = 600;
       ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       break;
     case 92:
       // (The test's huge margin pushes the card down; only its width counts here.)
-      if (!check(view.size === "wide" && one.popup.contentWidth === 560 && Math.abs(one.popup.cardItem.width - 560) < 1, "the popup is Wide (" + view.size + ", " + one.popup.contentWidth + ")")) return;
-      one.close();
-      one.popup.margin = shell.savedMargin;
-      if (!check(one.size === "large", "room again: Large")) return;
-      // IPC toggle: the leader's popup, Large.
-      var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
-      shell.ipcPanel = one.data.indexOf(ipc) >= 0 ? one : two;
-      if (!check(shell.ipcPanel === shell.leader(), "the leader owns IPC")) return;
-      ipc.toggle();
+      if (!check(view.size === "wide" && one.popup.contentWidth === 609 && Math.abs(one.popup.cardItem.width - 609) < 1, "the popup is Wide, narrow (" + view.size + ", " + one.popup.contentWidth + ")")) return;
+      view.goTo(view.firstRowStop);
+      if (!check(view.fullWidth && one.cardWidth === 720, "a task selected: the full width, clamped to the room (" + one.cardWidth + ")")) return;
+      wait.waitFor(function() { return one.popup.contentWidth === 720; }, 5000, function(grown) {
+        if (!check(grown, "the card grew to 720 (" + one.popup.contentWidth + ")")) return;
+        one.close();
+        one.popup.margin = shell.savedMargin;
+        if (!check(one.size === "wide" && one.cardWidth === 609 && one.popup.contentWidth === 720 && one.popup.visible, "closing: the card keeps its width as it fades (" + JSON.stringify([one.cardWidth, one.popup.contentWidth]) + ")")) return;
+        // IPC toggle: the leader's popup, Wide.
+        var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
+        shell.ipcPanel = one.data.indexOf(ipc) >= 0 ? one : two;
+        if (!check(shell.ipcPanel === shell.leader(), "the leader owns IPC")) return;
+        wait.waitFor(function() { return !one.popup.visible; }, 5000, function() { ipc.toggle(); });
+      });
       break;
     case 93:
       var lead = shell.leader();
-      if (!check(shell.popupPlacement(lead, 880) === "", "IPC toggle: the leader's popup, 880 wide under its button (" + shell.popupPlacement(lead, 880) + ")")) return;
-      // IPC add while Large is open: the caret in the band's field.
+      if (!check(shell.popupPlacement(lead, 609) === "", "IPC toggle: the leader's popup, 609 wide under its button (" + shell.popupPlacement(lead, 609) + ")")) return;
+      // IPC add while Wide is open: the caret in the band's field.
       var ipcAdd = lead.data.find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.add === "function"; });
       ipcAdd.add();
       break;
     case 94:
       var lead2 = shell.leader();
       var leadView = lead2.popup.bodyItem;
-      if (!check(lead2.opened && leadView.fieldOpen && !leadView.searching && leadView.size === "large", "IPC add: the add field in the Large popup")) return;
+      if (!check(lead2.opened && leadView.fieldOpen && !leadView.searching && leadView.size === "wide", "IPC add: the add field in the Wide popup")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      // The Week view, then another size: Today, and "Open on: Last view"
-      // opens Today.
+      // Under reduced motion the width changes at once, both ways.
+      Commons.Style.reduceMotion = true;
+      leadView.goTo(leadView.firstRowStop);
+      var instantFull = lead2.popup.contentWidth;
+      leadView.clearSelection();
+      var instantNarrow = lead2.popup.contentWidth;
+      Commons.Style.reduceMotion = false;
+      if (!check(instantFull === 880 && instantNarrow === 609 && !leadView.clip, "reduced motion: 880 and back to 609 at once (" + JSON.stringify([instantFull, instantNarrow]) + ")")) return;
+      // The Week view from Today with nothing selected: the full width.
+      // Then another size: Today, and "Open on: Last view" opens Today.
       leadView.setView("week");
-      if (!check(store.lastView === "week", "Week is the last view")) return;
+      if (!check(store.lastView === "week" && leadView.fullWidth && lead2.cardWidth === 880, "Week is the last view, at the full width")) return;
       one.prefs.save("openOn", "last");
       one.prefs.save("panelWidth", "standard");
       break;

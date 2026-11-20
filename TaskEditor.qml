@@ -7,12 +7,12 @@ import "kit"
 import "Model.js" as Model
 import "Edit.js" as Edit
 
-// The task editor, one component used two ways. `mode` "page" (Small and
-// Wide): a sub-view in place of the list, built like the settings page
-// (the compact band with Back, the task's place as the title, "Saving…",
-// Open in Todoist); Esc or Back returns. "pane" (Large): the details pane
-// beside the list, always showing the selected task; Esc gives the keys
-// back to the list (`keysReturned`).
+// The task editor, one component used two ways. `mode` "page" (Small): a
+// sub-view in place of the list, built like the settings page (the compact
+// band with Back, the task's place as the title, "Saving…", Open in
+// Todoist); Esc or Back returns. "pane" (Wide): the details pane beside the
+// list, shown while a task is selected; Esc gives the keys back to the list
+// (`keysReturned`).
 //
 // It reads like the task, after Todoist's task view: the completion ring
 // and the title, the description under it, then the properties (Project,
@@ -22,7 +22,6 @@ import "Edit.js" as Edit
 // its menu, or (Date, Deadline) a one-line field in its value's place.
 // At rest the title reads as the list shows it (Model.plainText: a link's
 // text, no Markdown marks); with the keys it holds Todoist's raw text.
-// In the Wide page the properties sit in a column of their own (`split`).
 //
 // Each part saves on its own: a text field when it loses the keys, on
 // Enter (the title, Date, Deadline) or Ctrl+Enter (the description). A save is one
@@ -39,9 +38,6 @@ FocusScope {
   id: editor
   property string taskId: ""
   property string mode: "page"
-  // Todoist's split (the Wide page): the title and description on the
-  // left, the properties in a column on a tinted surface on the right.
-  property bool split: false
   // The rail's project list, for the project menu: [{id, name}].
   property var projects: []
   signal back
@@ -398,7 +394,7 @@ FocusScope {
     if (!pane)
       back()
   }
-  // The caret in the first field (`e`, Enter on a row in Large).
+  // The caret in the first field (`e`, Enter on a row in Wide).
   function focusFirst() {
     if (!task)
       return
@@ -515,8 +511,6 @@ FocusScope {
   // The ring's column: the title's and the description's text line up after it.
   readonly property real ringSize: FoamyStyle.font.iconLarge
   readonly property real gutter: ringSize + FoamyStyle.gapSmall
-  // The Wide page's property column, tinted edge to edge.
-  readonly property real sideWidth: Commons.Style.space(240)
   implicitHeight: (pane ? paneTop.height : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
 
   // The page's band: Back, the task's place, "Saving…", Open in Todoist.
@@ -569,30 +563,18 @@ FocusScope {
     z: -1
   }
 
-  // Nothing to show: no task selected (pane), or the task is gone.
+  // The page's task is gone (the pane closes instead: TodoView.paneShown).
   PlainText {
     objectName: "editorEmpty"
-    visible: editor.task === null
-    anchors.top: editor.pane ? paneTop.bottom : pageBand.bottom
-    anchors.topMargin: editor.pane ? 0 : FoamyStyle.gapLarge
+    visible: editor.gone && !editor.pane
+    anchors.top: pageBand.bottom
+    anchors.topMargin: FoamyStyle.gapLarge
     x: FoamyStyle.padding
     width: parent.width - FoamyStyle.padding * 2
-    horizontalAlignment: editor.pane ? Text.AlignLeft : Text.AlignHCenter
-    text: editor.gone ? FoamyI18n.t("This task is no longer in Todoist.") : FoamyI18n.t("No task selected")
+    horizontalAlignment: Text.AlignHCenter
+    text: FoamyI18n.t("This task is no longer in Todoist.")
     font.pixelSize: FoamyStyle.font.bodySmall
     color: FoamyPalette.mutedText
-  }
-
-  // The Wide page's property column: a slightly different surface, from
-  // the band to the bottom (it doesn't scroll; the properties do).
-  Rectangle {
-    objectName: "editorSide"
-    visible: editor.split && editor.task !== null
-    anchors.right: parent.right
-    anchors.top: pageBand.bottom
-    anchors.bottom: parent.bottom
-    width: editor.sideWidth
-    color: FoamyPalette.noteFill
   }
 
   FoamyWheelScroll {
@@ -643,14 +625,11 @@ FocusScope {
       policy: Controls.ScrollBar.AsNeeded
     }
 
-    // One column (the title and description, then the properties), or
-    // Todoist's split: two columns side by side.
-    GridLayout {
+    // One column: the title and description, then the properties.
+    ColumnLayout {
       id: form
       width: scroll.width
-      columns: editor.split ? 2 : 1
-      columnSpacing: 0
-      rowSpacing: 0
+      spacing: 0
 
       // ---- the title and the description ----
       ColumnLayout {
@@ -661,7 +640,7 @@ FocusScope {
         Layout.leftMargin: FoamyStyle.padding - FoamyStyle.gapSmall
         Layout.rightMargin: FoamyStyle.padding - FoamyStyle.gapSmall
         Layout.topMargin: editor.pane ? 0 : FoamyStyle.gapLarge
-        Layout.bottomMargin: editor.split ? FoamyStyle.padding : FoamyStyle.gap
+        Layout.bottomMargin: FoamyStyle.gap
         spacing: FoamyStyle.gapSmall
 
         RowLayout {
@@ -881,17 +860,15 @@ FocusScope {
 
       // ---- the properties ----
       // Captioned sections with hairlines between them; the value rows'
-      // icons line up with the ring (one column) or the column's inset.
+      // icons line up with the ring.
       ColumnLayout {
         id: props
         objectName: "editorProperties"
-        readonly property real inset: editor.split ? FoamyStyle.gapLarge : FoamyStyle.padding - FoamyStyle.gap
-        Layout.fillWidth: !editor.split
-        Layout.preferredWidth: editor.split ? editor.sideWidth - inset * 2 : -1
+        readonly property real inset: FoamyStyle.padding - FoamyStyle.gap
+        Layout.fillWidth: true
         Layout.alignment: Qt.AlignTop
         Layout.leftMargin: inset
         Layout.rightMargin: inset
-        Layout.topMargin: editor.split ? FoamyStyle.gapLarge : 0
         Layout.bottomMargin: FoamyStyle.padding - FoamyStyle.gap
         spacing: 0
 

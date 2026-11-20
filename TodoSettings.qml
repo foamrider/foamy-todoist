@@ -155,10 +155,6 @@ FoamySettingsPage {
         {
           value: "wide",
           label: FoamyI18n.t("Wide")
-        },
-        {
-          value: "large",
-          label: FoamyI18n.t("Large")
         }
       ]
       onChanged: function (value) {
