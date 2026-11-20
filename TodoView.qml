@@ -30,6 +30,12 @@ import "Model.js" as Model
 PanelKeyCatcher {
   id: root
   property bool active: true
+  // The popup still draws this view (it fades out after `active` goes).
+  // The popup keeps its body while closed: the lists are built only while
+  // the view is open or still on screen, never for a sync behind a closed
+  // popup.
+  property bool shown: false
+  readonly property bool live: active || shown
   // "standard" (Small), "wide" or "large" (Panel.qml decides when the
   // screen has room).
   property string size: "standard"
@@ -103,7 +109,7 @@ PanelKeyCatcher {
   readonly property string listView: searching ? "search" : view
   readonly property bool weekShown: view === "week" && !searching
   readonly property var store: TodoStore
-  readonly property var rows: weekShown ? [] : Model.rows(store.model, listView, store.today, {
+  readonly property var rows: !live || weekShown ? [] : Model.rows(store.model, listView, store.today, {
     struck: store.struck,
     hidden: store.sending,
     hideOthers: store.hideOthers,
@@ -114,7 +120,7 @@ PanelKeyCatcher {
     query: query
   })
   // The Week view's columns, only while it shows.
-  readonly property var weekColumns: weekShown ? Model.weekColumns(store.model, store.today, {
+  readonly property var weekColumns: live && weekShown ? Model.weekColumns(store.model, store.today, {
     struck: store.struck,
     hidden: store.sending,
     hideOthers: store.hideOthers,

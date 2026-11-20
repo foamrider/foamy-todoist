@@ -152,6 +152,7 @@ Ui.Panel {
     body: Component {
       TodoView {
         active: root.opened
+        shown: panelPopup.visible
         size: root.size
         preferences: prefsQueue.effectiveSettings
         saving: prefsQueue.busy

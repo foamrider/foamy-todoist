@@ -1787,6 +1787,9 @@ ShellRoot {
       if (!check(!one.opened, "Esc: the popup closes")) return;
       break;
     case 89:
+      // The closed popup keeps its view, but builds no list behind it.
+      var hidden = one.popup.bodyItem;
+      if (!check(hidden && hidden.weekShown && hidden.weekColumns.length === 0 && hidden.rows.length === 0, "a closed popup builds no Week columns or rows (" + (hidden ? JSON.stringify([hidden.weekColumns.length, hidden.rows.length]) : "no view") + ")")) return;
       // Large again, in Norwegian: the pane's buttons still on one line.
       shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t1", description: "One", truncated: false } }));
       shell.pickLanguage("no");
@@ -1795,6 +1798,7 @@ ShellRoot {
       break;
     case 90:
       var big6 = one.popup.bodyItem;
+      if (!check(big6.view === "today" && big6.rows.length > 0, "open again (on Today): the rows are back (" + big6.rows.length + ")")) return;
       var noOpen = shell.find(big6.editor, "editOpen");
       if (!check(shell.find(big6.editor, "editComplete").text === "Fullfør" && noOpen.text === "Todoist" && noOpen.tooltipText === "Åpne i Todoist" && shell.buttonsOnOneLine(big6.editor) === "", "Norwegian: the pane's buttons on one line (" + shell.buttonsOnOneLine(big6.editor) + ")")) return;
       // Typed in the pane, then a click outside the popup: it closes, and
