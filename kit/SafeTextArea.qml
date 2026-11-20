@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 13ac77166dfe020049e04c225746fca584bd7dbe91500619ec4ca5b4bed25c5a — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 5e864fcd564ac4f4a9e268afaaf8530df5901fc0c1ea81262332e7dfc393a095 — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.Commons
@@ -65,6 +65,10 @@ Flickable {
   readonly property var _borderSpec: Border.controlSpec(_focused ? "focus" : (_hot ? "hover-cursor" : "normal"), foreground, accent)
   property alias background: editor.background
   property bool editorReady: false
+  // A scroll view around the field (FoamySettingsPage's focus follow)
+  // shows the field's box, not its inner editor: the field scrolls its
+  // own text to the caret.
+  readonly property bool scrollsItself: true
   property alias color: editor.color
   property alias cursorPosition: editor.cursorPosition
   property alias font: editor.font

@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 60f7c15123a900bee96c77742f3278e4edccea01e1f4403309ec45a9b94f5738 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 32c702bb6403f216713940895715f247fb962b0ff959a10d454c5223ba1ff83d — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 
@@ -17,7 +17,8 @@ import QtQuick.Controls as Controls
 //   }
 //
 // Esc goes back. Tab walks the form controls (focusable: true); the page
-// scrolls to keep the focused control visible. RTL mirrors the whole page.
+// scrolls to keep the focused control visible (a SafeTextArea's box, not
+// its whole text). RTL mirrors the whole page.
 // Focus `backTarget` when the page opens.
 //
 // Scrolling: a wheel notch moves ~3 rows and touchpad deltas map 1:1
@@ -59,10 +60,19 @@ FocusScope {
   }
 
   // Focus follow: the least scroll that shows the focused control.
-  function keepVisible(item) {
-    var ancestor = item
-    while (ancestor && ancestor !== scroll.contentItem)
+  function keepVisible(focused) {
+    // In a SafeTextArea the focused item is its inner editor, as tall as
+    // the whole text and moved by the area's own scroll: the area's box is
+    // what shows (the area keeps its caret in view itself). The area says
+    // so with `scrollsItself`: a page synced without SafeTextArea can't
+    // name its type.
+    var item = focused
+    var ancestor = focused
+    while (ancestor && ancestor !== scroll.contentItem) {
+      if (item === focused && ancestor.scrollsItself === true)
+        item = ancestor
       ancestor = ancestor.parent
+    }
     if (!ancestor)
       return
     var point = item.mapToItem(scroll.contentItem, 0, 0)
