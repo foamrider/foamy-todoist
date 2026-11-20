@@ -1,4 +1,4 @@
-// foamy-kit 0.13.0 38d4a7011dc973f83d321c8e92aa04120fe5f6c4a2fe02e89153013828a73aba — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.0 782fef94965a2802e5d4eb8ee44de10b213b0601afa264c209215bd5c7aa0ac5 — do not edit; change foamy-kit and run sync
 import QtQuick
 import qs.Commons as Commons
 
@@ -25,9 +25,10 @@ import qs.Commons as Commons
 //
 // Keyboard (single cursor): open(true) from the keyboard selects the first
 // entry; open(false) from a click selects nothing until the pointer or a key
-// moves. Up/Down/j/k/Home/End move, Enter/Space/Right/l activate (Right
-// opens a submenu), Left/h/Backspace leave a submenu, Esc leaves a submenu
-// or closes, Tab closes. While open the menu has the keys and the pointer
+// moves. Up/Down/j/k/Home/End move; a long menu then scrolls the least
+// that shows the entry (the wheel and hover scroll and highlight freely).
+// Enter/Space/Right/l activate (Right opens a submenu), Left/h/Backspace
+// leave a submenu, Esc leaves a submenu or closes, Tab closes. While open the menu has the keys and the pointer
 // (hover outside does nothing, a press outside closes it), so the panel's own
 // cursor stays put: add `menu.opened` to your PanelKeyCatcher's `blocked`.
 // Focus returns to whatever had it when the menu opened.
@@ -113,6 +114,7 @@ QtObject {
     if (keyboard)
       move(1)
     _overlay.place()
+    overlay.reveal()
     _overlay.forceActiveFocus()
   }
 
@@ -150,6 +152,7 @@ QtObject {
       i = i < 0 ? (delta > 0 ? 0 : n - 1) : Math.max(0, Math.min(n - 1, i + (delta > 0 ? 1 : -1)))
       if (selectable(i)) {
         _index = i
+        overlay.reveal()
         return
       }
       if ((delta > 0 && i === n - 1) || (delta < 0 && i === 0))
@@ -188,6 +191,7 @@ QtObject {
       _index = 0
       move(1)
       _overlay.place()
+      overlay.reveal()
       return
     }
     close()
@@ -201,6 +205,7 @@ QtObject {
     _parentEntry = null
     _index = _entries.indexOf(from)
     _overlay.place()
+    overlay.reveal()
     return true
   }
 
@@ -260,6 +265,27 @@ QtObject {
         menuHeight = Math.max(0, Math.min(h, above))
         menuY = b.y - FoamyStyle.gapSmall - menuHeight
       }
+    }
+    // Keyboard moves keep the highlighted entry in view: the least scroll
+    // that shows it, at once (Enter must never pick a hidden entry). The
+    // wheel and hover don't call it, so they scroll and highlight freely.
+    function reveal() {
+      if (!root._opened || root._index < 0)
+        return
+      // A new level's rows are laid out on the next polish; place them now.
+      list.forceLayout()
+      var row = rows.itemAt(root._index)
+      if (!row)
+        return
+      var top = row.y
+      var bottom = top + row.height
+      var y = scroller.contentY
+      if (top < y)
+        y = top
+      else if (bottom > y + scroller.height)
+        y = bottom - scroller.height
+      if (Math.abs(menuWheel.clamp(y) - scroller.contentY) > 0.5)
+        menuWheel.scrollTo(y, false)
     }
     onWidthChanged: place()
     onHeightChanged: place()
@@ -375,6 +401,7 @@ QtObject {
 
       Flickable {
         id: scroller
+        objectName: "foamyMenuScroller"
         anchors.fill: parent
         anchors.margins: FoamyStyle.menuPadding + FoamyStyle.borderWidth
         contentWidth: width
@@ -388,6 +415,7 @@ QtObject {
           id: list
           width: scroller.width
           Repeater {
+            id: rows
             model: root._entries
             Item {
               id: row
@@ -479,6 +507,7 @@ QtObject {
         }
       }
       FoamyWheelScroll {
+        id: menuWheel
         target: scroller
       }
     }
