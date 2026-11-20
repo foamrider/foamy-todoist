@@ -363,6 +363,14 @@ FocusScope {
                 visible: chip.hovered && chipName.truncated
                 text: chipName.text
                 implicitWidth: Math.min(implicitContentWidth + leftPadding + rightPadding, overview.width)
+                // The host's tooltip wraps at word boundaries only; a label
+                // is often one long word, so it may break anywhere.
+                Binding {
+                  target: chipTip.contentItem
+                  property: "wrapMode"
+                  value: Text.WrapAtWordBoundaryOrAnywhere
+                  when: chipTip.contentItem !== null
+                }
               }
             }
           }

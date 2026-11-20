@@ -129,7 +129,8 @@ ShellRoot {
   // A fixed Wednesday: Upcoming's groups depend on the weekday.
   readonly property string today: "2026-11-18"
   // A label as long as Todoist allows (60 characters).
-  readonly property string longLabel: "a-label-name-long-enough-to-overflow-the-overview-chips-0060"
+  // One word with no break opportunity (no hyphens): the tooltip must still wrap it.
+  readonly property string longLabel: "Alabelnamewithnobreakopportunitylongenoughtooverflowthechip"
   TestEvent { id: ev }
   FoamyWait { id: wait }
   FileView { id: writer; blockWrites: true; printErrors: false }
@@ -821,6 +822,10 @@ ShellRoot {
       // The tooltip shows after its delay.
       return [function() { return chip.hovered && tip.visible; }, "hover shows the tooltip"];
     }, function() {
+      // The whole name inside the tooltip, wrapped though it is one word.
+      var longChip = part("labelChip-" + shell.longLabel);
+      var tipText = longChip.tip.contentItem;
+      if (!check(tipText.contentWidth <= tipText.width + 1 && tipText.lineCount > 1 && longChip.tip.width <= view.paneWidth + 1, "the tooltip wraps the one-word name inside it (" + JSON.stringify([tipText.contentWidth, tipText.width, tipText.lineCount, longChip.tip.width]) + ")")) return false;
       // A short name: whole, no tooltip.
       var errand = part("labelChip-errand");
       ev.mouseMove(errand, errand.width / 2, errand.height / 2, -1, Qt.NoButton, Qt.NoModifier);
