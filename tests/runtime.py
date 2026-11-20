@@ -615,6 +615,12 @@ ShellRoot {
     ev.mouseClick(editor, editor.width / 2, 4, Qt.LeftButton, Qt.NoModifier, -1);
     if (!check(!editor.contentField.inputActiveFocus && !view.blocked && view.paneTask === id && view.cursor.index === stop && view.taskInBand, "a click in the pane's empty space took the keys, kept the selection")) return;
     if (!check(editor.saving && footerStatus.text === "Saving…" && !view.footer.statusError, "the footer says Saving… while it runs (" + footerStatus.text + ")")) return;
+    // An add draft left open (the field without the keys): the save's
+    // status takes the key hints' place, and they come back after it.
+    var hintsRow = shell.find(view, "keyHints");
+    view.fieldOpen = true;
+    if (!check(view.adding && footerStatus.text === "Saving…" && !hintsRow.visible, "with an add draft open, Saving… in the hints' place (" + JSON.stringify([footerStatus.text, hintsRow.visible]) + ")")) return;
+    view.fieldOpen = false;
     wait.waitFor(function() { return shell.calls("apply").length === from + 1 && !store.busy && !editor.saving; }, 15000, function(ok) {
       if (!check(ok && store.model.byId[id].content === first, "and saved the typed text (" + JSON.stringify(shell.updatesSince(from)) + ")")) return;
       // "Saved" for a moment (the timer's run), then the freshness line again.

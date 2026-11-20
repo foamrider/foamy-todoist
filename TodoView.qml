@@ -1679,6 +1679,9 @@ PanelKeyCatcher {
   // ("Saving…", then "Saved"). Small's editor page says "Saving…" in its
   // own band (the footer is hidden there). A failed save shows under its field.
   readonly property string saveStatus: !wide ? "" : taskEditor.saving ? FoamyI18n.t("Saving…") : taskEditor.savedShown ? FoamyI18n.t("Saved") : ""
+  // An add draft stays open while the pane edits a task: the save's status
+  // takes the key hints' place for its moment, then the hints come back.
+  readonly property bool keyHintsShown: adding && saveStatus === ""
   // While adding, the keys and what they do; else where the tasks come
   // from, how fresh they are, and Refresh.
   FoamyPanelFooter {
@@ -1691,7 +1694,7 @@ PanelKeyCatcher {
     // A launch that failed first (until the next one works), as foamy-clock's
     // footer; else, with cached data shown after a failed sync, the time of
     // the last good one.
-    status: root.adding ? "" : root.saveStatus !== "" ? root.saveStatus : root.store.launchError !== "" ? root.store.launchError : root.store.syncing && root.store.loaded && clock.date.getTime() - root.store.syncedAt > root.store.refreshSeconds * 1000 ? FoamyI18n.t("Updating…") : FoamyI18n.updatedAgo(root.store.syncedAt, clock.date.getTime())
+    status: root.saveStatus !== "" ? root.saveStatus : root.adding ? "" : root.store.launchError !== "" ? root.store.launchError : root.store.syncing && root.store.loaded && clock.date.getTime() - root.store.syncedAt > root.store.refreshSeconds * 1000 ? FoamyI18n.t("Updating…") : FoamyI18n.updatedAgo(root.store.syncedAt, clock.date.getTime())
     statusError: !root.adding && root.saveStatus === "" && root.store.launchError !== ""
     showRefresh: !root.adding
     refreshing: root.store.syncing
@@ -1727,7 +1730,7 @@ PanelKeyCatcher {
     Row {
       id: keyHints
       objectName: "keyHints"
-      visible: root.adding
+      visible: root.keyHintsShown
       spacing: FoamyStyle.gapLarge
       readonly property bool closing: root.closeAfterAdd === "close"
       readonly property var hints: [
