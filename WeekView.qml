@@ -27,6 +27,8 @@ Item {
   signal hovered(int column, int card)
   signal clicked(int column, int card)
   signal completeRequested(string id)
+  // A click on a column's empty space (below its cards, a day heading).
+  signal spaceClicked
 
   function formatDate(date, pattern) {
     return date.toLocaleDateString(Qt.locale(FoamyI18n.formatLocale), pattern)
@@ -149,6 +151,7 @@ Item {
       }
       FoamyWheelScroll {
         target: entriesList
+        onSpaceClicked: week.spaceClicked()
       }
       delegate: Item {
         id: entryItem

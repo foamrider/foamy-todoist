@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-editor", "large", "large-week", "large-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-project", "wide-upcoming", "wide-editor", "large", "large-week", "large-week-pane", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool large: previewState.indexOf("large") === 0
   readonly property bool wide: previewState.indexOf("wide") === 0
@@ -94,8 +94,10 @@ Item {
         view.goTo(view.firstRowStop + 2)
       })
     // The editor: the page (Small, Wide), the pane (Large); the Date
-    // field open, a refused save under the date.
-    if (previewState === "editor" || previewState === "wide-editor" || previewState === "editor-error" || previewState === "editor-date-open")
+    // field open, a refused save under the date, the keys on the empty
+    // Deadline section (its fill as on hover, and the keys' ring; the
+    // renderer can't hover).
+    if (previewState === "editor" || previewState === "wide-editor" || previewState === "editor-error" || previewState === "editor-date-open" || previewState === "editor-section-cursor")
       Qt.callLater(function () {
         view.openTask(previewState === "wide-editor" ? "t1" : "t4", false)
         if (previewState === "editor-error")
@@ -105,6 +107,10 @@ Item {
         if (previewState === "editor-date-open")
           Qt.callLater(function () {
             view.editor.openField("due")
+          })
+        if (previewState === "editor-section-cursor")
+          Qt.callLater(function () {
+            view.editor.closeField("deadline", true)
           })
       })
     if (previewState === "large")

@@ -16,9 +16,10 @@ import "Edit.js" as Edit
 //
 // It reads like the task, after Todoist's task view: the completion ring
 // and the title, the description under it, then the properties (Project,
-// Date, Deadline, Priority, Labels) as captioned value rows. Every part is
-// edited where it is: the title and description are quiet fields; a value
-// row opens its menu, or (Date, Deadline) a one-line field in its place.
+// Date, Deadline, Priority, Labels) as captioned sections. Every part is
+// edited where it is: the title and description are quiet fields; a
+// section (its caption and value, one click target, as in Todoist) opens
+// its menu, or (Date, Deadline) a one-line field in its value's place.
 // At rest the title reads as the list shows it (Model.plainText: a link's
 // text, no Markdown marks); with the keys it holds Todoist's raw text.
 // In the Wide page the properties sit in a column of their own (`split`).
@@ -66,8 +67,12 @@ FocusScope {
   // The one menu (project, priority or labels; one at a time).
   readonly property alias menu: picker
   readonly property alias ring: ringBox
-  // Open in Todoist: in the page's band, or at the top of the pane.
-  readonly property Item openButton: pane ? paneOpen : pageOpen
+  // Open in Todoist: in the page's band (the pane's is the panel's band's).
+  readonly property Item openButton: pane ? null : pageOpen
+  // The page keeps the keys when a click on its empty space takes them from
+  // a field (FoamyClickAway), as Esc and Back work there; the pane gives
+  // them to the list's (null: the search goes on to the panel).
+  readonly property Item foamyKeyHome: pane ? null : editor
   // Date and Deadline: the key whose one-line field is open ("" none).
   property string opened: ""
 
@@ -417,7 +422,7 @@ FocusScope {
   function rowOf(key) {
     return key === "due" ? dueSection : deadlineSection
   }
-  // The value row (or the caption's +) opens the field, the caret at its end.
+  // The section (its value, or its + when empty) opens the field, the caret at its end.
   function openField(key) {
     if (!task)
       return
@@ -427,7 +432,7 @@ FocusScope {
     input.cursorPosition = input.text.length
   }
   // The field closes (losing the keys, it saves what it holds:
-  // onEditingFinished); `refocus` gives the keys to its row (Enter, Esc).
+  // onEditingFinished); `refocus` gives the keys to its section (Enter, Esc).
   function closeField(key, refocus) {
     if (opened === key)
       opened = ""
@@ -537,7 +542,7 @@ FocusScope {
       }
     ]
   }
-  // The pane's top: "Saving…" or "Saved", and Open in Todoist.
+  // The pane's top: "Saving…" or "Saved" (Open in Todoist is in the panel's band).
   Item {
     id: paneTop
     visible: editor.pane
@@ -554,19 +559,14 @@ FocusScope {
       font.pixelSize: FoamyStyle.font.bodySmall
       color: FoamyPalette.mutedText
     }
-    FoamyAction {
-      id: paneOpen
-      objectName: "paneOpen"
-      visible: editor.task !== null
-      anchors.right: parent.right
-      anchors.rightMargin: FoamyStyle.padding - FoamyStyle.gapSmall
-      anchors.verticalCenter: parent.verticalCenter
-      focusable: true
-      iconName: "external-link"
-      foreground: FoamyPalette.secondaryText
-      tooltipText: FoamyI18n.t("Open in Todoist")
-      onClicked: editor.store.openView("task", editor.taskId)
-    }
+  }
+
+  // A click on the editor's empty space outside its scroll (the pane's top,
+  // the page's band) takes the keys from a field and goes no further: over
+  // the Week view it would reach the cards under the pane.
+  FoamyClickAway {
+    anchors.fill: parent
+    z: -1
   }
 
   // Nothing to show: no task selected (pane), or the task is gone.
@@ -899,7 +899,11 @@ FocusScope {
           id: placeSection
           objectName: "section-place"
           caption: FoamyI18n.t("Project")
+          accessibleName: FoamyI18n.t("Project") + ": " + placeRow.text
           error: editor.errorOf("place")
+          onActivated: function (keyboard) {
+            editor.openPlaceMenu(keyboard)
+          }
           onRetry: editor.retry("place")
           ValueRow {
             id: placeRow
@@ -907,10 +911,6 @@ FocusScope {
             iconName: "hash"
             iconColor: editor.roleColor(editor.placeProject ? Model.colorRole(editor.placeProject.color) : "muted")
             text: editor.placeLabel
-            accessibleName: FoamyI18n.t("Project") + ": " + text
-            onActivated: function (keyboard) {
-              editor.openPlaceMenu(keyboard)
-            }
           }
         }
         Divider {}
@@ -920,14 +920,14 @@ FocusScope {
           id: dueSection
           objectName: "section-due"
           caption: FoamyI18n.t("Date")
-          canAdd: editor.dueLabel === "" && editor.opened !== "due"
-          addTip: FoamyI18n.t("Add date")
+          // While its field is open the field has the clicks.
+          active: editor.opened !== "due"
+          showAdd: editor.dueLabel === "" && active
+          hasValue: editor.dueLabel !== "" || editor.opened === "due"
+          accessibleName: dueRow.visible ? FoamyI18n.t("Date") + ": " + dueRow.text : FoamyI18n.t("Add date")
           error: editor.errorOf("due")
-          onAdd: editor.openField("due")
+          onActivated: editor.openField("due")
           onRetry: editor.retry("due")
-          function focusRow() {
-            (dueRow.visible ? dueRow : addButton).forceActiveFocus()
-          }
           ValueRow {
             id: dueRow
             objectName: "dueRow"
@@ -935,8 +935,6 @@ FocusScope {
             iconName: "calendar"
             iconColor: editor.dayColor("due", editor.task && editor.task.due ? editor.task.due.day : "")
             text: editor.dueLabel
-            accessibleName: FoamyI18n.t("Date") + ": " + text
-            onActivated: editor.openField("due")
           }
           SafeTextField {
             id: dueInput
@@ -964,14 +962,13 @@ FocusScope {
           id: deadlineSection
           objectName: "section-deadline"
           caption: FoamyI18n.t("Deadline")
-          canAdd: editor.deadlineLabel === "" && editor.opened !== "deadline"
-          addTip: FoamyI18n.t("Add deadline")
+          active: editor.opened !== "deadline"
+          showAdd: editor.deadlineLabel === "" && active
+          hasValue: editor.deadlineLabel !== "" || editor.opened === "deadline"
+          accessibleName: deadlineRow.visible ? FoamyI18n.t("Deadline") + ": " + deadlineRow.text : FoamyI18n.t("Add deadline")
           error: editor.errorOf("deadline")
-          onAdd: editor.openField("deadline")
+          onActivated: editor.openField("deadline")
           onRetry: editor.retry("deadline")
-          function focusRow() {
-            (deadlineRow.visible ? deadlineRow : addButton).forceActiveFocus()
-          }
           ValueRow {
             id: deadlineRow
             objectName: "deadlineRow"
@@ -979,8 +976,6 @@ FocusScope {
             iconName: "target"
             iconColor: editor.dayColor("deadline", editor.task ? editor.task.deadline : "")
             text: editor.deadlineLabel
-            accessibleName: FoamyI18n.t("Deadline") + ": " + text
-            onActivated: editor.openField("deadline")
           }
           SafeTextField {
             id: deadlineInput
@@ -1008,7 +1003,11 @@ FocusScope {
           id: prioritySection
           objectName: "section-priority"
           caption: FoamyI18n.t("Priority")
+          accessibleName: FoamyI18n.t("Priority") + ": " + priorityRow.text
           error: editor.errorOf("priority")
+          onActivated: function (keyboard) {
+            editor.openPriorityMenu(keyboard)
+          }
           onRetry: editor.retry("priority")
           ValueRow {
             id: priorityRow
@@ -1018,10 +1017,6 @@ FocusScope {
             iconName: "flag"
             iconColor: editor.roleColor(Model.priorityRole(5 - level))
             text: "P" + level
-            accessibleName: FoamyI18n.t("Priority") + ": " + text
-            onActivated: function (keyboard) {
-              editor.openPriorityMenu(keyboard)
-            }
           }
         }
         Divider {}
@@ -1030,11 +1025,15 @@ FocusScope {
           id: labelsSection
           objectName: "section-labels"
           caption: FoamyI18n.t("Labels")
-          canAdd: editor.task !== null && !editor.task.labelsTruncated && editor.freeLabels.length > 0
-          addTip: FoamyI18n.t("Add label")
+          // A click adds a label (the chips' × remove theirs): only while
+          // there is one to add.
+          active: editor.task !== null && !editor.task.labelsTruncated && editor.freeLabels.length > 0
+          showAdd: active
+          hasValue: (editor.base !== null && editor.base.labels.length > 0) || (editor.task !== null && editor.task.labelsTruncated)
           addName: "addLabel"
+          accessibleName: FoamyI18n.t("Add label")
           error: editor.errorOf("labels")
-          onAdd: function (keyboard) {
+          onActivated: function (keyboard) {
             editor.openLabelMenu(keyboard)
           }
           onRetry: editor.retry("labels")
@@ -1201,56 +1200,123 @@ FocusScope {
     }), keyboard)
   }
 
-  // One property: its caption (with + at its end, to add a first value),
-  // the value, and a failed save's error with Retry.
+  // One property, as in Todoist: its caption (with + at its end when it is
+  // empty) and its value are one click target with one hover fill. A
+  // click anywhere in it, or Enter or Space on its one cursor stop, does
+  // what its value does (`activated`: a menu, or the one-line field). The
+  // label chips' × and an open field keep their own clicks (the click
+  // target lies under the content). A failed save's error and Retry sit
+  // under it, outside the target.
   component Section: ColumnLayout {
     id: section
     property string caption: ""
-    property bool canAdd: false
-    property string addTip: ""
+    // A click target and a cursor stop now (not while its field is open,
+    // nor Labels with nothing to add).
+    property bool active: true
+    // The + at the caption's end: the mark of an empty section.
+    property bool showAdd: false
     property string addName: ""
+    property string accessibleName: caption
+    // A value shows under the caption (else the caption alone, centred).
+    // From the section's state, not the value's `visible`, which follows
+    // the slot's own.
+    property bool hasValue: true
     property string error: ""
     readonly property alias addButton: plus
     default property alias content: slot.data
-    signal add(bool keyboard)
+    signal activated(bool keyboard)
     signal retry
-    Layout.fillWidth: true
-    spacing: FoamyStyle.gapSmall
-    Item {
-      Layout.fillWidth: true
-      Layout.topMargin: FoamyStyle.gap
-      implicitHeight: FoamyStyle.actionSize
-      PlainText {
-        objectName: "sectionCaption"
-        anchors.left: parent.left
-        anchors.leftMargin: FoamyStyle.gap
-        anchors.right: plus.visible ? plus.left : parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        text: section.caption
-        wrapMode: Text.NoWrap
-        elide: Text.ElideRight
-        font.pixelSize: FoamyStyle.font.bodySmall
-        font.weight: Font.DemiBold
-        color: FoamyPalette.secondaryText
-      }
-      FoamyAction {
-        id: plus
-        objectName: section.addName !== "" ? section.addName : "sectionAdd"
-        visible: section.canAdd
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        focusable: true
-        iconName: "plus"
-        foreground: FoamyPalette.secondaryText
-        tooltipText: section.addTip
-        onClicked: section.add(activeFocus)
-      }
+    function focusRow() {
+      box.forceActiveFocus()
     }
+    Layout.fillWidth: true
+    spacing: 0
+    // Layouts nest directly (no item between them), so the section's size
+    // follows its content in the same pass.
     ColumnLayout {
-      id: slot
+      id: boxLayout
       Layout.fillWidth: true
-      Layout.bottomMargin: FoamyStyle.gap
+      Layout.topMargin: FoamyStyle.gapSmall
+      Layout.bottomMargin: FoamyStyle.gapSmall
       spacing: FoamyStyle.gapSmall
+      Item {
+        Layout.fillWidth: true
+        Layout.topMargin: FoamyStyle.gapSmall
+        Layout.bottomMargin: slot.visible ? 0 : FoamyStyle.gapSmall
+        implicitHeight: FoamyStyle.actionSize
+        // The click target, its hover fill and its cursor stop: the whole
+        // section under its caption and value (it reaches past this row,
+        // which doesn't clip).
+        Rectangle {
+          id: box
+          objectName: "sectionBox"
+          readonly property bool lit: section.active && (hover.hovered || activeFocus)
+          y: -FoamyStyle.gapSmall
+          z: -1
+          width: boxLayout.width
+          height: boxLayout.height
+          radius: FoamyStyle.radius
+          color: lit ? FoamyPalette.hoverFill : "transparent"
+          border.width: activeFocus ? 1 : 0
+          border.color: Commons.Color.accent
+          activeFocusOnTab: section.active
+          Accessible.role: Accessible.Button
+          Accessible.name: section.accessibleName
+          Accessible.onPressAction: if (section.active)
+            section.activated(false)
+          Keys.onPressed: function (event) {
+            if (section.active && (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+              event.accepted = true
+              section.activated(true)
+            }
+          }
+          // Over the chips' × too: the whole section stays lit.
+          HoverHandler {
+            id: hover
+            enabled: section.active
+            cursorShape: Qt.PointingHandCursor
+          }
+          MouseArea {
+            objectName: "sectionClick"
+            anchors.fill: parent
+            enabled: section.active
+            onClicked: section.activated(false)
+          }
+        }
+        PlainText {
+          objectName: "sectionCaption"
+          anchors.left: parent.left
+          anchors.leftMargin: FoamyStyle.gap
+          anchors.right: plus.visible ? plus.left : parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          text: section.caption
+          wrapMode: Text.NoWrap
+          elide: Text.ElideRight
+          font.pixelSize: FoamyStyle.font.bodySmall
+          font.weight: Font.DemiBold
+          color: FoamyPalette.secondaryText
+        }
+        // The + marks an empty section; the section takes its click.
+        FoamyIcon {
+          id: plus
+          objectName: section.addName !== "" ? section.addName : "sectionAdd"
+          visible: section.showAdd
+          anchors.right: parent.right
+          anchors.rightMargin: (FoamyStyle.actionSize - width) / 2
+          anchors.verticalCenter: parent.verticalCenter
+          width: FoamyStyle.iconSize
+          height: width
+          name: "plus"
+          color: FoamyPalette.secondaryText
+        }
+      }
+      ColumnLayout {
+        id: slot
+        visible: section.hasValue
+        Layout.fillWidth: true
+        Layout.bottomMargin: FoamyStyle.gapSmall
+        spacing: FoamyStyle.gapSmall
+      }
     }
     ErrorLine {
       Layout.leftMargin: FoamyStyle.gap
@@ -1260,31 +1326,14 @@ FocusScope {
     }
   }
 
-  // A property's value: its icon and words; a click, Enter or Space
-  // changes it (a menu, or the one-line field).
-  component ValueRow: Rectangle {
+  // A property's value: its icon and words (the section takes the clicks).
+  component ValueRow: Item {
     id: valueRow
     property string iconName: ""
     property color iconColor: FoamyPalette.secondaryText
     property string text: ""
-    property string accessibleName: ""
-    signal activated(bool keyboard)
     Layout.fillWidth: true
     implicitHeight: FoamyStyle.actionSize
-    radius: FoamyStyle.radius
-    color: valueMouse.containsMouse || activeFocus ? FoamyPalette.hoverFill : "transparent"
-    border.width: activeFocus ? 1 : 0
-    border.color: Commons.Color.accent
-    activeFocusOnTab: true
-    Accessible.role: Accessible.Button
-    Accessible.name: accessibleName
-    Accessible.onPressAction: valueRow.activated(false)
-    Keys.onPressed: function (event) {
-      if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-        event.accepted = true
-        valueRow.activated(true)
-      }
-    }
     FoamyIcon {
       id: valueIcon
       anchors.left: parent.left
@@ -1306,13 +1355,6 @@ FocusScope {
       wrapMode: Text.NoWrap
       elide: Text.ElideRight
       color: FoamyPalette.text
-    }
-    MouseArea {
-      id: valueMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: valueRow.activated(false)
     }
   }
 

@@ -21,12 +21,16 @@ import "Model.js" as Model
 // other. Esc clears the text, then closes the field. An empty field closes
 // when it loses the keys; one with text stays open.
 //
-// One cursor (FoamyCursor) over the stops, in on-screen order: +, Search,
-// ⋯ (the band's, while its field is closed), the tabs or the rail, each
-// list row that does something (the Week view's grid is one stop), the
-// footer's Todoist button and Refresh. Nothing has the cursor on open.
-// While a field, the editor or a menu has the keys the key catcher is
-// blocked.
+// One cursor (FoamyCursor) over the stops, in on-screen order: +, Search
+// (Open, while the Large pane shows a task), ⋯ (the band's, while its
+// field is closed), the tabs or the rail, each list row that does something
+// (the Week view's grid is one stop), the footer's Todoist button and
+// Refresh. Nothing has the cursor on open. While a field, the editor or a
+// menu has the keys the key catcher is blocked.
+//
+// A click on the list's space that isn't a row clears the selection
+// (clearSelection); a click on any empty space takes the keys from a text
+// field and gives them to `keyFocus` (the kit's click-away, `foamyKeyHome`).
 PanelKeyCatcher {
   id: root
   property bool active: true
@@ -81,6 +85,10 @@ PanelKeyCatcher {
   function focusList() {
     keyFocus.forceActiveFocus()
   }
+  // Where a click on empty space leaves the keys it takes from a field
+  // (FoamyClickAway): the list's, as focusList() does. The editor page and
+  // the settings page keep them instead.
+  readonly property Item foamyKeyHome: keyFocus
   function chordKey(event) {
     if (!(event.modifiers & Qt.ControlModifier) || root.blocked)
       return
@@ -184,6 +192,7 @@ PanelKeyCatcher {
   // ---- cursor stops ------------------------------------------------------------------
   // The band's buttons are stops only while its field is closed.
   readonly property int addStop: 0
+  // Search, or Open while the Large pane shows a task (taskInBand).
   readonly property int searchStop: 1
   readonly property int menuStop: 2
   readonly property int switchStop: wide ? -1 : 3
@@ -251,6 +260,16 @@ PanelKeyCatcher {
     var row = cursorRow()
     if (large && row && row.kind === "task" && (!weekShown || weekPaneOpen))
       paneTask = row.id
+  }
+  // A click on the list's space that isn't a row (below the last row, a
+  // heading between groups, the Week view's empty column space), as in
+  // Todoist: no row selected, the cursor gone, the pane's empty state (the
+  // Week view's pane closes). The pane's draft is saved as it lets the task
+  // go (TaskEditor.show()). Clicks in the pane never reach the list.
+  function clearSelection() {
+    viewCursor.index = -1
+    paneTask = ""
+    weekPaneOpen = false
   }
   // The band's field: add or search, over the title row.
   property bool fieldOpen: false
@@ -666,7 +685,7 @@ PanelKeyCatcher {
     if (at === addStop)
       return openAdd()
     if (at === searchStop)
-      return searching ? leaveSearch() : startSearch()
+      return taskInBand ? openPaneTask() : searching ? leaveSearch() : startSearch()
     if (at === menuStop)
       return heroBand.openMenu(true)
     if (on(switchStop))
@@ -698,6 +717,13 @@ PanelKeyCatcher {
   }
   function openViewInTodoist() {
     store.openView(view === "week" ? "upcoming" : view, projectId)
+  }
+  // Large, a task in the pane: Open (that task) takes Search's place in the
+  // band and Search moves to the top of the ⋯ menu; `/` still searches.
+  readonly property bool taskInBand: large && paneShown && taskEditor.task !== null
+  function openPaneTask() {
+    if (taskInBand)
+      store.openView("task", paneTask)
   }
   onActivateRequested: {
     var enter = enterPressed
@@ -981,7 +1007,8 @@ PanelKeyCatcher {
     title: "Todoist"
     iconName: "todoist"
     meta: root.meta
-    // +, Search and ⋯ (Open in Todoist, then Settings): three buttons.
+    // +, Search and ⋯ (Open in Todoist, then Settings): three buttons. With
+    // a task in the Large pane: +, Open (the task) and ⋯ (Search first).
     maxButtons: 3
     field: fieldBox
     fieldOrigin: root.searching ? searchAction : addAction
@@ -1001,6 +1028,13 @@ PanelKeyCatcher {
         viewCursor.hover(root.menuStop)
     }
     menuItems: [
+      FoamyMenuItem {
+        objectName: "searchItem"
+        visible: root.taskInBand && root.store.signedIn
+        text: FoamyI18n.t("Search")
+        iconName: "search"
+        onTriggered: root.startSearch()
+      },
       FoamyMenuItem {
         objectName: "openInTodoist"
         text: FoamyI18n.t("Open in Todoist")
@@ -1023,7 +1057,7 @@ PanelKeyCatcher {
       FoamyAction {
         id: searchAction
         objectName: "searchAction"
-        visible: root.store.signedIn
+        visible: root.store.signedIn && !root.taskInBand
         iconName: "search"
         tooltipText: FoamyI18n.t("Search")
         hasCursor: viewCursor.at(root.searchStop)
@@ -1032,6 +1066,21 @@ PanelKeyCatcher {
         onClicked: {
           root.leaveField()
           root.searching ? root.leaveSearch() : root.startSearch()
+        }
+      },
+      // The pane's task in Todoist, in Search's place (the same cursor stop).
+      FoamyAction {
+        id: openTaskAction
+        objectName: "openTaskAction"
+        visible: root.taskInBand
+        iconName: "external-link"
+        tooltipText: FoamyI18n.t("Open in Todoist")
+        hasCursor: viewCursor.at(root.searchStop)
+        onHoveredChanged: if (hovered && !root.fieldFocused)
+          viewCursor.hover(root.searchStop)
+        onClicked: {
+          root.leaveField()
+          root.openPaneTask()
         }
       }
     ]
@@ -1267,6 +1316,14 @@ PanelKeyCatcher {
       anchors.rightMargin: root.paneShown && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0
       height: parent.height
 
+      // The list's space that isn't a row (the margins, the error lines,
+      // the Week view's headings): under everything in it.
+      FoamyClickAway {
+        anchors.fill: parent
+        z: -1
+        onClicked: root.clearSelection()
+      }
+
       // Lines at the top: why the last add, sync or change failed (an
       // error, whole), and that the snapshot was cut (a note, while rows show).
       Column {
@@ -1318,6 +1375,8 @@ PanelKeyCatcher {
         }
         FoamyWheelScroll {
           target: taskList
+          // Below the last row, a heading between groups.
+          onSpaceClicked: root.clearSelection()
         }
         delegate: TaskRow {
           required property var modelData
@@ -1382,6 +1441,7 @@ PanelKeyCatcher {
           root.leaveField()
           root.completeTask(id)
         }
+        onSpaceClicked: root.clearSelection()
       }
 
       // Signed out, loading, empty, or failed without data: one line.
