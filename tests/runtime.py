@@ -63,6 +63,10 @@ ShellRoot {
   property int drawTarget: 0
   property var entry: ({})
   property int callsBefore: 0
+  // Wall-clock times (ms) of a key and of the description read it led to:
+  // timers run on the real clock, so a later read never means a shorter wait.
+  property real keyAt: 0
+  property real readAt: 0
   property int openedBefore: 0
   property int queuedAdds: 0
   property var ipcPanel: null
@@ -153,6 +157,17 @@ ShellRoot {
     return command ? all.filter(function(line) { return line.split(" ")[0] === command; }) : all;
   }
   // The snapshot with some tasks' fields changed ({id: {field: value}}).
+  // The visible items under `item` whose text has Todoist's markup in it.
+  function markupTexts(item) {
+    var found = [];
+    var walk = function(at) {
+      if (!at.visible) return;
+      if (typeof at.text === "string" && at.textFormat !== undefined && (at.text.indexOf("<b>") >= 0 || at.text.indexOf("<i>") >= 0)) found.push(at);
+      for (var child of at.children) walk(child);
+    };
+    walk(item);
+    return found;
+  }
   function snapshotWith(changes, drop) {
     var reply = shell.snapshot(drop);
     reply.tasks = reply.tasks.map(function(task) { return changes[task.id] ? Object.assign({}, task, changes[task.id]) : task; });
@@ -894,6 +909,10 @@ ShellRoot {
   Connections {
     target: Plugin.TodoStore
     function onAddFinished(request, ok, message) { shell.settled = shell.settled.concat([{ request: request, ok: ok, message: message }]); }
+    function onDescriptionChanged() {
+      var d = Plugin.TodoStore.description;
+      if (d.state === "loading" && d.id === "t1" && shell.readAt === 0) shell.readAt = Date.now();
+    }
   }
   function gate(n) {
     var store = Plugin.TodoStore;
@@ -1007,7 +1026,8 @@ ShellRoot {
     case 112: return [function() { return store.error === "" && store.loaded && !store.busy; }, 15000, "a good sync again"];
     case 113: return [function() { return one.prefs.value("barCount") === "today"; }, 10000, "the bar count back on"];
     case 114: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && shell.builtRows(v).some(function(r) { return r.entry.id === "t3"; }); }, 10000, "the popup with marked-up task text"];
-    case 115: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 115: return [function() { var v = one.popup.bodyItem; return v && v.editor.visible && v.editor.taskId === "t3" && store.description.state === "ready" && store.description.id === "t3"; }, 10000, "the marked-up task on its page"];
+    case 116: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -1049,6 +1069,8 @@ ShellRoot {
       // in local time.
       var utc = Model.dueOf({ date: "2026-11-18T23:30:00.000000Z" });
       var utcAt = new Date(Date.UTC(2026, 10, 18, 23, 30));
+      // In a zone at UTC+0 a date read as local time looks right too.
+      if (!check(utcAt.getTimezoneOffset() !== 0, "the run's time zone is not UTC (TZ " + Quickshell.env("TZ") + ")")) return;
       if (!check(utc !== null && utc.day === Model.dayKey(utcAt) && utc.minutes === utcAt.getHours() * 60 + utcAt.getMinutes(), "Qt's engine reads Todoist's UTC due dates (" + JSON.stringify(utc) + ")")) return;
       one.open();
       break;
@@ -2211,6 +2233,8 @@ ShellRoot {
         var area0 = shell.find(big, "listArea");
         shell.listBox = [area0.width, area0.mapToItem(big, 0, 0).x];
         shell.callsBefore = shell.calls("task").length;
+        shell.readAt = 0;
+        shell.keyAt = Date.now();
         ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
         // The cursor may move on at once: the pane reads the description
         // only once the selection rests, so nothing is queued yet.
@@ -2225,6 +2249,9 @@ ShellRoot {
       var big1 = one.popup.bodyItem;
       var reads = shell.calls("task");
       if (!check(reads.length === shell.callsBefore + 1 && JSON.parse(reads[reads.length - 1].slice("task ".length)).id === "t1", "one description read where the cursor rested (" + JSON.stringify(reads.slice(shell.callsBefore)) + ")")) return;
+      // Held ↓ repeats about every 30 ms: a read only after a real pause
+      // keeps the rows it passes from each reading a description.
+      if (!check(shell.readAt - shell.keyAt >= 250, "the read waited for the selection to rest (" + (shell.readAt - shell.keyAt) + " ms)")) return;
       var area1 = shell.find(big1, "listArea");
       if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "a task in the pane: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
       // Open in Todoist is in the band, in Search's place, and Search leads the ⋯ menu.
@@ -2657,24 +2684,31 @@ ShellRoot {
       });
       break;
     case 113:
-      // Todoist text is shown as plain text: markup in a title or a project
-      // name (anyone in a shared project can write one) is never rendered.
+      // Todoist text is shown as plain text: markup in a title, a project,
+      // section or label name, or a description (anyone in a shared project
+      // can write one) is never rendered.
       if (!check(one.barContent.countLabel.visible, "the number is back with the setting")) return;
-      var marked = shell.snapshotWith({ t3: { content: "<b>Bold</b> <img src=\"file:///nonexistent.png\"> stand-up" } });
+      var marked = shell.snapshotWith({ t3: { content: "<b>Bold</b> <img src=\"file:///nonexistent.png\"> **stand-up**", labels: ["<i>tag</i>"] } });
       marked.projects = marked.projects.map(function(p) { return p.id === "work" ? Object.assign({}, p, { name: "<i>Work</i>" }) : p; });
+      marked.sections = marked.sections.map(function(section) { return section.id === "s-ops" ? Object.assign({}, section, { name: "<b>Ops</b>" }) : section; });
+      marked.labels = marked.labels.concat([{ id: "l-marked", name: "<i>tag</i>", color: "teal", item_order: 5 }]);
       store.snapshot = marked;
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t3", description: "<b>Agenda</b> first", truncated: false } }));
       one.open();
       break;
     case 114:
-      var markup = [];
-      var walkMarkup = function(at) {
-        if (!at.visible) return;
-        if (typeof at.text === "string" && at.textFormat !== undefined && (at.text.indexOf("<b>") >= 0 || at.text.indexOf("<i>") >= 0)) markup.push(at);
-        for (var child of at.children) walkMarkup(child);
-      };
-      walkMarkup(view);
-      var rich = markup.filter(function(item) { return item.textFormat !== Text.PlainText; });
-      if (!check(markup.length >= 2 && rich.length === 0, "Todoist text is plain text (" + markup.length + " found; " + JSON.stringify(rich.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
+      var listMarkup = shell.markupTexts(view);
+      var listRich = listMarkup.filter(function(item) { return item.textFormat !== Text.PlainText; });
+      if (!check(listMarkup.length >= 5 && listRich.length === 0, "Todoist text is plain text in the list (" + listMarkup.length + " found; " + JSON.stringify(listRich.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
+      view.openTask("t3", false);
+      break;
+    case 115:
+      // The task's page shows the same text again: the rendered title and
+      // the fields, the project and section, the label and the description.
+      var pageMarkup = shell.markupTexts(view.editor);
+      var pageRich = pageMarkup.filter(function(item) { return item.textFormat !== Text.PlainText; });
+      if (!check(pageMarkup.length >= 6 && pageRich.length === 0, "Todoist text is plain text on the task's page (" + pageMarkup.length + " found; " + JSON.stringify(pageMarkup.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
+      view.closeTask();
       store.snapshot = shell.snapshot();
       one.close();
       // No helper for this CPU: says so, no retry loop; an add waiting
@@ -2684,7 +2718,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 115:
+    case 116:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();
@@ -2744,6 +2778,9 @@ run = harness.Run(
 try:
     (run.out / "reply-status.json").write_text(json.dumps({"ok": True, "state": "signed_out", "user": None}))
     run.env["FAKE_HELPER"] = FAKE_HELPER
+    # One zone with an offset from UTC on every machine: the UTC due-date
+    # check needs one, and local days then fall the same everywhere.
+    run.env["TZ"] = "Europe/Oslo"
     # The kit's stand-in wl-paste: a paste reads "folder", never the real clipboard.
     run.env.update(hostenv.clipboard_fakes(run.base / "clipboard", env=run.env))
     run.run(timeout=200)
