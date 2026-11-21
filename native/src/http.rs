@@ -505,26 +505,40 @@ mod tests {
 
     #[test]
     fn a_redirect_is_the_reply_and_never_followed() {
-        // Following it would send a request to another host (as a GET for
-        // 302; a 307 POST would fail as a network error).
+        // Following it would send a request to another host.
         for code in [302, 307] {
+            // The other host answers at once, so a followed redirect ends
+            // in its 200 instead of a timeout. Its thread returns whether
+            // a request reached it.
             let elsewhere = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = elsewhere.local_addr().unwrap().port();
+            let contacted = std::thread::spawn(move || {
+                let (mut stream, _) = elsewhere.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut buffer = [0u8; 4096];
+                let requested = stream.read(&mut buffer).is_ok_and(|read| read > 0);
+                if requested {
+                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+                }
+                requested
+            });
             let head = format!(
-                "HTTP/1.1 {code} Redirect\r\nLocation: http://127.0.0.1:{}/sync\r\nContent-Length: 0\r\n\r\n",
-                elsewhere.local_addr().unwrap().port()
+                "HTTP/1.1 {code} Redirect\r\nLocation: http://127.0.0.1:{port}/sync\r\nContent-Length: 0\r\n\r\n"
             );
             let (base, server) = server(Box::leak(head.into_boxed_str()), 0, 0, Duration::ZERO);
             let reply = Client::new(base, Duration::from_secs(5))
                 .post("/sync", "t", Body::Json(&Value::Null))
                 .unwrap_or_else(|failure| panic!("{code}: not the reply: {failure:?}"));
             server.join().unwrap();
-            assert_eq!(reply.status, code);
-            // `post` has returned, so a followed redirect would be waiting here.
-            elsewhere.set_nonblocking(true).unwrap();
-            assert_eq!(
-                elsewhere.accept().unwrap_err().kind(),
-                std::io::ErrorKind::WouldBlock,
-                "{code}: the redirect was followed"
+            assert_eq!(reply.status, code, "{code}: the redirect was followed");
+            // An empty connection ends the other host's wait. It sends no
+            // request, so only a request from `post` counts.
+            let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+            assert!(
+                !contacted.join().unwrap(),
+                "{code}: the other host got a request"
             );
         }
     }

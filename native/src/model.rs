@@ -844,7 +844,7 @@ mod tests {
         // as `inbox`, and the markers of cut lists.
         assert_eq!(back.projects["P1"]["inbox"], true);
         assert_eq!(back.tasks["T2"]["labels_truncated"], true);
-        assert!(back.truncated);
+        assert!(back.truncated, "the cut marker survives the cache");
         assert_eq!(
             back.snapshot()["project_collaborators"],
             json!({"P2": ["1"]})
@@ -909,7 +909,7 @@ mod tests {
         state
             .merge(&json!({"sync_token": "A", "projects": projects}), "x")
             .unwrap();
-        assert!(!state.truncated);
+        assert!(!state.truncated, "2 000 projects are not a cut");
         state
             .merge(
                 &json!({"sync_token": "B", "projects": [{"id": "P1", "name": "renamed"},
@@ -1038,7 +1038,10 @@ mod tests {
                 "version {version}: the next sync is a full one"
             );
             assert_eq!(
-                state.user.as_ref().unwrap()["full_name"],
+                state
+                    .user
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("version {version}: the user is lost"))["full_name"],
                 "Ada",
                 "version {version}"
             );

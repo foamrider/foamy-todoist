@@ -268,7 +268,7 @@ fn full_sync() -> Value {
 fn ids(reply: &Value) -> Vec<String> {
     let mut ids: Vec<String> = reply["tasks"]
         .as_array()
-        .unwrap()
+        .unwrap_or_else(|| panic!("no task list in the reply: {reply}"))
         .iter()
         .map(|task| task["id"].as_str().unwrap().to_string())
         .collect();
@@ -353,9 +353,12 @@ fn full_then_incremental_merge() {
     done["checked"] = json!(true);
     let mut deleted = task("T3", "three");
     deleted["is_deleted"] = json!(true);
+    let mut full = full_sync();
+    full["collaborators"] = json!([{"id": "1", "full_name": "Ada", "email": "ada@example.com"}]);
+    full["collaborator_states"] = json!([{"project_id": "P2", "user_id": "1", "state": "active"}]);
     let server = Server::start(
         vec![
-            ok(full_sync()),
+            ok(full),
             ok(json!({"sync_token": "S2", "full_sync": false,
                       "items": [task("T1", "one, edited"), done, deleted, task("T4", "four")]})),
         ],
@@ -365,6 +368,12 @@ fn full_then_incremental_merge() {
     assert_eq!(ids(&first), ["T1", "T2", "T3"], "{first}");
     assert_eq!(first["user"]["inbox_project_id"], "P1");
     assert!(first["synced_at"].as_str().unwrap().ends_with('Z'));
+    // The panel shows a shared project's people from this map.
+    assert_eq!(
+        first["project_collaborators"],
+        json!({"P2": ["1"]}),
+        "{first}"
+    );
     let (second, _) = home.run("sync", "{}", &server.base);
     assert_eq!(ids(&second), ["T1", "T4"], "{second}");
     let edited = second["tasks"]
@@ -382,12 +391,15 @@ fn full_then_incremental_merge() {
     let seen = server.seen();
     assert_eq!(seen[0].field("sync_token").as_deref(), Some("*"));
     assert_eq!(seen[1].field("sync_token").as_deref(), Some("S1"));
-    assert_eq!(
-        seen[1].field("resource_types").as_deref(),
-        Some(
-            r#"["items","projects","sections","labels","collaborators","collaborator_states","user"]"#
-        )
-    );
+    // The full sync and the next one ask for every kind the panel shows.
+    for request in &seen[..2] {
+        assert_eq!(
+            request.field("resource_types").as_deref(),
+            Some(
+                r#"["items","projects","sections","labels","collaborators","collaborator_states","user"]"#
+            )
+        );
+    }
     assert_eq!(seen[1].authorization, format!("Bearer {TOKEN}"));
 }
 
