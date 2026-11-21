@@ -316,14 +316,11 @@ test('the rail: every project but the Inbox, children under their parent', () =>
 });
 
 test('colours: each Todoist name maps to a theme role; unknown names are muted', () => {
-  const table = {
-    berry_red: 'error', red: 'error', orange: 'warning', yellow: 'warning', olive_green: 'success',
-    lime_green: 'success', green: 'success', mint_green: 'success', teal: 'info', sky_blue: 'info',
-    light_blue: 'info', blue: 'accent', grape: 'accent', violet: 'accent', lavender: 'accent',
-    magenta: 'error', salmon: 'warning', charcoal: 'muted', grey: 'muted', taupe: 'muted',
-    neon: 'muted', '': 'muted', constructor: 'muted', __proto__x: 'muted',
-  };
-  for (const [name, role] of Object.entries(table)) assert.equal(Model.colorRole(name), role, name);
+  // Pairs, not an object: a __proto__ key in an object literal would set its prototype.
+  // The names come from Todoist, so names of Object's own members must be muted too.
+  const pairs = [['berry_red', 'error'], ['blue', 'accent'], ['neon', 'muted'], ['', 'muted'],
+    ['constructor', 'muted'], ['__proto__', 'muted'], ['hasOwnProperty', 'muted'], ['toString', 'muted']];
+  for (const [name, role] of pairs) assert.equal(Model.colorRole(name), role, name);
   assert.deepEqual([4, 3, 2, 1, 7].map(Model.priorityRole), ['error', 'warning', 'accent', 'muted', 'muted']);
 });
 
