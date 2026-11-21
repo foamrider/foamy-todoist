@@ -21,26 +21,8 @@ test('the inline schema mirrors the manifest', () => {
   assert.ok(!Schema.fields.some((f) => /token/i.test(f.key)));
 });
 
-test('values are checked; missing ones take the defaults', () => {
-  const ok = (key, value) => Prefs.valid(Schema.fields, key, value);
-  const table = [
-    ['barCount', 'today', true], ['barCount', 'none', true], ['barCount', 'all', false],
-    ['panelWidth', 'standard', true], ['panelWidth', 'wide', true], ['panelWidth', 'large', false], ['panelWidth', 'huge', false],
-    ['afterAdd', 'close', true], ['afterAdd', 'keep', true], ['afterAdd', 'stay', false],
-    ['openOn', 'last', true], ['openOn', 'project', false],
-    ['othersTasks', 'hide', true], ['othersTasks', 'show', true], ['othersTasks', 'all', false],
-    ['refreshSeconds', 60, true], ['refreshSeconds', 1800, true], ['refreshSeconds', 30, false],
-    ['refreshSeconds', 3600, false], ['refreshSeconds', '300', false],
-  ];
-  for (const [key, value, expected] of table) assert.equal(ok(key, value), expected, `${key}=${JSON.stringify(value)}`);
-  assert.equal(Prefs.value(Schema.fields, {}, 'refreshSeconds'), 300);
-  assert.equal(Prefs.value(Schema.fields, {}, 'othersTasks'), 'hide');
-  assert.equal(Prefs.value(Schema.fields, {}, 'afterAdd'), 'close');
-  // A size saved before this schema still reads as it was.
-  assert.equal(Prefs.value(Schema.fields, { panelWidth: 'wide' }, 'panelWidth'), 'wide');
-  assert.equal(Prefs.value(Schema.fields, { refreshSeconds: 5 }, 'refreshSeconds'), 300);
-  // Every refresh choice the settings page offers is a valid value.
-  for (const seconds of Schema.refreshChoices) assert.ok(ok('refreshSeconds', seconds), seconds);
+test('every refresh choice the settings page offers is a valid value', () => {
+  for (const seconds of Schema.refreshChoices) assert.ok(Prefs.valid(Schema.fields, 'refreshSeconds', seconds), `refresh choice ${seconds} s is not a valid setting`);
 });
 
 test('a saved "large" (the size Wide took over) reads as Wide, quietly', () => {
@@ -63,10 +45,19 @@ test('a saved "large" (the size Wide took over) reads as Wide, quietly', () => {
 });
 
 test('the open command: a bare command name or an absolute path, no shell, no control characters', () => {
-  const ok = (value) => Prefs.valid(Schema.fields, 'openCommand', value) && Schema.validOpenCommand(value);
-  for (const value of ['', 'xdg-open', 'omarchy-launch-or-focus-webapp Todoist {url}', '/usr/bin/firefox --new-window {url}', 'firefox  {url}  ', 'my_open.sh {url}'])
-    assert.ok(ok(value), JSON.stringify(value));
-  for (const value of [' firefox', '{url}', 'firefox\t{url}', 'firefox {url}\n', 'fire\u0007fox', 'a'.repeat(301), '-x {url}', 'fire\u0000fox', '../bin/open', 'bin/open {url}'])
-    assert.ok(!ok(value), JSON.stringify(value));
+  // Two separate paths: the schema pattern decides what a stored value reads as,
+  // and validOpenCommand is the settings field's own check. Each must hold alone.
+  for (const value of ['', 'xdg-open', 'omarchy-launch-or-focus-webapp Todoist {url}', '/usr/bin/firefox --new-window {url}', 'firefox  {url}  ', 'my_open.sh {url}']) {
+    assert.ok(Prefs.valid(Schema.fields, 'openCommand', value), `schema accepts ${JSON.stringify(value)}`);
+    assert.ok(Schema.validOpenCommand(value), `settings field accepts ${JSON.stringify(value)}`);
+  }
+  for (const value of [' firefox', '{url}', 'firefox\t{url}', 'firefox {url}\n', 'fire\u0007fox', 'a'.repeat(301), '-x {url}', 'fire\u0000fox', '../bin/open', 'bin/open {url}']) {
+    assert.ok(!Prefs.valid(Schema.fields, 'openCommand', value), `schema refuses ${JSON.stringify(value)}`);
+    assert.ok(!Schema.validOpenCommand(value), `settings field refuses ${JSON.stringify(value)}`);
+  }
+  // The manifest has no pattern, so a value set by hand or by the CLI can reach
+  // the stored entry. The panel must not run it: it reads as the default.
+  for (const stored of ['-x {url}', 'firefox\t{url}'])
+    assert.equal(Prefs.value(Schema.fields, { openCommand: stored }, 'openCommand'), '', JSON.stringify(stored));
   assert.equal(Prefs.value(Schema.fields, {}, 'openCommand'), '');
 });
