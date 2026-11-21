@@ -124,10 +124,3 @@ test('every entry is used', () => {
   const used = new Set([...literals().map((l) => l.key), ...dataKeys(), ...helperKeys()]);
   for (const key of Object.keys(en)) assert.ok(used.has(key), `unused catalog key: ${key}`);
 });
-
-if (process.argv.includes('--keys')) {
-  const out = {};
-  for (const { fn, key } of literals()) out[key] = fn;
-  for (const key of [...dataKeys(), ...helperKeys()]) out[key] = out[key] || 't';
-  console.log(JSON.stringify(out, null, 1));
-}

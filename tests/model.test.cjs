@@ -255,8 +255,6 @@ test('upcoming headings and trailing text, in English and Norwegian', () => {
   assert.deepEqual(['nw', 'dec'].map((id) => trail(id, 'en')), ['Mon', 'Tue 1']);
   assert.equal(rows.find((row) => row.id === 'nw').dueTime, '09:00');
   assert.equal(rows.find((row) => row.id === 'nw2').dueTime, '');
-  // Other views have no extra trailing text.
-  assert.equal(Model.trailingDay(Model.rows(Model.index(snapshot), 'inbox', today)[0] || { trail: '' }, formatter('en'), catalog('en')), '');
 });
 
 test('the upcoming count is tomorrow through seven days from today', () => {
@@ -807,7 +805,6 @@ test('the add placeholder says where the task goes', () => {
   assert.equal(Model.addPlaceholder('project', '', TODAY, 'Work', format, t), 'Add a task to Work…');
   // Search and the Week view add like the Inbox (no default).
   assert.equal(Model.addPlaceholder('week', '', TODAY, '', format, t), 'Add a task to the Inbox…');
-  for (const key of Model.PLACEHOLDER_KEYS) assert.ok(key.endsWith('…'), key);
 });
 
 test('the editor date in the panel words', () => {

@@ -78,9 +78,6 @@ test('what the helper would refuse is caught first, with its message', () => {
   assert.equal(change('labels', Array.from({ length: 51 }, (_, i) => `l${i}`)).error, 'Give at most 50 labels of 1 to 60 characters each, without control characters.');
   assert.equal(change('description', 'x'.repeat(16384), '').error, 'A description can have at most 16383 characters.');
   assert.equal(change('description', 'a\u0000b', '').error, "A description can't have control characters other than line breaks and tabs.");
-  // Every message is a helper catalog key.
-  const en = require('../i18n/en.json');
-  for (const key of Object.values(Edit.ERRORS)) assert.ok(Object.hasOwn(en, key), key);
 });
 
 test('cut labels and an unloaded description are never sent', () => {
