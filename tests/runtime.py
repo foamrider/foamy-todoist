@@ -993,7 +993,21 @@ ShellRoot {
     case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 101: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 101: return [function() { return !store.busy && store.signedIn && store.loaded; }, 15000, "signed in and idle, before a slow sync"];
+    case 102: return [function() { return store.current !== null && store.current.command === "sync"; }, 15000, "the slow sync runs"];
+    case 103: return [function() { return store.current !== null && store.current.command === "token-clear"; }, 15000, "the old sync's reply came, the sign-out runs"];
+    case 104: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "signed out"];
+    case 105: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the sign-out"];
+    case 106: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "a SIGNED_OUT reply signed out"];
+    case 107: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup while signed out elsewhere"];
+    case 108: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the SIGNED_OUT reply"];
+    case 109: return [function() { return !store.tokenBusy && store.tokenError !== "" && store.signedIn && store.loaded && !store.busy; }, 15000, "a sign-out the keyring refused"];
+    case 110: return [function() { return store.error === "Todoist didn't answer in time." && !store.busy; }, 15000, "a sync that timed out"];
+    case 111: return [function() { return store.error === "The Todoist helper failed." && !store.busy; }, 15000, "a sync with a reply that isn't JSON"];
+    case 112: return [function() { return store.error === "" && store.loaded && !store.busy; }, 15000, "a good sync again"];
+    case 113: return [function() { return one.prefs.value("barCount") === "today"; }, 10000, "the bar count back on"];
+    case 114: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && shell.builtRows(v).some(function(r) { return r.entry.id === "t3"; }); }, 10000, "the popup with marked-up task text"];
+    case 115: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -2571,6 +2585,98 @@ ShellRoot {
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
       one.close();
       one.prefs.save("openOn", "today");
+      break;
+    case 101:
+      // A sync still running when the user signs out: its reply is for the
+      // account that went and must show nothing (the sign-out waits behind it).
+      shell.put("slow-sync", "2");
+      shell.put("slow-token-clear", "1");
+      store.sync();
+      break;
+    case 102:
+      shell.callsBefore = shell.calls("token-clear").length;
+      store.signOut();
+      break;
+    case 103:
+      if (!check(store.snapshot === null && !store.loaded && !one.barContent.countLabel.visible, "a sync reply from before sign-out shows nothing of the old account (" + JSON.stringify([store.loaded, one.barContent.countLabel.visible]) + ")")) return;
+      break;
+    case 104:
+      if (!check(button.tooltipText === "Todoist: not signed in" && shell.calls("token-clear").length === shell.callsBefore + 1, "signed out: the bar says so, one token-clear (" + button.tooltipText + ")")) return;
+      shell.put("slow-sync", "");
+      shell.put("slow-token-clear", "");
+      shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+      store.setToken("again");
+      break;
+    case 105:
+      // The keyring item went elsewhere: a SIGNED_OUT reply from any job
+      // clears the tasks and shows the signed-out state.
+      shell.put("reply-sync.json", JSON.stringify({ ok: false, code: "SIGNED_OUT", error: "Not signed in to Todoist." }));
+      store.sync();
+      break;
+    case 106:
+      if (!check(!store.loaded && !one.barContent.countLabel.visible && button.tooltipText === "Todoist: not signed in", "SIGNED_OUT: no tasks, no count (" + button.tooltipText + ")")) return;
+      one.open();
+      break;
+    case 107:
+      if (!check(shell.find(view, "stateText").text === "Add your Todoist API token in Settings" && view.rows.length === 0, "SIGNED_OUT: the popup asks for a token, no rows (" + JSON.stringify([shell.find(view, "stateText").text, view.rows.length]) + ")")) return;
+      shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+      shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+      one.close();
+      store.check();
+      break;
+    case 108:
+      // A sign-out the keyring refuses (locked): the token stays, so the
+      // user is still signed in, with the reason.
+      shell.put("reply-token-clear.json", JSON.stringify({ ok: false, code: "KEYRING_LOCKED", error: "The keyring that holds the Todoist token is locked. Unlock it and try again." }));
+      store.signOut();
+      break;
+    case 109:
+      if (!check(store.tokenError === "The keyring that holds the Todoist token is locked. Unlock it and try again.", "a refused sign-out says why (" + store.tokenError + ")")) return;
+      // A sync that times out (exit 124, no reply) keeps the cached tasks.
+      shell.put("exit-sync", "124");
+      store.sync();
+      break;
+    case 110:
+      if (!check(store.loaded && !!store.model.byId.t4 && store.failures >= 1, "a timed-out sync keeps the tasks (" + store.failures + " failures)")) return;
+      // A reply that isn't JSON: the helper failed, the tasks stay.
+      shell.put("exit-sync", "");
+      shell.put("reply-sync.json", "not json");
+      store.sync();
+      break;
+    case 111:
+      if (!check(store.loaded && !!store.model.byId.t4, "a sync with a broken reply keeps the tasks")) return;
+      shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+      store.sync();
+      break;
+    case 112:
+      // Icon only: no number in the bar, the tooltip keeps the counts.
+      one.prefs.save("barCount", "none");
+      wait.waitFor(function() { return one.prefs.value("barCount") === "none"; }, 10000, function(ok) {
+        if (!check(ok && !one.barContent.countLabel.visible && button.tooltipText.indexOf("left today") > 0, "Icon only hides the number, the tooltip keeps the counts (" + button.tooltipText + ")")) return;
+        one.prefs.save("barCount", "today");
+      });
+      break;
+    case 113:
+      // Todoist text is shown as plain text: markup in a title or a project
+      // name (anyone in a shared project can write one) is never rendered.
+      if (!check(one.barContent.countLabel.visible, "the number is back with the setting")) return;
+      var marked = shell.snapshotWith({ t3: { content: "<b>Bold</b> <img src=\"file:///nonexistent.png\"> stand-up" } });
+      marked.projects = marked.projects.map(function(p) { return p.id === "work" ? Object.assign({}, p, { name: "<i>Work</i>" }) : p; });
+      store.snapshot = marked;
+      one.open();
+      break;
+    case 114:
+      var markup = [];
+      var walkMarkup = function(at) {
+        if (!at.visible) return;
+        if (typeof at.text === "string" && at.textFormat !== undefined && (at.text.indexOf("<b>") >= 0 || at.text.indexOf("<i>") >= 0)) markup.push(at);
+        for (var child of at.children) walkMarkup(child);
+      };
+      walkMarkup(view);
+      var rich = markup.filter(function(item) { return item.textFormat !== Text.PlainText; });
+      if (!check(markup.length >= 2 && rich.length === 0, "Todoist text is plain text (" + markup.length + " found; " + JSON.stringify(rich.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
+      store.snapshot = shell.snapshot();
+      one.close();
       // No helper for this CPU: says so, no retry loop; an add waiting
       // behind the sync ends as failed.
       shell.put("exit-sync", "127");
@@ -2578,7 +2684,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 101:
+    case 115:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();
