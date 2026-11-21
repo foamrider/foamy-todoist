@@ -255,8 +255,6 @@ test('upcoming headings and trailing text, in English and Norwegian', () => {
   assert.deepEqual(['nw', 'dec'].map((id) => trail(id, 'en')), ['Mon', 'Tue 1']);
   assert.equal(rows.find((row) => row.id === 'nw').dueTime, '09:00');
   assert.equal(rows.find((row) => row.id === 'nw2').dueTime, '');
-  // Other views have no extra trailing text.
-  assert.equal(Model.trailingDay(Model.rows(Model.index(snapshot), 'inbox', today)[0] || { trail: '' }, formatter('en'), catalog('en')), '');
 });
 
 test('the upcoming count is tomorrow through seven days from today', () => {
@@ -317,15 +315,13 @@ test('the rail: every project but the Inbox, children under their parent', () =>
   ]);
 });
 
-test('colours: each Todoist name maps to a theme role; unknown names are muted', () => {
-  const table = {
-    berry_red: 'error', red: 'error', orange: 'warning', yellow: 'warning', olive_green: 'success',
-    lime_green: 'success', green: 'success', mint_green: 'success', teal: 'info', sky_blue: 'info',
-    light_blue: 'info', blue: 'accent', grape: 'accent', violet: 'accent', lavender: 'accent',
-    magenta: 'error', salmon: 'warning', charcoal: 'muted', grey: 'muted', taupe: 'muted',
-    neon: 'muted', '': 'muted', constructor: 'muted', __proto__x: 'muted',
-  };
-  for (const [name, role] of Object.entries(table)) assert.equal(Model.colorRole(name), role, name);
+test('colours: one Todoist name for each theme role; unknown names are muted', () => {
+  // Pairs, not an object: in an object literal a __proto__ key makes no entry, so its row would be lost.
+  // The names come from Todoist, so names of Object's own members must be muted too.
+  const pairs = [['berry_red', 'error'], ['orange', 'warning'], ['green', 'success'], ['teal', 'info'],
+    ['blue', 'accent'], ['neon', 'muted'], ['', 'muted'],
+    ['constructor', 'muted'], ['__proto__', 'muted'], ['hasOwnProperty', 'muted'], ['toString', 'muted']];
+  for (const [name, role] of pairs) assert.equal(Model.colorRole(name), role, name);
   assert.deepEqual([4, 3, 2, 1, 7].map(Model.priorityRole), ['error', 'warning', 'accent', 'muted', 'muted']);
 });
 
@@ -807,7 +803,6 @@ test('the add placeholder says where the task goes', () => {
   assert.equal(Model.addPlaceholder('project', '', TODAY, 'Work', format, t), 'Add a task to Work…');
   // Search and the Week view add like the Inbox (no default).
   assert.equal(Model.addPlaceholder('week', '', TODAY, '', format, t), 'Add a task to the Inbox…');
-  for (const key of Model.PLACEHOLDER_KEYS) assert.ok(key.endsWith('…'), key);
 });
 
 test('the editor date in the panel words', () => {

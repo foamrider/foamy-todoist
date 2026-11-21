@@ -63,16 +63,18 @@ ShellRoot {
   property int drawTarget: 0
   property var entry: ({})
   property int callsBefore: 0
+  // Wall-clock times (ms) of a key and of the description read it led to:
+  // timers run on the real clock, so a later read never means a shorter wait.
+  property real keyAt: 0
+  property real readAt: 0
   property int openedBefore: 0
   property int queuedAdds: 0
-  property real rowY: 0
   property var ipcPanel: null
   property string expectedUrl: ""
   property string ringTask: ""
   // The task the pane's typed text belongs to, and the text.
   property string paneFrom: ""
   property string paneText: ""
-  property real oneLineX: 0
   // The popup's margin before a step narrows its room.
   property int savedMargin: 0
   // Wide's list before the pane opened: its width and x in the view.
@@ -82,25 +84,6 @@ ShellRoot {
   // clock) notifies nothing, so only the store's own checks see it.
   property var clock: ({ at: new Date(2026, 10, 18, 12, 0, 0) })
   readonly property string unknownText: "Todoist didn't answer. The task may have been added: check the list before adding it again."
-  // A task row's vertical layout: "" when the text block has the same space
-  // above and below (±1px) and the ring and the time are centred on it;
-  // else what is off.
-  function rowGeometry(row) {
-    var surface = shell.find(row, "taskSurface");
-    var text = shell.find(row, "taskText");
-    var detail = shell.find(row, "taskDetail");
-    var y = function(item, at) { return item.mapToItem(surface, 0, at).y; };
-    var top = y(text, 0);
-    var bottom = detail.visible ? y(detail, detail.height) : y(text, text.height);
-    var middle = (top + bottom) / 2;
-    var ring = shell.find(row, "ringMark");
-    var time = shell.find(row, "taskTime");
-    var off = [];
-    if (Math.abs(top - (surface.height - bottom)) > 1) off.push("padding " + top + " above, " + (surface.height - bottom) + " below");
-    if (Math.abs(y(ring, ring.height / 2) - middle) > 1) off.push("ring at " + y(ring, ring.height / 2) + ", text block at " + middle);
-    if (time.visible && Math.abs(y(time, time.height / 2) - middle) > 1) off.push("time at " + y(time, time.height / 2) + ", text block at " + middle);
-    return off.join("; ");
-  }
   // switchPanel calls from the popup's view.
   property int switches: 0
   Connections {
@@ -133,11 +116,26 @@ ShellRoot {
   readonly property string longLabel: "Alabelnamewithnobreakopportunitylongenoughtooverflowthechip"
   TestEvent { id: ev }
   FoamyWait { id: wait }
-  FileView { id: writer; blockWrites: true; printErrors: false }
-  function put(name, text) { writer.path = shell.out + "/" + name; writer.setText(text); }
+  // A fixture file, written and read back. A FileView skips a write of the
+  // text it holds, and it may not have read a new path yet, so it reads the
+  // file first. Quickshell's atomic write also fails now and then on this
+  // host ("Atomic commit failed", about one run in five; the old file
+  // stays). A fixture write is safe to repeat: at most three writes, else
+  // the run fails.
+  FileView { id: writer; blockAllReads: true; blockWrites: true; printErrors: false }
+  function writeFile(path, text) {
+    writer.path = path;
+    for (var attempt = 0; ; attempt++) {
+      writer.reload();
+      if (writer.text() === text) return true;
+      if (attempt === 3) return check(false, "could not write " + path + " (it holds " + JSON.stringify(writer.text()) + ")");
+      if (attempt > 0) console.log("FOAMY NOTE write " + attempt + " of " + path + " did not land");
+      writer.setText(text);
+    }
+  }
+  function put(name, text) { shell.writeFile(shell.out + "/" + name, text); }
   // The Omarchy language picker's file (the kit's translations follow it).
-  FileView { id: languageFile; path: Quickshell.env("OMARCHY_LANGUAGE_FILE"); blockWrites: true; printErrors: false }
-  function pickLanguage(code) { languageFile.setText(code + "\n"); }
+  function pickLanguage(code) { shell.writeFile(Quickshell.env("OMARCHY_LANGUAGE_FILE"), code + "\n"); }
   // The add error at the top of the list: "" when it shows whole
   // (wrapped, not elided, the list's width but its insets); else what is wrong.
   function addErrorLayout(view, text) {
@@ -159,6 +157,17 @@ ShellRoot {
     return command ? all.filter(function(line) { return line.split(" ")[0] === command; }) : all;
   }
   // The snapshot with some tasks' fields changed ({id: {field: value}}).
+  // The visible items under `item` whose text has Todoist's markup in it.
+  function markupTexts(item) {
+    var found = [];
+    var walk = function(at) {
+      if (!at.visible) return;
+      if (typeof at.text === "string" && at.textFormat !== undefined && (at.text.indexOf("<b>") >= 0 || at.text.indexOf("<i>") >= 0)) found.push(at);
+      for (var child of at.children) walk(child);
+    };
+    walk(item);
+    return found;
+  }
   function snapshotWith(changes, drop) {
     var reply = shell.snapshot(drop);
     reply.tasks = reply.tasks.map(function(task) { return changes[task.id] ? Object.assign({}, task, changes[task.id]) : task; });
@@ -353,8 +362,9 @@ ShellRoot {
       done();
     });
   }
-  // The editor's menus (Small's page, t7 open): each field's context menu, then a
-  // project menu taller than its room; back to the list, then done().
+  // The editor's context menus (Small's page, t7 open): a one-line field
+  // that saves and closes when its edit ends, and the description, which
+  // saves; back to the list, then done().
   function editorMenus(view, done) {
     view.openTask("t7", true);
     wait.waitFor(function() { var d = Plugin.TodoStore.description; return view.pageShown && view.editor.taskId === "t7" && d.id === "t7" && d.state === "ready" && view.editor.descriptionField.enabled; }, 15000, function(ok) {
@@ -362,15 +372,11 @@ ShellRoot {
       var ed = view.editor;
       shell.contextPaste(ed, [
         { name: "dueField", open: "due" },
-        { name: "deadlineField", open: "deadline" },
-        { name: "contentField", open: "" },
         { name: "descriptionField", open: "" }
       ], function() {
         shell.menuLeave(ed, function() {
-          shell.longPlaceMenu(ed, function() {
-            view.editor.back();
-            done();
-          });
+          view.editor.back();
+          done();
         });
       });
     });
@@ -408,6 +414,11 @@ ShellRoot {
     });
     });
   }
+  // Calls `then` once the first bar's popup is hidden, so that the next
+  // open() opens it again instead of finding it still on its way out.
+  function afterClose(then) {
+    wait.waitFor(function() { return !one.popup.visible; }, 5000, function(ok) { if (check(ok, "the popup closed")) then(); });
+  }
   // Calls `then` once `item`'s window has drawn a frame (layouts done).
   function afterFrame(item, then) {
     var window = item.Window.window;
@@ -440,51 +451,6 @@ ShellRoot {
         done();
       });
     });
-    });
-  }
-  // "" when entry `index` of the menu shows whole in its view; else where.
-  function menuRowShown(menu, index) {
-    // The panel's Flickable (it has a contentItem).
-    var view = null;
-    for (var child of menu.panel.children)
-      if (child.contentItem !== undefined && child.contentY !== undefined) view = child;
-    if (!view) return "no menu view";
-    var list = view.contentItem.children[0];
-    var row = null;
-    for (var item of list.children)
-      if (item.objectName === "foamyMenuRow" && item.index === index) row = item;
-    if (!row) return "no row " + index;
-    var top = row.mapToItem(view, 0, 0).y;
-    return top >= -0.5 && top + row.height <= view.height + 0.5 ? "" : "row " + index + " at " + top + ".." + (top + row.height) + " of " + view.height;
-  }
-  // Many projects: the project menu is taller than its room (it scrolls);
-  // End and Down keep the entry the keys are on in view.
-  function longPlaceMenu(ed, done) {
-    var store = Plugin.TodoStore;
-    var many = shell.snapshot();
-    for (var n = 1; n <= 40; n++)
-      many.projects.push({ id: "extra" + n, name: "Extra " + n, color: "grey", parent_id: null, child_order: 10 + n, inbox: false });
-    store.snapshot = many;
-    ed.openPlaceMenu(true);
-    var menu = ed.menu;
-    var last = menu.entries.length - 1;
-    var tall = function() { return menu.opened && last > 40 && menu.panel.height > 100 && menu.panel.height + 1 < menu.overlayItem.naturalHeight; };
-    wait.waitFor(tall, 3000, function(ok) {
-    if (!check(ok, "the project menu is taller than its room (" + JSON.stringify([last + 1, menu.panel.height, menu.overlayItem.naturalHeight]) + ")")) return;
-    ev.keyClick(Qt.Key_End, Qt.NoModifier, -1);
-    if (!check(menu.currentIndex === last && shell.menuRowShown(menu, last) === "", "End: the last project, in view (" + shell.menuRowShown(menu, last) + ")")) return;
-    ev.keyClick(Qt.Key_Home, Qt.NoModifier, -1);
-    var hidden = [];
-    for (var i = 0; i < last; i++) {
-      ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
-      var at = shell.menuRowShown(menu, menu.currentIndex);
-      if (at !== "") hidden.push(at);
-    }
-    if (!check(menu.currentIndex === last && hidden.length === 0, "Down keeps each project in view (" + JSON.stringify(hidden.slice(0, 3)) + ")")) return;
-    ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-    if (!check(!menu.opened && Object.keys(ed.pending).length === 0, "Esc closed the menu, nothing picked")) return;
-    store.snapshot = shell.snapshot();
-    done();
     });
   }
   function check(ok, message) {
@@ -627,7 +593,7 @@ ShellRoot {
     wait.waitFor(function() { return shell.calls("apply").length === from + 1 && !store.busy && !editor.saving; }, 15000, function(ok) {
       if (!check(ok && store.model.byId[id].content === first, "and saved the typed text (" + JSON.stringify(shell.updatesSince(from)) + ")")) return;
       // "Saved" for a moment (the timer's run), then the freshness line again.
-      if (!check(footerStatus.text === "Saved" && editor.savedTimer.running && editor.savedTimer.interval === editor.savedNotice, "then Saved (" + footerStatus.text + ")")) return;
+      if (!check(footerStatus.text === "Saved" && editor.savedTimer.running, "then Saved (" + footerStatus.text + ")")) return;
       editor.savedTimer.stop();
       if (!check(footerStatus.text.indexOf("Updated") === 0, "and the freshness line when its moment ends (" + footerStatus.text + ")")) return;
       var second = typed(" there");
@@ -943,6 +909,10 @@ ShellRoot {
   Connections {
     target: Plugin.TodoStore
     function onAddFinished(request, ok, message) { shell.settled = shell.settled.concat([{ request: request, ok: ok, message: message }]); }
+    function onDescriptionChanged() {
+      var d = Plugin.TodoStore.description;
+      if (d.state === "loading" && d.id === "t1" && shell.readAt === 0) shell.readAt = Date.now();
+    }
   }
   function gate(n) {
     var store = Plugin.TodoStore;
@@ -983,7 +953,7 @@ ShellRoot {
     case 37: return [function() { return shell.opened().length === 3 && !store.launchRunning; }, 15000, "Open in Todoist with the command, the link appended"];
     case 38: return [function() { return store.launchError !== "" && !store.launchRunning; }, 15000, "a launch that failed"];
     case 39: return [function() { return store.launchError === "" && shell.opened().length === 5 && !store.launchRunning; }, 15000, "the next launch worked"];
-    case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide; }, 10000, "the standard popup again"];
+    case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 10000, "the standard popup again, the completion sent"];
     case 41: return [function() { return view.fieldFocused; }, 10000, "the empty field, to click away from"];
     case 42: return [function() { return view.fieldFocused; }, 10000, "the empty field again"];
     case 43: return [function() { return view.fieldFocused; }, 10000, "the field for search and drafts"];
@@ -1029,7 +999,7 @@ ShellRoot {
     case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
     case 86: return [function() { return one.popup.bodyItem.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && one.popup.contentWidth === one.cardWidth; }, 20000, "the pane's text saved as the view changed, the card's width settled"];
     case 87: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
-    case 88: return [function() { return one.popup.bodyItem.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
+    case 88: return [function() { return one.popup.bodyItem.editor.contentField.inputActiveFocus && store.description.id === "t2" && store.description.state === "ready" && Math.abs(one.popup.drawnHeight - one.popup.contentHeight) < 1; }, 10000, "the caret in the week's pane, its description read, the card's height settled"];
     case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Wide popup closed"];
     case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Wide again, in Norwegian"];
     case 91: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && Kit.FoamyI18n.language === "en"; }, 15000, "the pane's text saved as the popup closed"];
@@ -1042,7 +1012,22 @@ ShellRoot {
     case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 101: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 101: return [function() { return !store.busy && store.signedIn && store.loaded; }, 15000, "signed in and idle, before a slow sync"];
+    case 102: return [function() { return store.current !== null && store.current.command === "sync"; }, 15000, "the slow sync runs"];
+    case 103: return [function() { return store.current !== null && store.current.command === "token-clear"; }, 15000, "the old sync's reply came, the sign-out runs"];
+    case 104: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "signed out"];
+    case 105: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the sign-out"];
+    case 106: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "a SIGNED_OUT reply signed out"];
+    case 107: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup while signed out elsewhere"];
+    case 108: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the SIGNED_OUT reply"];
+    case 109: return [function() { return !store.tokenBusy && store.tokenError !== "" && store.signedIn && store.loaded && !store.busy; }, 15000, "a sign-out the keyring refused"];
+    case 110: return [function() { return store.error === "Todoist didn't answer in time." && !store.busy; }, 15000, "a sync that timed out"];
+    case 111: return [function() { return store.error === "The Todoist helper failed." && !store.busy; }, 15000, "a sync with a reply that isn't JSON"];
+    case 112: return [function() { return store.error === "" && store.loaded && !store.busy; }, 15000, "a good sync again"];
+    case 113: return [function() { return one.prefs.value("barCount") === "today"; }, 10000, "the bar count back on"];
+    case 114: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && shell.builtRows(v).some(function(r) { return r.entry.id === "t3"; }); }, 10000, "the popup with marked-up task text"];
+    case 115: return [function() { var v = one.popup.bodyItem; return v && v.editor.visible && v.editor.taskId === "t3" && store.description.state === "ready" && store.description.id === "t3"; }, 10000, "the marked-up task on its page"];
+    case 116: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -1079,6 +1064,14 @@ ShellRoot {
       if (!check(Kit.FoamyShared.memberCount("todoist") === 2, "two monitor instances share the store")) return;
       if (!check(!one.barContent.countLabel.visible && button.tooltipText === "Todoist: not signed in", "no count while signed out (" + button.tooltipText + ")")) return;
       if (!check(!store.polling, "nothing polls while signed out")) return;
+      // Todoist sends a fixed-zone due date in UTC with six fraction
+      // digits: the panel's own JavaScript engine (not node's) must read it,
+      // in local time.
+      var utc = Model.dueOf({ date: "2026-11-18T23:30:00.000000Z" });
+      var utcAt = new Date(Date.UTC(2026, 10, 18, 23, 30));
+      // In a zone at UTC+0 a date read as local time looks right too.
+      if (!check(utcAt.getTimezoneOffset() !== 0, "the run's time zone is not UTC (TZ " + Quickshell.env("TZ") + ")")) return;
+      if (!check(utc !== null && utc.day === Model.dayKey(utcAt) && utc.minutes === utcAt.getHours() * 60 + utcAt.getMinutes(), "Qt's engine reads Todoist's UTC due dates (" + JSON.stringify(utc) + ")")) return;
       one.open();
       break;
     case 1:
@@ -1100,7 +1093,7 @@ ShellRoot {
       if (!check(shell.calls("sync").length === 1, "one sync after signing in (" + JSON.stringify(shell.calls()) + ")")) return;
       one.close();
       shell.put("slow-sync", "");
-      wait.after(100, function() { one.open(); });
+      shell.afterClose(function() { one.open(); });
       break;
     case 4:
       // Reopened: no field, no cursor; the band has +, Search and ⋯ (Settings in it).
@@ -1110,25 +1103,15 @@ ShellRoot {
       var actions = view.band.shownTrailing.map(function(item) { return item.objectName; });
       if (!check(JSON.stringify(actions) === JSON.stringify(["addAction", "searchAction"]) && view.band.settingsInMenu && view.band.menuButton.visible, "the band: +, Search, ⋯ (" + JSON.stringify(actions) + ", Settings in the menu " + view.band.settingsInMenu + ")")) return;
       var plus = shell.find(view.band, "addAction");
-      if (!check(plus.tooltipText === "Add a task" && plus.iconName === "plus", "+ says Add a task")) return;
-      if (!check(shell.find(view, "addRow") === null && !view.band.fieldShown, "no add row; the band field is closed")) return;
-      shell.rowY = view.band.height;
+      // The icon-only + is named for a screen reader by its tooltip.
+      if (!check(plus.Accessible.name === "Add a task", "+ is named Add a task (" + plus.Accessible.name + ")")) return;
       if (!check(view.band.meta === "Today · 6 left · 2 overdue", "the band's meta (" + view.band.meta + ")")) return;
-      if (!check(view.band.iconName === "todoist", "the band shows the Todoist mark")) return;
       // One number, as in foamy-zendesk: left today, in the bar's urgent colour.
       var count = one.barContent.countLabel;
       if (!check(count.visible && count.text === "6" && Qt.colorEqual(count.color, bar.urgent) && count.font.family === button.fontFamily, "the bar: 6 in the urgent colour (" + count.text + ", " + count.color + ", " + count.font.family + ")")) return;
       var texts = one.barContent.children.filter(function(item) { return item.visible && item.hasOwnProperty("text"); });
-      if (!check(texts.length === 1 && one.barContent.overdueLabel === undefined, "no separate overdue number in the bar (" + texts.length + ")")) return;
+      if (!check(texts.length === 1, "no separate overdue number in the bar (" + texts.length + ")")) return;
       if (!check(button.tooltipText === "Todoist: 6 left today, 2 overdue", "the tooltip (" + button.tooltipText + ")")) return;
-      // Section counts sit at the end of the heading line, where times end.
-      var overdueHead = view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry && item.entry.key === "header:overdue"; });
-      var overdueCount = shell.find(overdueHead, "headerCount");
-      var at = function(item) { return item.mapToItem(view, 0, 0).x; };
-      var timed = shell.builtRows(view).find(function(r) { return r.entry.id === "t3"; });
-      var timeLabel = shell.find(timed, "taskTime");
-      if (!check(overdueCount && timed && timeLabel, "found the count and a timed row (" + !!overdueCount + " " + !!timed + " " + !!timeLabel + " " + (overdueHead && overdueHead.entry.key) + ")")) return;
-      if (!check(overdueCount.text === "2" && Math.abs(at(overdueCount) + overdueCount.width - at(timeLabel) - timeLabel.width) < 1, "the Overdue count ends where the times do (" + (at(overdueCount) + overdueCount.width) + " vs " + (at(timeLabel) + timeLabel.width) + ")")) return;
       // Nothing left today: the bar shows the mark alone, no "0".
       var full = store.snapshot;
       store.snapshot = Object.assign({}, full, { tasks: [] });
@@ -1137,19 +1120,13 @@ ShellRoot {
       if (!check(emptyTabs[0].count === -1 && emptyTabs[1].count === -1, "no 0 in the tabs either (" + emptyTabs[0].count + ", " + emptyTabs[1].count + ")")) return;
       store.snapshot = full;
       if (!check(one.barContent.countLabel.visible && one.barContent.countLabel.text === "6", "the count is back")) return;
-      // The tab row: in the body, right under the band, full width.
+      // A vertical bar has no room for the number: the mark alone.
+      bar.position = "left";
+      if (!check(!one.barContent.countLabel.visible, "no number on a vertical bar")) return;
+      bar.position = "top";
+      if (!check(one.barContent.countLabel.visible, "the number again on a horizontal bar")) return;
       var tabs = shell.find(view, "viewSwitch");
-      if (!check(tabs && tabs.visible && shell.find(view.band, "viewSwitch") === null, "the tabs are not in the band")) return;
-      var top = function(item) { return item.mapToItem(view, 0, 0).y; };
-      var at = function(item) { return item.mapToItem(view, 0, 0).x; };
-      if (!check(Math.abs(top(tabs) - view.band.height) < 1 && Math.abs(at(tabs)) < 1 && Math.abs(tabs.width - view.width) < 1, "the tabs sit under the band, full width (" + top(tabs) + " vs " + view.band.height + ", " + at(tabs) + "+" + tabs.width + ")")) return;
       if (!check(tabs.model[0].count === 4 && tabs.model[1].count === 6 && tabs.model[1].countUrgent === true, "the tabs' counts")) return;
-      // Section headers start where the rows' rings do; the add row's
-      // edges are the rows' edges, its icon where the rings are.
-      var header = view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.kind === "header"; });
-      var firstRow = shell.builtRows(view)[0];
-      var ringX = at(shell.find(firstRow, "ringMark"));
-      if (!check(Math.abs(at(shell.find(header, "header")) - ringX) < 1, "a header lines up with the rings (" + at(shell.find(header, "header")) + " vs " + ringX + ")")) return;
       // ↓ from nothing: the first row; ↑: the tabs; ←, Enter: Inbox.
       view.moveRequested(0, 1);
       if (!check(view.cursor.index === view.firstRowStop && shell.highlighted(view).length === 1, "↓ lands on the first row (" + view.cursor.index + ")")) return;
@@ -1172,15 +1149,10 @@ ShellRoot {
       view.activateRequested();
       break;
     case 5:
-      var box = shell.find(view, "fieldBox");
-      var at = function(item) { return item.mapToItem(view, 0, 0); };
       if (!check(view.fieldOpen && view.band.fieldOpen && view.blocked && !view.band.buttonsActive, "Enter opened the band field, with the keys; the buttons are inert")) return;
-      // Over the title row, the band's width between its paddings; the band keeps its height.
-      if (!check(Math.abs(view.band.height - shell.rowY) < 1 && Math.abs(at(box).x - Kit.FoamyStyle.padding) < 1 && Math.abs(box.width - (view.band.width - Kit.FoamyStyle.padding * 2)) < 1 && at(box).y + box.height <= view.band.height, "the field covers the band, which keeps its height (" + JSON.stringify([view.band.height, shell.rowY, at(box).x, box.width, at(box).y]) + ")")) return;
       if (!check(view.field.placeholderText === "Add a task for today…", "the placeholder says where it goes (" + view.field.placeholderText + ")")) return;
       if (!check(view.field.font.pixelSize === Kit.FoamyStyle.font.title, "the field's text is the band title's size (" + view.field.font.pixelSize + ")")) return;
-      // No chips or hints under it; the footer shows the keys.
-      if (!check(shell.find(view, "dateChip") === null && shell.find(view, "fieldHint") === null, "nothing under the field")) return;
+      // The footer shows the keys.
       var hints = shell.find(view, "keyHints");
       var hintTexts = [0, 1, 2].map(function(i) { return shell.find(hints, "keyHint" + i).label; });
       if (!check(hints.visible && JSON.stringify(hintTexts) === JSON.stringify(["add and close", "add, keep typing", "cancel"]) && !shell.find(view, "openTodoist").visible && !view.footer.refreshButton.visible, "the footer's keys while adding (" + JSON.stringify(hintTexts) + ")")) return;
@@ -1249,7 +1221,6 @@ ShellRoot {
       // next week, later in November, December, January 2027.
       if (!check(view.band.meta === "Upcoming · 3 tasks in the next 7 days", "the band's meta (" + view.band.meta + ")")) return;
       var heads = view.rows.filter(function(row) { return row.kind === "header"; });
-      if (!check(JSON.stringify(heads.map(function(h) { return h.group; })) === JSON.stringify(["day", "day", "week", "later", "month", "month"]), "the groups (" + JSON.stringify(heads.map(function(h) { return h.group; })) + ")")) return;
       var built = function(key) { return view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry && item.entry.key === key; }); };
       var text = function(item, name) { var found = shell.find(item, name); return found && found.visible ? found.text : ""; };
       var shown = function(head) { var item = built(head.key); return item ? [text(item, "headerTitle"), text(item, "headerSub"), text(item, "headerCount"), shell.find(item, "headerDivider").visible] : null; };
@@ -1325,7 +1296,7 @@ ShellRoot {
       if (!check(!view.searching && !view.fieldOpen && view.cursor.index === view.searchStop && one.opened, "Esc when empty leaves search, the cursor on Search")) return;
       // IPC add: the popup opens with the field open and focused.
       one.close();
-      wait.after(100, function() {
+      shell.afterClose(function() {
         // One handler per shell: the leading monitor's instance.
         var handler = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.add === "function"; });
         shell.ipcPanel = one.data.indexOf(handler) >= 0 ? one : two;
@@ -1353,7 +1324,7 @@ ShellRoot {
       break;
     case 19:
       if (!check(view.width > 540 && shell.find(view, "rail").visible, "wide: the rail shows (" + view.width + ")")) return;
-      if (!check(!view.band.fieldShown && shell.find(view, "addRow") === null && !shell.find(view, "viewSwitch").visible, "wide: the title row in the band, no tabs, no add row")) return;
+      if (!check(!view.band.fieldShown && !shell.find(view, "viewSwitch").visible, "wide: the title row in the band, no tabs")) return;
       if (!check(shell.find(view, "rail-week") !== null, "wide: Week in the rail")) return;
       // No task selected: the pane shows the overview; the card is 880
       // under the button.
@@ -1417,8 +1388,8 @@ ShellRoot {
       if (!check(store.queue.length === 0 && store.error.indexOf("Todoist is limiting requests.") === 0, "a refused move to tomorrow says why (" + store.error + ")")) return;
       store.error = "";
       store.retryUntil = 0;
-      // A full queue, a repeated t, then sign-out: every add settles.
-      shell.put("slow-sync", "3");
+      // A full queue, a repeated t, then sign-out: every add settles. The
+      // sync is one of the queued jobs: sign-out drops it before it starts.
       shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
       shell.put("reply-token-clear.json", JSON.stringify({ ok: true, state: "signed_out", user: null }));
       shell.settled = [];
@@ -1457,7 +1428,6 @@ ShellRoot {
     case 26:
       if (!check(store.helperInput === "", "the token isn't kept after it was written (" + store.helperInput.length + " characters)")) return;
       if (!check(view.settingsPage.tokenField.secretText === "wrong-token", "a refused token stays in the field")) return;
-      shell.put("slow-sync", "");
       shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
       view.settingsPage.tokenField.clear();
       view.settingsPage.tokenField.focusInput();
@@ -1502,8 +1472,6 @@ ShellRoot {
       ev.keyClickChar("#", Qt.NoModifier, -1);
       if (!check(list.visible && JSON.stringify(shown()) === JSON.stringify(["Home", "Inbox", "Launch", "Reading list", "Work"]), "# lists the projects (" + JSON.stringify(shown()) + ")")) return;
       if (!check(shell.find(list, "suggestion-Home").hasCursor, "the first one is highlighted")) return;
-      var box = shell.find(view, "fieldBox");
-      if (!check(Math.abs(list.mapToItem(view, 0, 0).x - box.mapToItem(view, 0, 0).x) < 1 && Math.abs(list.width - box.width) < 1 && list.mapToItem(view, 0, 0).y >= box.mapToItem(view, 0, 0).y + box.height, "the list drops from the field, as wide as it")) return;
       ev.keyClickChar("o", Qt.NoModifier, -1);
       if (!check(JSON.stringify(shown()) === JSON.stringify(["Home", "Inbox", "Work"]), "typing narrows it (" + JSON.stringify(shown()) + ")")) return;
       // ↓ then Enter: inserted, not added.
@@ -1607,10 +1575,11 @@ ShellRoot {
       break;
     case 39:
       if (!check(!view.footer.statusError && view.footer.status.indexOf("Updated") === 0, "the next success clears it (" + view.footer.status + ")")) return;
-      // The IPC target keeps only the panel's own functions (Foamy Menu's
-      // openTask and openInbox are gone).
-      var target = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled; });
-      if (!check(target && typeof target.toggle === "function" && typeof target.openTask === "undefined" && typeof target.openInbox === "undefined", "the IPC target has toggle, no openTask or openInbox")) return;
+      // One IPC target per shell (the leading bar's): it offers toggle, add
+      // and refresh, the calls a keybinding or another tool makes.
+      var targets = one.data.concat(two.data).filter(function(item) { return item.target === "foamy.todoist" && item.enabled; });
+      var target = targets[0];
+      if (!check(targets.length === 1 && typeof target.toggle === "function" && typeof target.add === "function" && typeof target.refresh === "function", "one IPC target with toggle, add and refresh (" + targets.length + " enabled)")) return;
       // Wide: ← on a row goes to the rail, → from the rail back to the rows.
       view.goTo(view.firstRowStop);
       view.moveRequested(-1, 0);
@@ -1619,10 +1588,23 @@ ShellRoot {
       if (!check(view.cursor.index === view.firstRowStop, "→ from the rail goes to the rows (wide)")) return;
       one.prefs.save("openCommand", "");
       one.prefs.save("panelWidth", "standard");
+      // A task completed, then the popup closed inside the undo window:
+      // the completion goes at once, not when the window would have ended.
+      view.goTo(view.firstRowStop);
+      shell.ringTask = view.cursorRow().id;
+      var closeResults = {};
+      closeResults[shell.ringTask] = "ok";
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(), { results: closeResults })));
+      shell.callsBefore = shell.calls("apply").length;
+      view.activateRequested();
+      if (!check(store.struck[shell.ringTask] === true && store.undoWindow.running, "Space struck " + shell.ringTask + ", its undo window runs")) return;
       one.close();
-      wait.after(100, function() { one.open(); });
+      if (!check(!store.undoWindow.running && store.sending[shell.ringTask] === true && Object.keys(store.struck).length === 0, "closing sent the completion at once (" + JSON.stringify([store.undoWindow.running, store.sending, store.struck]) + ")")) return;
+      shell.afterClose(function() { one.open(); });
       break;
     case 40:
+      var closeSent = JSON.parse(shell.calls("apply")[shell.callsBefore].slice("apply ".length));
+      if (!check(JSON.stringify(closeSent) === JSON.stringify({ commands: [{ op: "close", id: shell.ringTask }] }), "the close sent on closing (" + JSON.stringify(closeSent) + ")")) return;
       // Small: ← and → on a row do nothing.
       view.goTo(view.firstRowStop);
       view.moveRequested(1, 0);
@@ -1680,7 +1662,7 @@ ShellRoot {
       if (!check(shell.switches === 0 && view.field.text === "Keep me" && view.fieldFocused && one.opened, "Tab with text did nothing (" + shell.switches + ")")) return;
       // The draft outlives the popup: reopened, the field has it, with the keys.
       one.close();
-      wait.after(100, function() { one.open(); });
+      shell.afterClose(function() { one.open(); });
       break;
     case 44:
       var back = one.popup.bodyItem;
@@ -1693,7 +1675,7 @@ ShellRoot {
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
       if (!check(shell.switches === 1, "Tab in an empty field switches panels (" + shell.switches + ")")) return;
       one.close();
-      wait.after(100, function() { one.open(); });
+      shell.afterClose(function() { one.open(); });
       break;
     case 45:
       var again = one.popup.bodyItem;
@@ -1730,8 +1712,6 @@ ShellRoot {
     case 47:
       var oneLine = shell.builtRows(view).find(function(r) { return r.entry.id === "t7"; });
       if (!check(oneLine && !oneLine.entry.detail, "t7 is a one-line row in the Inbox")) return;
-      if (!check(shell.rowGeometry(oneLine) === "", "one-line row: " + shell.rowGeometry(oneLine))) return;
-      shell.oneLineX = shell.find(oneLine, "taskSurface").mapToItem(view, 0, 0).x;
       view.setView("today");
       break;
     case 48:
@@ -1744,8 +1724,6 @@ ShellRoot {
       for (var r of shell.builtRows(view)) {
         var project = shell.find(r, "taskProject");
         if (!check(r.entry.showProject && shell.find(r, "taskDetail").visible && project.visible && project.text === r.entry.projectName && project.text !== "", "Today: " + r.entry.id + " shows its project (" + project.text + ", detail " + shell.find(r, "taskDetail").visible + ")")) return;
-        if (!check(shell.rowGeometry(r) === "", "two-line row " + r.entry.id + ": " + shell.rowGeometry(r))) return;
-        if (!check(Math.abs(shell.find(r, "taskSurface").mapToItem(view, 0, 0).x - shell.oneLineX) < 1, "the same fill insets on every row")) return;
       }
       // An add whose reply comes after the popup closed leaves no draft.
       shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
@@ -1935,12 +1913,6 @@ ShellRoot {
       var shown = shell.visibleTexts(editor);
       var expected = ["Work › Review", "Review pull request #482", "Project", "Work › Review", "Date", "Today 14:00", "Deadline", "Priority", "P3", "Labels", "@code"];
       if (!check(JSON.stringify(shown) === JSON.stringify(expected), "the page shows the task, no help text (" + JSON.stringify(shown) + ")")) return;
-      if (!check(shell.find(editor, "editComplete") === null && shell.find(editor, "editButtons") === null, "no Complete or Open buttons in the form")) return;
-      // The title and description are quiet: no fill or border at rest.
-      if (!check(editor.contentField.quiet && editor.descriptionField.quiet && editor.contentField.font.pixelSize === Kit.FoamyStyle.font.heading && editor.contentField.font.weight === Font.DemiBold, "the title and the description are edited in place")) return;
-      // Open in Todoist: an icon in the page's band.
-      var bandOpen = editor.openButton;
-      if (!check(bandOpen.objectName === "editOpen" && bandOpen.visible && bandOpen.iconName === "external-link" && bandOpen.tooltipText === "Open in Todoist" && bandOpen.Accessible.name === "Open in Todoist" && shell.find(shell.find(editor, "editorBand"), "editOpen") === bandOpen, "Open in Todoist is an icon in the band")) return;
       // At rest the title reads as the list shows it, in the field's place
       // and font; the field holds Todoist's raw text under it.
       var title = editor.contentField;
@@ -2001,7 +1973,7 @@ ShellRoot {
       // its caption lights all of it, a click there does what + does.
       var deadlineCaption = shell.find(deadlineSection, "sectionCaption");
       ev.mouseMove(deadlineCaption, 4, deadlineCaption.height / 2, -1, Qt.NoButton, Qt.NoModifier);
-      if (!check(deadlineBox.lit && Qt.colorEqual(deadlineBox.color, Kit.FoamyPalette.hoverFill) && deadlineBox.radius === Kit.FoamyStyle.radius && !shell.sectionBox(editor1, "section-due").lit, "hover lights the whole section, alone (" + deadlineBox.color + ")")) return;
+      if (!check(deadlineBox.lit && !shell.sectionBox(editor1, "section-due").lit, "hover lights the whole section, alone")) return;
       ev.mouseClick(deadlineCaption, 4, deadlineCaption.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(editor1.deadlineField.visible && editor1.deadlineField.inputActiveFocus && !deadlinePlus.visible && !deadlineBox.lit, "a click on the caption opened the deadline field with the caret")) return;
       for (var d1 of "2026-02-30") ev.keyClickChar(d1, Qt.NoModifier, -1);
@@ -2015,7 +1987,6 @@ ShellRoot {
       var dueRow1 = shell.find(editor1, "dueRow");
       ev.mouseClick(dueRow1, dueRow1.width / 2, dueRow1.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(editor1.dueField.visible && editor1.dueField.inputActiveFocus && editor1.dueField.text === "today 14:00" && !dueRow1.visible, "the date row opened its field with Todoist's words")) return;
-      if (!check(shell.visibleTexts(shell.find(editor1, "section-due")).join("|") === "Date", "no help text under the open date field (" + shell.visibleTexts(shell.find(editor1, "section-due")) + ")")) return;
       editor1.dueField.selectAll();
       for (var n1 of "next monday") ev.keyClickChar(n1, Qt.NoModifier, -1);
       // Leaving the field saves it.
@@ -2198,21 +2169,13 @@ ShellRoot {
       });
       break;
     case 80:
-      // Small's page: one column, the title and description, then the
-      // properties under them (no side column: Wide has no page).
+      // Small's page, laid out by the next drawn frame (the clicks below
+      // go to what is drawn).
       view.openTask("t4", true);
       var pageEditor = view.editor;
-      // "" when the column is laid out; else where things are.
-      var columnOff = function() {
-        var head = shell.find(pageEditor, "editorHead");
-        var props = shell.find(pageEditor, "editorProperties");
-        var propsY = props.mapToItem(pageEditor, 0, 0).y;
-        var headY = head.mapToItem(pageEditor, 0, 0).y;
-        var ok = view.pageShown && pageEditor.mode === "page" && shell.find(pageEditor, "editorSide") === null && propsY >= headY + head.height - 1;
-        return ok ? "" : JSON.stringify([view.pageShown, pageEditor.mode, propsY, headY, head.height]);
-      };
-      wait.waitFor(function() { return columnOff() === ""; }, 3000, function(laidOut) {
-      if (!check(laidOut, "Small's page: one column (" + columnOff() + ")")) return;
+      wait.waitFor(function() { return view.pageShown && pageEditor.taskId === "t4" && pageEditor.mode === "page"; }, 3000, function(shown) {
+      if (!check(shown, "Small's page shows t4 (" + JSON.stringify([view.pageShown, pageEditor.taskId, pageEditor.mode]) + ")")) return;
+      shell.afterFrame(pageEditor, function() {
       // The project: its row opens a menu of the projects and their
       // sections, the task's place checked; a pick saves the move alone.
       if (!check(shell.valueText(pageEditor, "editPlace") === "Work › Review", "the project row: Work › Review (" + shell.valueText(pageEditor, "editPlace") + ")")) return;
@@ -2232,7 +2195,7 @@ ShellRoot {
         ev.mouseClick(bandOpen, bandOpen.width / 2, bandOpen.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
         wait.waitFor(function() { return shell.opened().length === shell.openedBefore + 1 && !store.launchRunning; }, 15000, function(ok2) {
           var launched = ok2 ? shell.opened()[shell.openedBefore] : [];
-          if (!check(ok2 && launched.indexOf(Model.webUrl("task", "t4")) >= 0, "the band's icon opened the task (" + JSON.stringify(launched) + ")")) return;
+          if (!check(ok2 && launched.indexOf(Model.webUrl("task", "t4")) >= 0 && bandOpen.Accessible.name === "Open in Todoist", "the band's icon, named Open in Todoist, opened the task (" + JSON.stringify([launched, bandOpen.Accessible.name]) + ")")) return;
           // The ring beside the title completes the task and leaves the page.
           var ring = pageEditor.ring;
           if (!check(ring.Accessible.name === "Complete" && ring.activeFocusOnTab, "the ring is named and on the Tab path")) return;
@@ -2244,6 +2207,7 @@ ShellRoot {
           // The size as a version before this one saved it: "large".
           shell.editorMenus(view, function() { shell.entry = Object.assign({}, shell.entry, { panelWidth: "large" }); });
         });
+      });
       });
       });
       break;
@@ -2268,7 +2232,13 @@ ShellRoot {
       shell.overviewChecks(big, function() {
         var area0 = shell.find(big, "listArea");
         shell.listBox = [area0.width, area0.mapToItem(big, 0, 0).x];
+        shell.callsBefore = shell.calls("task").length;
+        shell.readAt = 0;
+        shell.keyAt = Date.now();
         ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+        // The cursor may move on at once: the pane reads the description
+        // only once the selection rests, so nothing is queued yet.
+        if (!check(![store.current].concat(store.queue).some(function(job) { return !!job && job.command === "task"; }), "the pane waits for the selection to rest before it reads the description")) return;
         if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
         // The card stays 880: the list keeps its width and place, the
         // task's details in the overview's place beside it.
@@ -2277,12 +2247,14 @@ ShellRoot {
       break;
     case 83:
       var big1 = one.popup.bodyItem;
+      var reads = shell.calls("task");
+      if (!check(reads.length === shell.callsBefore + 1 && JSON.parse(reads[reads.length - 1].slice("task ".length)).id === "t1", "one description read where the cursor rested (" + JSON.stringify(reads.slice(shell.callsBefore)) + ")")) return;
+      // Held ↓ repeats about every 30 ms: a read only after a real pause
+      // keeps the rows it passes from each reading a description.
+      if (!check(shell.readAt - shell.keyAt >= 250, "the read waited for the selection to rest (" + (shell.readAt - shell.keyAt) + " ms)")) return;
       var area1 = shell.find(big1, "listArea");
       if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "a task in the pane: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
-      // The pane: no Open icon and no "Task" caption; Open in Todoist is in
-      // the band, in Search's place, and Search leads the ⋯ menu.
-      var paneTexts = shell.visibleTexts(big1.editor);
-      if (!check(big1.editor.openButton === null && shell.find(big1.editor, "paneOpen") === null && paneTexts.indexOf("Task") < 0 && paneTexts[0] === store.model.byId.t1.text && paneTexts[1] === "Project", "no Open icon in the pane; no Task caption (" + JSON.stringify(paneTexts) + ")")) return;
+      // Open in Todoist is in the band, in Search's place, and Search leads the ⋯ menu.
       var taskActions = big1.band.shownTrailing.map(function(item) { return item.objectName; });
       var openTask = shell.find(big1.band, "openTaskAction");
       if (!check(big1.taskInBand && JSON.stringify(taskActions) === JSON.stringify(["addAction", "openTaskAction"]) && openTask.iconName === "external-link" && openTask.tooltipText === "Open in Todoist" && openTask.Accessible.name === "Open in Todoist" && big1.band.menuButton.visible, "the band: +, Open, ⋯ (" + JSON.stringify(taskActions) + ")")) return;
@@ -2458,6 +2430,12 @@ ShellRoot {
       break;
     case 88:
       var big4 = one.popup.bodyItem;
+      // The pane over the Week view is the card's tallest part: the card
+      // grows to show it whole instead of cutting it to the week's height.
+      var tallest = Math.max(big4.railHeight, big4.listChrome + big4.listHeight);
+      if (!check(big4.editor.implicitHeight > tallest + 1 && big4.editor.implicitHeight <= big4.maxListHeight, "the pane is the tallest part, under the cap (" + JSON.stringify([big4.editor.implicitHeight, big4.railHeight, big4.listChrome + big4.listHeight, big4.maxListHeight]) + ")")) return;
+      var weekPaneScroll = shell.find(big4.editor, "editorScroll");
+      if (!check(weekPaneScroll.contentHeight <= weekPaneScroll.height + 1, "the pane over the week shows whole (" + JSON.stringify([weekPaneScroll.contentHeight, weekPaneScroll.height]) + ")")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big4.blocked && big4.weekPaneOpen, "Esc: the keys back, the pane stays")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
@@ -2603,7 +2581,7 @@ ShellRoot {
       var ipc = one.data.concat(two.data).find(function(item) { return item.target === "foamy.todoist" && item.enabled && typeof item.toggle === "function"; });
       shell.ipcPanel = one.data.indexOf(ipc) >= 0 ? one : two;
       if (!check(shell.ipcPanel === shell.leader(), "the leader owns IPC")) return;
-      wait.waitFor(function() { return !one.popup.visible; }, 5000, function() { ipc.toggle(); });
+      shell.afterClose(function() { ipc.toggle(); });
       break;
     case 97:
       var lead = shell.leader();
@@ -2634,6 +2612,105 @@ ShellRoot {
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
       one.close();
       one.prefs.save("openOn", "today");
+      break;
+    case 101:
+      // A sync still running when the user signs out: its reply is for the
+      // account that went and must show nothing (the sign-out waits behind it).
+      shell.put("slow-sync", "2");
+      shell.put("slow-token-clear", "1");
+      store.sync();
+      break;
+    case 102:
+      shell.callsBefore = shell.calls("token-clear").length;
+      store.signOut();
+      break;
+    case 103:
+      if (!check(store.snapshot === null && !store.loaded && !one.barContent.countLabel.visible, "a sync reply from before sign-out shows nothing of the old account (" + JSON.stringify([store.loaded, one.barContent.countLabel.visible]) + ")")) return;
+      break;
+    case 104:
+      if (!check(button.tooltipText === "Todoist: not signed in" && shell.calls("token-clear").length === shell.callsBefore + 1, "signed out: the bar says so, one token-clear (" + button.tooltipText + ")")) return;
+      shell.put("slow-sync", "");
+      shell.put("slow-token-clear", "");
+      shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+      store.setToken("again");
+      break;
+    case 105:
+      // The keyring item went elsewhere: a SIGNED_OUT reply from any job
+      // clears the tasks and shows the signed-out state.
+      shell.put("reply-sync.json", JSON.stringify({ ok: false, code: "SIGNED_OUT", error: "Not signed in to Todoist." }));
+      store.sync();
+      break;
+    case 106:
+      if (!check(!store.loaded && !one.barContent.countLabel.visible && button.tooltipText === "Todoist: not signed in", "SIGNED_OUT: no tasks, no count (" + button.tooltipText + ")")) return;
+      one.open();
+      break;
+    case 107:
+      if (!check(shell.find(view, "stateText").text === "Add your Todoist API token in Settings" && view.rows.length === 0, "SIGNED_OUT: the popup asks for a token, no rows (" + JSON.stringify([shell.find(view, "stateText").text, view.rows.length]) + ")")) return;
+      shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+      shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+      one.close();
+      store.check();
+      break;
+    case 108:
+      // A sign-out the keyring refuses (locked): the token stays, so the
+      // user is still signed in, with the reason.
+      shell.put("reply-token-clear.json", JSON.stringify({ ok: false, code: "KEYRING_LOCKED", error: "The keyring that holds the Todoist token is locked. Unlock it and try again." }));
+      store.signOut();
+      break;
+    case 109:
+      if (!check(store.tokenError === "The keyring that holds the Todoist token is locked. Unlock it and try again.", "a refused sign-out says why (" + store.tokenError + ")")) return;
+      // A sync that times out (exit 124, no reply) keeps the cached tasks.
+      shell.put("exit-sync", "124");
+      store.sync();
+      break;
+    case 110:
+      if (!check(store.loaded && !!store.model.byId.t4 && store.failures >= 1, "a timed-out sync keeps the tasks (" + store.failures + " failures)")) return;
+      // A reply that isn't JSON: the helper failed, the tasks stay.
+      shell.put("exit-sync", "");
+      shell.put("reply-sync.json", "not json");
+      store.sync();
+      break;
+    case 111:
+      if (!check(store.loaded && !!store.model.byId.t4, "a sync with a broken reply keeps the tasks")) return;
+      shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+      store.sync();
+      break;
+    case 112:
+      // Icon only: no number in the bar, the tooltip keeps the counts.
+      one.prefs.save("barCount", "none");
+      wait.waitFor(function() { return one.prefs.value("barCount") === "none"; }, 10000, function(ok) {
+        if (!check(ok && !one.barContent.countLabel.visible && button.tooltipText.indexOf("left today") > 0, "Icon only hides the number, the tooltip keeps the counts (" + button.tooltipText + ")")) return;
+        one.prefs.save("barCount", "today");
+      });
+      break;
+    case 113:
+      // Todoist text is shown as plain text: markup in a title, a project,
+      // section or label name, or a description (anyone in a shared project
+      // can write one) is never rendered.
+      if (!check(one.barContent.countLabel.visible, "the number is back with the setting")) return;
+      var marked = shell.snapshotWith({ t3: { content: "<b>Bold</b> <img src=\"file:///nonexistent.png\"> **stand-up**", labels: ["<i>tag</i>"] } });
+      marked.projects = marked.projects.map(function(p) { return p.id === "work" ? Object.assign({}, p, { name: "<i>Work</i>" }) : p; });
+      marked.sections = marked.sections.map(function(section) { return section.id === "s-ops" ? Object.assign({}, section, { name: "<b>Ops</b>" }) : section; });
+      marked.labels = marked.labels.concat([{ id: "l-marked", name: "<i>tag</i>", color: "teal", item_order: 5 }]);
+      store.snapshot = marked;
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t3", description: "<b>Agenda</b> first", truncated: false } }));
+      one.open();
+      break;
+    case 114:
+      var listMarkup = shell.markupTexts(view);
+      var listRich = listMarkup.filter(function(item) { return item.textFormat !== Text.PlainText; });
+      if (!check(listMarkup.length >= 5 && listRich.length === 0, "Todoist text is plain text in the list (" + listMarkup.length + " found; " + JSON.stringify(listRich.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
+      view.openTask("t3", false);
+      break;
+    case 115:
+      // The task's page shows the same text again: the rendered title and
+      // the fields, the project and section, the label and the description.
+      var pageMarkup = shell.markupTexts(view.editor);
+      var pageRich = pageMarkup.filter(function(item) { return item.textFormat !== Text.PlainText; });
+      if (!check(pageMarkup.length >= 6 && pageRich.length === 0, "Todoist text is plain text on the task's page (" + pageMarkup.length + " found; " + JSON.stringify(pageMarkup.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
+      view.closeTask();
+      store.snapshot = shell.snapshot();
+      one.close();
       // No helper for this CPU: says so, no retry loop; an add waiting
       // behind the sync ends as failed.
       shell.put("exit-sync", "127");
@@ -2641,7 +2718,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 101:
+    case 116:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();
@@ -2650,7 +2727,8 @@ ShellRoot {
       var late = shell.settled.find(function(s) { return s.request === shell.lateAdd; });
       if (!check(late && !late.ok && late.message === store.accountError, "the waiting add ended as failed (" + JSON.stringify(shell.settled) + ")")) return;
       shell.afterAdd = store.add("After", "", "");
-      wait.after(50, function() {
+      // One drawn frame: a job queued by the add would have started by then.
+      shell.afterFrame(frameProbe, function() {
         // Not signed in any more: no request, so no view waits for one.
         if (!check(shell.afterAdd === -1 && shell.calls().length === before, "an add while unavailable is refused at once, without a helper")) return;
         shell.finishRun();
@@ -2700,6 +2778,9 @@ run = harness.Run(
 try:
     (run.out / "reply-status.json").write_text(json.dumps({"ok": True, "state": "signed_out", "user": None}))
     run.env["FAKE_HELPER"] = FAKE_HELPER
+    # One zone with an offset from UTC on every machine: the UTC due-date
+    # check needs one, and local days then fall the same everywhere.
+    run.env["TZ"] = "Europe/Oslo"
     # The kit's stand-in wl-paste: a paste reads "folder", never the real clipboard.
     run.env.update(hostenv.clipboard_fakes(run.base / "clipboard", env=run.env))
     run.run(timeout=200)

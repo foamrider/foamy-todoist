@@ -817,13 +817,38 @@ mod tests {
 
     #[test]
     fn the_cache_round_trips_and_rejects_what_it_is_not() {
+        let mut many_labels = task("T2", "two");
+        many_labels["labels"] = json!((0..51).map(|n| format!("l{n}")).collect::<Vec<_>>());
         let mut state = State::empty();
         state
-            .merge(&json!({"sync_token": "A", "user": {"id": "1"}, "projects": [{"id": "P1", "name": "Inbox"}], "items": [task("T1", "one")]}), "2026-11-16T08:00:00Z")
+            .merge(
+                &json!({"sync_token": "A",
+                    "user": {"id": "1", "full_name": "Ada", "inbox_project_id": "P1",
+                             "tz_info": {"timezone": "Europe/Oslo"}},
+                    "projects": [{"id": "P1", "name": "Inbox", "inbox_project": true},
+                                 {"id": "P2", "name": "Trip", "shared": true, "parent_id": "P1"}],
+                    "sections": [{"id": "S1", "project_id": "P2", "name": "Soon", "section_order": 1}],
+                    "items": [task("T1", "one"), many_labels],
+                    "labels": [{"id": "L1", "name": "home"}],
+                    "collaborators": [{"id": "1", "full_name": "Ada", "email": "ada@example.com"}],
+                    "collaborator_states": [{"project_id": "P2", "user_id": "1", "state": "active"}]}),
+                "2026-11-16T08:00:00Z",
+            )
             .unwrap();
+        // Set by a cut in an earlier sync; the cache must keep saying so.
+        state.truncated = true;
         let back = State::from_cache(&state.to_cache()).unwrap();
         assert_eq!(back.sync_token, "A");
         assert_eq!(back.snapshot(), state.snapshot());
+        // What only the cache path can lose: Todoist's `inbox_project` is kept
+        // as `inbox`, and the markers of cut lists.
+        assert_eq!(back.projects["P1"]["inbox"], true);
+        assert_eq!(back.tasks["T2"]["labels_truncated"], true);
+        assert!(back.truncated, "the cut marker survives the cache");
+        assert_eq!(
+            back.snapshot()["project_collaborators"],
+            json!({"P2": ["1"]})
+        );
         for bad in [
             &b"{"[..],
             b"[]",
@@ -840,24 +865,61 @@ mod tests {
     }
 
     #[test]
-    fn bounds_cut_and_say_so() {
+    fn every_record_kind_is_bounded_and_says_so() {
+        // The bounds README.md and main.rs state, in the order of `kept` below.
+        let bounds = [
+            ("projects", 2_000),
+            ("sections", 5_000),
+            ("items", 20_000),
+            ("labels", 2_000),
+            ("collaborators", 2_000),
+            ("collaborator_states", 20_000),
+        ];
+        for (slot, (key, bound)) in bounds.into_iter().enumerate() {
+            // One record shape that every normalizer keeps.
+            let records: Vec<Value> = (0..=bound)
+                .map(|i| {
+                    json!({"id": format!("R{i}"), "name": "x", "content": "x", "full_name": "x",
+                           "project_id": "P1", "user_id": format!("U{i}"), "state": "active"})
+                })
+                .collect();
+            let mut state = State::empty();
+            state
+                .merge(&json!({"sync_token": "A", key: records}), "x")
+                .unwrap();
+            let kept = [
+                state.projects.len(),
+                state.sections.len(),
+                state.tasks.len(),
+                state.labels.len(),
+                state.collaborators.len(),
+                state.memberships.len(),
+            ];
+            let mut want = [0; 6];
+            want[slot] = bound;
+            assert_eq!(kept, want, "{key}");
+            assert!(state.snapshot()["truncated"].as_bool().unwrap(), "{key}");
+        }
+        // At the bound nothing is cut; an update of a kept one still lands,
+        // and one more is cut.
         let mut state = State::empty();
-        let projects: Vec<Value> = (0..MAX_PROJECTS + 5)
+        let projects: Vec<Value> = (0..2_000)
             .map(|i| json!({"id": format!("P{i}"), "name": "p"}))
             .collect();
         state
             .merge(&json!({"sync_token": "A", "projects": projects}), "x")
             .unwrap();
-        assert_eq!(state.projects.len(), MAX_PROJECTS);
-        assert!(state.snapshot()["truncated"].as_bool().unwrap());
-        // An update of a kept one still lands.
+        assert!(!state.truncated, "2 000 projects are not a cut");
         state
             .merge(
-                &json!({"sync_token": "B", "projects": [{"id": "P1", "name": "renamed"}]}),
+                &json!({"sync_token": "B", "projects": [{"id": "P1", "name": "renamed"},
+                                                        {"id": "P2000", "name": "new"}]}),
                 "x",
             )
             .unwrap();
         assert_eq!(state.projects["P1"]["name"], "renamed");
+        assert!(!state.projects.contains_key("P2000"));
+        assert!(state.truncated);
     }
 
     #[test]
@@ -917,30 +979,6 @@ mod tests {
     }
 
     #[test]
-    fn labels_are_bounded() {
-        let mut state = State::empty();
-        let labels: Vec<Value> = (0..MAX_LABEL_RECORDS + 3)
-            .map(|i| json!({"id": format!("L{i}"), "name": format!("l{i}")}))
-            .collect();
-        state
-            .merge(&json!({"sync_token": "A", "labels": labels}), "x")
-            .unwrap();
-        assert_eq!(state.labels.len(), MAX_LABEL_RECORDS);
-        assert!(state.snapshot()["truncated"].as_bool().unwrap());
-    }
-
-    #[test]
-    fn a_cache_from_before_labels_keeps_the_user_and_syncs_in_full() {
-        let old = json!({"version": 1, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
-            "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": []});
-        let state = State::from_cache(old.to_string().as_bytes()).unwrap();
-        assert!(state.is_full(), "the next sync is a full one");
-        assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
-        assert!(state.tasks.is_empty() && state.projects.is_empty());
-        assert!(State::from_cache(br#"{"version":6,"sync_token":"A"}"#).is_none());
-    }
-
-    #[test]
     fn collaborators_and_their_projects_are_merged_and_removed() {
         let mut state = State::empty();
         let full = json!({"sync_token": "A", "full_sync": true,
@@ -987,30 +1025,30 @@ mod tests {
     }
 
     #[test]
-    fn collaborators_are_bounded() {
-        let mut state = State::empty();
-        let people: Vec<Value> = (0..MAX_COLLABORATORS + 2)
-            .map(|i| json!({"id": format!("{i}"), "full_name": "x", "email": "x@example.com"}))
-            .collect();
-        state
-            .merge(&json!({"sync_token": "A", "collaborators": people}), "x")
-            .unwrap();
-        assert_eq!(state.collaborators.len(), MAX_COLLABORATORS);
-        assert!(state.snapshot()["truncated"].as_bool().unwrap());
-    }
-
-    #[test]
-    fn a_cache_from_before_collaborators_keeps_the_user_and_syncs_in_full() {
-        for version in [1, 2, 3] {
+    fn an_older_cache_keeps_only_the_user_and_syncs_in_full() {
+        // 1-4: written before labels, collaborators, assignees and deadlines.
+        for version in 1..=4 {
             let old = json!({"version": version, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
-                "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [], "labels": []});
-            let state = State::from_cache(old.to_string().as_bytes()).unwrap();
+                "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
+                "labels": [], "collaborators": [], "memberships": []});
+            let state = State::from_cache(old.to_string().as_bytes())
+                .unwrap_or_else(|| panic!("version {version}: refused"));
             assert!(
                 state.is_full(),
                 "version {version}: the next sync is a full one"
             );
-            assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
-            assert!(state.tasks.is_empty());
+            assert_eq!(
+                state
+                    .user
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("version {version}: the user is lost"))["full_name"],
+                "Ada",
+                "version {version}"
+            );
+            assert!(
+                state.tasks.is_empty() && state.projects.is_empty(),
+                "version {version}"
+            );
         }
     }
 
@@ -1038,18 +1076,6 @@ mod tests {
     }
 
     #[test]
-    fn a_cache_from_before_assignees_syncs_in_full() {
-        // Version 3 tasks have no responsible_uid: a full sync brings it.
-        let old = json!({"version": 3, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
-            "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
-            "labels": [], "collaborators": [], "memberships": []});
-        let state = State::from_cache(old.to_string().as_bytes()).unwrap();
-        assert!(state.is_full(), "the next sync is a full one");
-        assert!(state.tasks.is_empty());
-        assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
-    }
-
-    #[test]
     fn a_task_keeps_its_deadline_date() {
         let mut due = task("T1", "x");
         due["deadline"] = json!({"date": "2026-12-01", "lang": "en"});
@@ -1062,14 +1088,12 @@ mod tests {
             normalize_task(&kept),
             Change::Keep("T1".into(), kept.clone())
         );
-        for none in [json!(null), Value::Null] {
-            let mut open = task("T2", "y");
-            open["deadline"] = none;
-            let Change::Keep(_, kept) = normalize_task(&open) else {
-                panic!("dropped")
-            };
-            assert_eq!(kept["deadline"], Value::Null);
-        }
+        let mut open = task("T2", "y");
+        open["deadline"] = Value::Null;
+        let Change::Keep(_, kept) = normalize_task(&open) else {
+            panic!("dropped")
+        };
+        assert_eq!(kept["deadline"], Value::Null);
         // A deadline that isn't a date drops the task, like a broken due.
         for bad in [
             json!({"date": "2026-02-30"}),
@@ -1090,17 +1114,6 @@ mod tests {
             .unwrap();
         let back = State::from_cache(&state.to_cache()).unwrap();
         assert_eq!(back.tasks["T1"]["deadline"], "2026-12-01");
-    }
-
-    #[test]
-    fn a_cache_from_before_deadlines_syncs_in_full() {
-        let old = json!({"version": 4, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
-            "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
-            "labels": [], "collaborators": [], "memberships": []});
-        let state = State::from_cache(old.to_string().as_bytes()).unwrap();
-        assert!(state.is_full(), "the next sync is a full one");
-        assert!(state.tasks.is_empty());
-        assert_eq!(state.user.as_ref().unwrap()["full_name"], "Ada");
     }
 
     #[test]

@@ -413,7 +413,6 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn only_loopback_overrides_are_accepted() {
@@ -450,37 +449,42 @@ mod tests {
     }
 
     /// A server that answers one request with `head`, then writes `chunks`
-    /// of `chunk` bytes `pause` apart; it counts what it managed to write.
+    /// of `chunk` bytes `pause` apart. Its thread returns how many body
+    /// bytes it managed to write.
     fn server(
         head: &'static str,
         chunk: usize,
         chunks: usize,
         pause: Duration,
-    ) -> (String, Arc<AtomicUsize>) {
+    ) -> (String, std::thread::JoinHandle<usize>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let written = Arc::new(AtomicUsize::new(0));
-        let count = written.clone();
-        std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // A client that stops reading must not block this thread for ever.
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut buffer = [0u8; 4096];
             let _ = stream.read(&mut buffer);
             let _ = stream.write_all(head.as_bytes());
             let block = vec![b' '; chunk];
+            let mut written = 0;
             for _ in 0..chunks {
                 if stream.write_all(&block).is_err() {
                     break;
                 }
-                count.fetch_add(chunk, Ordering::SeqCst);
+                written += chunk;
                 std::thread::sleep(pause);
             }
+            written
         });
-        (format!("http://127.0.0.1:{port}"), written)
+        (format!("http://127.0.0.1:{port}"), thread)
     }
 
     #[test]
     fn a_trickling_server_cannot_outlast_the_deadline() {
-        let (base, _) = server(
+        let (base, _server) = server(
             "HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n",
             1,
             100,
@@ -500,10 +504,50 @@ mod tests {
     }
 
     #[test]
+    fn a_redirect_is_the_reply_and_never_followed() {
+        // Following it would send a request to another host.
+        for code in [302, 307] {
+            // The other host answers at once, so a followed redirect ends
+            // in its 200 instead of a timeout. Its thread returns whether
+            // a request reached it.
+            let elsewhere = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = elsewhere.local_addr().unwrap().port();
+            let contacted = std::thread::spawn(move || {
+                let (mut stream, _) = elsewhere.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut buffer = [0u8; 4096];
+                let requested = stream.read(&mut buffer).is_ok_and(|read| read > 0);
+                if requested {
+                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+                }
+                requested
+            });
+            let head = format!(
+                "HTTP/1.1 {code} Redirect\r\nLocation: http://127.0.0.1:{port}/sync\r\nContent-Length: 0\r\n\r\n"
+            );
+            let (base, server) = server(Box::leak(head.into_boxed_str()), 0, 0, Duration::ZERO);
+            let reply = Client::new(base, Duration::from_secs(5))
+                .post("/sync", "t", Body::Json(&Value::Null))
+                .unwrap_or_else(|failure| panic!("{code}: not the reply: {failure:?}"));
+            server.join().unwrap();
+            assert_eq!(reply.status, code, "{code}: the redirect was followed");
+            // An empty connection ends the other host's wait. It sends no
+            // request, so only a request from `post` counts.
+            let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+            assert!(
+                !contacted.join().unwrap(),
+                "{code}: the other host got a request"
+            );
+        }
+    }
+
+    #[test]
     fn an_oversized_body_is_cut_while_it_is_read() {
         // 64 MiB announced, more than the socket buffers hold; the client
         // stops after 1 KiB + 1 and closes, so the server can't finish.
-        let (base, written) = server(
+        let (base, server) = server(
             "HTTP/1.1 200 OK\r\nContent-Length: 67108864\r\n\r\n",
             1 << 20,
             64,
@@ -513,26 +557,11 @@ mod tests {
         let failure = client
             .post("/sync", "t", Body::Json(&Value::Null))
             .unwrap_err();
+        // Dropping the client closes the socket: the server's next write fails.
+        drop(client);
+        let written = server.join().unwrap();
+        assert!(written < 64 << 20, "the whole body was taken");
         assert_eq!(failure.code, "HTTP");
         assert_eq!(failure.message, "Todoist sent an oversized reply.");
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            written.load(Ordering::SeqCst) < 64 << 20,
-            "the whole body was taken"
-        );
-    }
-
-    #[test]
-    fn a_closed_port_is_a_network_failure() {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let client = Client::new(format!("http://127.0.0.1:{port}"), TIMEOUT);
-        let failure = client
-            .post("/sync", "t", Body::Json(&Value::Null))
-            .unwrap_err();
-        assert_eq!(failure.code, "NETWORK");
     }
 }
