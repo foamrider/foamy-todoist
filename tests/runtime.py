@@ -112,11 +112,26 @@ ShellRoot {
   readonly property string longLabel: "Alabelnamewithnobreakopportunitylongenoughtooverflowthechip"
   TestEvent { id: ev }
   FoamyWait { id: wait }
-  FileView { id: writer; blockWrites: true; printErrors: false }
-  function put(name, text) { writer.path = shell.out + "/" + name; writer.setText(text); }
+  // A fixture file, written and read back. A FileView skips a write of the
+  // text it holds, and it may not have read a new path yet, so it reads the
+  // file first. Quickshell's atomic write also fails now and then on this
+  // host ("Atomic commit failed", about one run in five; the old file
+  // stays). A fixture write is safe to repeat: at most three writes, else
+  // the run fails.
+  FileView { id: writer; blockAllReads: true; blockWrites: true; printErrors: false }
+  function writeFile(path, text) {
+    writer.path = path;
+    for (var attempt = 0; ; attempt++) {
+      writer.reload();
+      if (writer.text() === text) return true;
+      if (attempt === 3) return check(false, "could not write " + path + " (it holds " + JSON.stringify(writer.text()) + ")");
+      if (attempt > 0) console.log("FOAMY NOTE write " + attempt + " of " + path + " did not land");
+      writer.setText(text);
+    }
+  }
+  function put(name, text) { shell.writeFile(shell.out + "/" + name, text); }
   // The Omarchy language picker's file (the kit's translations follow it).
-  FileView { id: languageFile; path: Quickshell.env("OMARCHY_LANGUAGE_FILE"); blockWrites: true; printErrors: false }
-  function pickLanguage(code) { languageFile.setText(code + "\n"); }
+  function pickLanguage(code) { shell.writeFile(Quickshell.env("OMARCHY_LANGUAGE_FILE"), code + "\n"); }
   // The add error at the top of the list: "" when it shows whole
   // (wrapped, not elided, the list's width but its insets); else what is wrong.
   function addErrorLayout(view, text) {
