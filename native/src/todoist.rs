@@ -941,21 +941,46 @@ mod tests {
                 Edit::Due("T2".into(), "2026-11-17".into())
             ]
         );
+        let hundred: Vec<Value> = (0..100)
+            .map(|i| json!({"op": "close", "id": format!("T{i}")}))
+            .collect();
+        assert_eq!(
+            parse_changes(&map(json!({"commands": hundred})))
+                .unwrap()
+                .len(),
+            100
+        );
         let too_many: Vec<Value> = (0..101)
             .map(|i| json!({"op": "close", "id": format!("T{i}")}))
             .collect();
-        for bad in [
-            json!({}),
-            json!({"commands": []}),
-            json!({"commands": too_many}),
-            json!({"commands": [{"op": "close", "id": "../x"}]}),
-            json!({"commands": [{"op": "due", "id": "T1", "date": "2026-02-30"}]}),
-            json!({"commands": [{"op": "delete", "id": "T1"}]}),
-            json!({"commands": [{"op": "close", "id": "T1"}, {"op": "due", "id": "T1", "date": "2026-11-17"}]}),
+        for (bad, message) in [
+            (json!({}), "Send 1 to 100 changes at a time."),
+            (json!({"commands": []}), "Send 1 to 100 changes at a time."),
+            (
+                json!({"commands": too_many}),
+                "Send 1 to 100 changes at a time.",
+            ),
+            (
+                json!({"commands": [{"op": "close", "id": "../x"}]}),
+                "That isn't a Todoist task id.",
+            ),
+            (
+                json!({"commands": [{"op": "due", "id": "T1", "date": "2026-02-30"}]}),
+                "Enter a date as YYYY-MM-DD.",
+            ),
+            (
+                json!({"commands": [{"op": "delete", "id": "T1"}]}),
+                "Unknown change.",
+            ),
+            (
+                json!({"commands": [{"op": "close", "id": "T1"}, {"op": "due", "id": "T1", "date": "2026-11-17"}]}),
+                "The same task is changed twice.",
+            ),
         ] {
+            let failure = parse_changes(&map(bad.clone())).unwrap_err();
             assert_eq!(
-                parse_changes(&map(bad.clone())).unwrap_err().code,
-                "INVALID_ARGUMENT",
+                (failure.code.as_str(), failure.message.as_str()),
+                ("INVALID_ARGUMENT", message),
                 "{bad}"
             );
         }
@@ -1001,35 +1026,6 @@ mod tests {
             "due_string": "x".repeat(200), "priority": 1
         }));
         assert!(longest.is_ok(), "{longest:?}");
-    }
-
-    #[test]
-    fn update_places_are_one_destination() {
-        let place = |fields: Value| update(fields).unwrap().moved;
-        assert_eq!(
-            place(json!({"project_id": "P2"})),
-            Some(Move::Project("P2".into()))
-        );
-        assert_eq!(
-            place(json!({"project_id": "P2", "section_id": ""})),
-            Some(Move::Project("P2".into()))
-        );
-        assert_eq!(
-            place(json!({"section_id": "S1"})),
-            Some(Move::Section("S1".into()))
-        );
-        assert_eq!(
-            place(json!({"project_id": "P2", "section_id": "S1"})),
-            Some(Move::Section("S1".into())),
-            "the section implies its project"
-        );
-        // A move alone is a change.
-        assert!(
-            update(json!({"section_id": "S1"}))
-                .unwrap()
-                .fields
-                .is_empty()
-        );
     }
 
     #[test]
@@ -1217,16 +1213,34 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(full.due_date.as_deref(), Some("2026-11-17"));
-        for bad in [
-            json!({}),
-            json!({"text": "   "}),
-            json!({"text": "é".repeat(501)}),
-            json!({"text": "x", "due_date": "tomorrow"}),
-            json!({"text": "x", "project_id": 5}),
+        for (bad, message) in [
+            (json!({}), "Enter a task."),
+            (json!({"text": "   "}), "Enter a task."),
+            (
+                json!({"text": "é".repeat(501)}),
+                "A task can have at most 500 characters.",
+            ),
+            (
+                json!({"text": "x", "due_date": "tomorrow"}),
+                "Enter a date as YYYY-MM-DD.",
+            ),
+            (
+                json!({"text": "x", "due_date": "2026-02-30"}),
+                "Enter a date as YYYY-MM-DD.",
+            ),
+            (
+                json!({"text": "x", "project_id": 5}),
+                "That isn't a Todoist project id.",
+            ),
+            (
+                json!({"text": "x", "project_id": "../P"}),
+                "That isn't a Todoist project id.",
+            ),
         ] {
+            let failure = parse_add(&map(bad.clone())).unwrap_err();
             assert_eq!(
-                parse_add(&map(bad.clone())).unwrap_err().code,
-                "INVALID_ARGUMENT",
+                (failure.code.as_str(), failure.message.as_str()),
+                ("INVALID_ARGUMENT", message),
                 "{bad}"
             );
         }

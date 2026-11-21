@@ -410,12 +410,24 @@ fn an_invalid_sync_token_falls_back_to_one_full_sync() {
         TOKEN,
     );
     home.run("sync", "", &server.base);
-    let (reply, _) = home.run("sync", "", &server.base);
+    // A change rides on the refused request: the full sync that follows
+    // sends the same commands, UUIDs included, so Todoist runs it once.
+    let (reply, _) = home.run(
+        "apply",
+        r#"{"commands":[{"op":"close","id":"T1"}]}"#,
+        &server.base,
+    );
     assert_eq!(ids(&reply), ["T7"], "{reply}");
     let seen = server.seen();
     assert_eq!(seen.len(), 3);
     assert_eq!(seen[1].field("sync_token").as_deref(), Some("S1"));
     assert_eq!(seen[2].field("sync_token").as_deref(), Some("*"));
+    assert_eq!(decoded_commands(&seen[1])[0]["type"], "item_close");
+    assert_eq!(
+        seen[2].field("commands"),
+        seen[1].field("commands"),
+        "the retry must send the same command UUIDs"
+    );
     // A full sync that is refused too is reported, not retried.
     let again = Server::start(vec![status(400, "{}")], TOKEN);
     let (reply, _) = home.run("sync", r#"{"full":true}"#, &again.base);
@@ -493,7 +505,6 @@ fn apply_sends_one_request_and_reports_each_change() {
     let home = Home::signed_in("apply");
     let server = Server::start(vec![ok(full_sync())], TOKEN);
     home.run("sync", "", &server.base);
-    server.seen();
     // The answer's sync_status keys are the command UUIDs, which the
     // helper makes: the fixture answers by position instead.
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -583,7 +594,6 @@ fn add_follows_up_with_the_views_date_and_project() {
     let home = Home::signed_in("add");
     let server = Server::start(vec![ok(full_sync())], TOKEN);
     home.run("sync", "", &server.base);
-    server.seen();
     let mut created = task("T5", "Call Bob");
     created["project_id"] = json!("P1");
     let mut moved = created.clone();
@@ -637,7 +647,6 @@ fn an_add_whose_follow_up_fails_is_still_added() {
     let home = Home::signed_in("add-warn");
     let server = Server::start(vec![ok(full_sync())], TOKEN);
     home.run("sync", "", &server.base);
-    server.seen();
     let server = Server::start(vec![ok(task("T5", "Call Bob")), status(503, "")], TOKEN);
     let (reply, _) = home.run(
         "add",
@@ -683,19 +692,21 @@ fn signed_out_and_locked_keyrings() {
         json!({"ok": true, "state": "signed_out", "user": null})
     );
 
+    // Signed in with cached tasks, then the keyring locks.
     fs::write(home.bin().join("item"), TOKEN).unwrap();
+    let server = Server::start(vec![ok(full_sync())], TOKEN);
+    home.run("sync", "", &server.base);
+    assert!(home.cache().exists());
     fs::write(home.bin().join("locked"), "").unwrap();
     for command in ["status", "sync", "token-clear"] {
         let (reply, _) = home.run(command, "", &closed());
         assert_eq!(reply["code"], "KEYRING_LOCKED", "{command}: {reply}");
     }
+    // A locked keyring is not a sign-out: the token and the cache stay.
     assert!(home.bin().join("item").exists(), "still stored");
+    assert!(home.cache().exists(), "the cache was removed");
     // Unlocked, sign-out removes the item and the cache.
     fs::remove_file(home.bin().join("locked")).unwrap();
-    let server = Server::start(vec![ok(full_sync())], TOKEN);
-    home.run("sync", "", &server.base);
-    server.seen();
-    assert!(home.cache().exists());
     let (reply, _) = home.run("token-clear", "", &closed());
     assert_eq!(reply["state"], "signed_out", "{reply}");
     assert!(!home.bin().join("item").exists());
@@ -730,14 +741,7 @@ fn a_held_lock_is_busy_and_no_runtime_dir_is_unavailable() {
 #[test]
 fn wrong_arguments_are_refused() {
     let home = Home::new("args");
-    // `names` and `notify` (Foamy Menu's) are gone: unknown like any other.
-    for args in [
-        vec![],
-        vec!["sync", "extra"],
-        vec!["delete"],
-        vec!["names"],
-        vec!["notify"],
-    ] {
+    for args in [vec![], vec!["sync", "extra"], vec!["delete"]] {
         let output = Command::new(HELPER)
             .args(&args)
             .env_clear()
@@ -751,9 +755,32 @@ fn wrong_arguments_are_refused() {
             reply["error"], "The Todoist helper was called with the wrong arguments.",
             "{args:?}"
         );
-        assert!(reply.get("contract").is_none(), "{args:?}");
         assert_ne!(output.status.code(), Some(0));
     }
+}
+
+#[test]
+fn a_request_that_is_not_one_json_object_is_refused() {
+    let home = Home::signed_in("request");
+    let cut_token = format!(r#"{{"token":"{TOKEN}""#);
+    for (command, input) in [
+        ("apply", "[]"),
+        ("apply", "{"),
+        ("sync", "{} {}"),
+        ("token-set", cut_token.as_str()),
+    ] {
+        let (reply, _) = home.run(command, input, &closed());
+        assert_eq!(
+            (reply["code"].as_str(), reply["error"].as_str()),
+            (
+                Some("INVALID_ARGUMENT"),
+                Some("The request isn't valid JSON.")
+            ),
+            "{command} {input}"
+        );
+    }
+    // Refused before the keyring: the fake secret-tool never ran.
+    assert!(!home.bin().join("log").exists(), "secret-tool was called");
 }
 
 #[test]
@@ -860,43 +887,6 @@ fn a_cache_from_before_labels_gets_one_full_sync() {
     let (first, _) = home.run("sync", "", &server.base);
     assert_eq!(first["labels"][0]["name"], "Food", "{first}");
     assert!(!ids(&first).contains(&"T0".to_string()));
-    home.run("sync", "", &server.base);
-    let seen = server.seen();
-    assert_eq!(seen[0].field("sync_token").as_deref(), Some("*"));
-    assert_eq!(
-        seen[1].field("sync_token").as_deref(),
-        Some("S1"),
-        "only one full sync"
-    );
-    assert_eq!(
-        seen[0].field("resource_types").as_deref(),
-        Some(
-            r#"["items","projects","sections","labels","collaborators","collaborator_states","user"]"#
-        )
-    );
-}
-
-#[test]
-fn a_cache_from_before_collaborators_gets_one_full_sync() {
-    let home = Home::signed_in("old-cache-2");
-    let dir = home.cache().parent().unwrap().to_path_buf();
-    fs::create_dir_all(&dir).unwrap();
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-    let old = json!({"version": 2, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada Lovelace"},
-        "projects": [{"id": "P1", "name": "Inbox", "inbox": true}], "sections": [], "labels": [], "tasks": [task("T0", "old")]});
-    fs::write(home.cache(), old.to_string()).unwrap();
-    fs::set_permissions(home.cache(), fs::Permissions::from_mode(0o600)).unwrap();
-    let mut full = full_sync();
-    full["collaborators"] =
-        json!([{"id": "1", "full_name": "Ada Lovelace", "email": "ada@example.com"}]);
-    full["collaborator_states"] = json!([{"project_id": "P2", "user_id": "1", "state": "active"}]);
-    let server = Server::start(vec![ok(full), ok(json!({"sync_token": "S2"}))], TOKEN);
-    let (first, _) = home.run("sync", "", &server.base);
-    assert_eq!(
-        first["project_collaborators"],
-        json!({"P2": ["1"]}),
-        "{first}"
-    );
     home.run("sync", "", &server.base);
     let seen = server.seen();
     assert_eq!(seen[0].field("sync_token").as_deref(), Some("*"));

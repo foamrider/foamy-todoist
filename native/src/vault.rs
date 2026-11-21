@@ -268,6 +268,15 @@ mod tests {
         let failure = tool.get().unwrap_err();
         assert_eq!(failure.code, "KEYRING_UNAVAILABLE");
         assert!(failure.message.contains("signal"), "{}", failure.message);
+        // Not installed: the keyring can't be used, which is not "signed out".
+        let failure = SecretTool::at(dir.join("absent")).get().unwrap_err();
+        assert_eq!(
+            (failure.code.as_str(), failure.message.as_str()),
+            (
+                "KEYRING_UNAVAILABLE",
+                "No keyring is available to store the Todoist token (%1).\u{1f}secret-tool isn't installed"
+            )
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
