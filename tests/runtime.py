@@ -934,7 +934,7 @@ ShellRoot {
     case 37: return [function() { return shell.opened().length === 3 && !store.launchRunning; }, 15000, "Open in Todoist with the command, the link appended"];
     case 38: return [function() { return store.launchError !== "" && !store.launchRunning; }, 15000, "a launch that failed"];
     case 39: return [function() { return store.launchError === "" && shell.opened().length === 5 && !store.launchRunning; }, 15000, "the next launch worked"];
-    case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide; }, 10000, "the standard popup again"];
+    case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 10000, "the standard popup again, the completion sent"];
     case 41: return [function() { return view.fieldFocused; }, 10000, "the empty field, to click away from"];
     case 42: return [function() { return view.fieldFocused; }, 10000, "the empty field again"];
     case 43: return [function() { return view.fieldFocused; }, 10000, "the field for search and drafts"];
@@ -980,7 +980,7 @@ ShellRoot {
     case 85: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "the pane's text saved as the selection moved"];
     case 86: return [function() { return one.popup.bodyItem.weekShown && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && one.popup.contentWidth === one.cardWidth; }, 20000, "the pane's text saved as the view changed, the card's width settled"];
     case 87: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 15000, "Ctrl+→ sent"];
-    case 88: return [function() { return one.popup.bodyItem.editor.contentField.inputActiveFocus; }, 10000, "the caret in the week's pane"];
+    case 88: return [function() { return one.popup.bodyItem.editor.contentField.inputActiveFocus && store.description.id === "t2" && store.description.state === "ready" && Math.abs(one.popup.drawnHeight - one.popup.contentHeight) < 1; }, 10000, "the caret in the week's pane, its description read, the card's height settled"];
     case 89: return [function() { return !one.opened && !one.popup.visible; }, 10000, "the Wide popup closed"];
     case 90: return [function() { var v = one.popup.bodyItem; return one.opened && v.active && Kit.FoamyI18n.language === "no" && v.paneTask === "t1" && store.description.id === "t1" && store.description.state === "ready"; }, 15000, "Wide again, in Norwegian"];
     case 91: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && Kit.FoamyI18n.language === "en"; }, 15000, "the pane's text saved as the popup closed"];
@@ -1030,6 +1030,12 @@ ShellRoot {
       if (!check(Kit.FoamyShared.memberCount("todoist") === 2, "two monitor instances share the store")) return;
       if (!check(!one.barContent.countLabel.visible && button.tooltipText === "Todoist: not signed in", "no count while signed out (" + button.tooltipText + ")")) return;
       if (!check(!store.polling, "nothing polls while signed out")) return;
+      // Todoist sends a fixed-zone due date in UTC with six fraction
+      // digits: the panel's own JavaScript engine (not node's) must read it,
+      // in local time.
+      var utc = Model.dueOf({ date: "2026-11-18T23:30:00.000000Z" });
+      var utcAt = new Date(Date.UTC(2026, 10, 18, 23, 30));
+      if (!check(utc !== null && utc.day === Model.dayKey(utcAt) && utc.minutes === utcAt.getHours() * 60 + utcAt.getMinutes(), "Qt's engine reads Todoist's UTC due dates (" + JSON.stringify(utc) + ")")) return;
       one.open();
       break;
     case 1:
@@ -1078,6 +1084,11 @@ ShellRoot {
       if (!check(emptyTabs[0].count === -1 && emptyTabs[1].count === -1, "no 0 in the tabs either (" + emptyTabs[0].count + ", " + emptyTabs[1].count + ")")) return;
       store.snapshot = full;
       if (!check(one.barContent.countLabel.visible && one.barContent.countLabel.text === "6", "the count is back")) return;
+      // A vertical bar has no room for the number: the mark alone.
+      bar.position = "left";
+      if (!check(!one.barContent.countLabel.visible, "no number on a vertical bar")) return;
+      bar.position = "top";
+      if (!check(one.barContent.countLabel.visible, "the number again on a horizontal bar")) return;
       var tabs = shell.find(view, "viewSwitch");
       if (!check(tabs.model[0].count === 4 && tabs.model[1].count === 6 && tabs.model[1].countUrgent === true, "the tabs' counts")) return;
       // ↓ from nothing: the first row; ↑: the tabs; ←, Enter: Inbox.
@@ -1541,10 +1552,23 @@ ShellRoot {
       if (!check(view.cursor.index === view.firstRowStop, "→ from the rail goes to the rows (wide)")) return;
       one.prefs.save("openCommand", "");
       one.prefs.save("panelWidth", "standard");
+      // A task completed, then the popup closed inside the undo window:
+      // the completion goes at once, not when the window would have ended.
+      view.goTo(view.firstRowStop);
+      shell.ringTask = view.cursorRow().id;
+      var closeResults = {};
+      closeResults[shell.ringTask] = "ok";
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(), { results: closeResults })));
+      shell.callsBefore = shell.calls("apply").length;
+      view.activateRequested();
+      if (!check(store.struck[shell.ringTask] === true && store.undoWindow.running, "Space struck " + shell.ringTask + ", its undo window runs")) return;
       one.close();
+      if (!check(!store.undoWindow.running && store.sending[shell.ringTask] === true && Object.keys(store.struck).length === 0, "closing sent the completion at once (" + JSON.stringify([store.undoWindow.running, store.sending, store.struck]) + ")")) return;
       shell.afterClose(function() { one.open(); });
       break;
     case 40:
+      var closeSent = JSON.parse(shell.calls("apply")[shell.callsBefore].slice("apply ".length));
+      if (!check(JSON.stringify(closeSent) === JSON.stringify({ commands: [{ op: "close", id: shell.ringTask }] }), "the close sent on closing (" + JSON.stringify(closeSent) + ")")) return;
       // Small: ← and → on a row do nothing.
       view.goTo(view.firstRowStop);
       view.moveRequested(1, 0);
@@ -2172,7 +2196,11 @@ ShellRoot {
       shell.overviewChecks(big, function() {
         var area0 = shell.find(big, "listArea");
         shell.listBox = [area0.width, area0.mapToItem(big, 0, 0).x];
+        shell.callsBefore = shell.calls("task").length;
         ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+        // The cursor may move on at once: the pane reads the description
+        // only once the selection rests, so nothing is queued yet.
+        if (!check(![store.current].concat(store.queue).some(function(job) { return !!job && job.command === "task"; }), "the pane waits for the selection to rest before it reads the description")) return;
         if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
         // The card stays 880: the list keeps its width and place, the
         // task's details in the overview's place beside it.
@@ -2181,6 +2209,8 @@ ShellRoot {
       break;
     case 83:
       var big1 = one.popup.bodyItem;
+      var reads = shell.calls("task");
+      if (!check(reads.length === shell.callsBefore + 1 && JSON.parse(reads[reads.length - 1].slice("task ".length)).id === "t1", "one description read where the cursor rested (" + JSON.stringify(reads.slice(shell.callsBefore)) + ")")) return;
       var area1 = shell.find(big1, "listArea");
       if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "a task in the pane: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
       // Open in Todoist is in the band, in Search's place, and Search leads the ⋯ menu.
@@ -2359,6 +2389,12 @@ ShellRoot {
       break;
     case 88:
       var big4 = one.popup.bodyItem;
+      // The pane over the Week view is the card's tallest part: the card
+      // grows to show it whole instead of cutting it to the week's height.
+      var tallest = Math.max(big4.railHeight, big4.listChrome + big4.listHeight);
+      if (!check(big4.editor.implicitHeight > tallest + 1 && big4.editor.implicitHeight <= big4.maxListHeight, "the pane is the tallest part, under the cap (" + JSON.stringify([big4.editor.implicitHeight, big4.railHeight, big4.listChrome + big4.listHeight, big4.maxListHeight]) + ")")) return;
+      var weekPaneScroll = shell.find(big4.editor, "editorScroll");
+      if (!check(weekPaneScroll.contentHeight <= weekPaneScroll.height + 1, "the pane over the week shows whole (" + JSON.stringify([weekPaneScroll.contentHeight, weekPaneScroll.height]) + ")")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big4.blocked && big4.weekPaneOpen, "Esc: the keys back, the pane stays")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
