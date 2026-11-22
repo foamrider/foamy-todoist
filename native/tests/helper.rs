@@ -756,7 +756,7 @@ fn a_stored_value_that_is_not_a_token_is_refused_by_every_command() {
 }
 
 #[test]
-fn a_held_lock_is_busy_and_no_runtime_dir_is_unavailable() {
+fn a_held_lock_is_busy() {
     let home = Home::signed_in("busy");
     let lock_dir = home.0.join("run/foamy-todoist");
     fs::create_dir_all(&lock_dir).unwrap();
@@ -767,17 +767,88 @@ fn a_held_lock_is_busy_and_no_runtime_dir_is_unavailable() {
     let (reply, _) = home.run("status", "", &closed());
     assert_eq!(reply["code"], "BUSY", "{reply}");
     assert!(started.elapsed() >= std::time::Duration::from_secs(14));
-    drop(file);
+}
+
+/// `status` in a session without `XDG_RUNTIME_DIR`; `homes` sets HOME and
+/// XDG_CACHE_HOME (else neither is set).
+fn status_without_runtime_dir(home: &Home, homes: bool) -> Value {
     let mut helper = Command::new(HELPER);
     helper
         .arg("status")
         .env_clear()
         .env("PATH", format!("{}:/usr/bin:/bin", home.bin().display()))
-        .env("HOME", home.0.join("home"))
-        .env("XDG_CACHE_HOME", home.0.join("cache"))
         .stdin(Stdio::null());
-    let reply: Value = serde_json::from_slice(&helper.output().unwrap().stdout).unwrap();
-    assert_eq!(reply["code"], "LOCK_UNAVAILABLE", "{reply}");
+    if homes {
+        helper
+            .env("HOME", home.0.join("home"))
+            .env("XDG_CACHE_HOME", home.0.join("cache"));
+    }
+    serde_json::from_slice(&helper.output().unwrap().stdout).unwrap()
+}
+
+#[test]
+fn without_a_runtime_dir_the_lock_is_in_the_cache_dir() {
+    let home = Home::signed_in("no-runtime");
+    // Held there, it makes the helper wait: that is the lock it takes.
+    let lock_dir = home.cache().parent().unwrap().to_path_buf();
+    fs::create_dir_all(&lock_dir).unwrap();
+    set_mode(&lock_dir, 0o700);
+    let file = fs::File::create(lock_dir.join("state.lock")).unwrap();
+    file.lock().unwrap();
+    let started = std::time::Instant::now();
+    let reply = status_without_runtime_dir(&home, true);
+    assert_eq!(reply["code"], "BUSY", "{reply}");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(14));
+    drop(file);
+    let reply = status_without_runtime_dir(&home, true);
+    assert_eq!(reply["state"], "signed_in", "{reply}");
+    // No home either: nowhere to lock, and the reply says why.
+    let reply = status_without_runtime_dir(&home, false);
+    assert_eq!(
+        (reply["code"].as_str(), reply["error"].as_str()),
+        (
+            Some("LOCK_UNAVAILABLE"),
+            Some("Can't use the Todoist lock file (%1).\u{1f}no home directory")
+        ),
+        "{reply}"
+    );
+}
+
+#[test]
+fn a_refused_runtime_dir_says_why() {
+    let home = Home::signed_in("refused-run");
+    let dir = home.0.join("run/foamy-todoist");
+    let elsewhere = home.0.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    set_mode(&elsewhere, 0o700);
+    // Either could be another user's doing: neither holds the lock.
+    let open = || {
+        fs::create_dir(&dir).unwrap();
+        set_mode(&dir, 0o755);
+    };
+    let link = || std::os::unix::fs::symlink(&elsewhere, &dir).unwrap();
+    let cases: [(&str, &dyn Fn(), &str); 2] = [
+        ("open to others", &open, "is accessible to other users"),
+        ("a symlink", &link, "is a symlink or not a directory"),
+    ];
+    for (case, make, reason) in cases {
+        make();
+        let (reply, _) = home.run("status", "", &closed());
+        let error = reply["error"].as_str().unwrap_or("");
+        assert_eq!(reply["code"], "LOCK_UNAVAILABLE", "{case}: {reply}");
+        assert!(
+            error.starts_with("Can't use the Todoist lock file (%1).\u{1f}")
+                && error.contains(reason),
+            "{case}: the reason is missing: {reply}"
+        );
+        // Nothing is read without the lock.
+        assert!(!home.bin().join("log").exists(), "{case}: secret-tool ran");
+        if dir.is_symlink() {
+            fs::remove_file(&dir).unwrap();
+        } else {
+            fs::remove_dir(&dir).unwrap();
+        }
+    }
 }
 
 #[test]
