@@ -4,7 +4,9 @@ The helper is a stand-in (TodoStore.helperCommand): a shell script that logs
 each call with its standard input to $FOAMY_OUT/calls.log and answers with
 $FOAMY_OUT/reply-<command>.json (after $FOAMY_OUT/slow-<command> seconds;
 with $FOAMY_OUT/exit-<command> as its exit status instead, when that file
-is not empty). Nothing reaches Todoist or a keyring.
+is not empty). While $FOAMY_OUT/hold-<command> is not empty it holds its
+reply (the scene's shell.hold and shell.release) and lists the hold in
+$FOAMY_OUT/held.log. Nothing reaches Todoist or a keyring.
 
   python3 tests/runtime.py
 
@@ -38,6 +40,19 @@ cmd=$1
 out=$FOAMY_OUT
 input=$(cat)
 printf '%s %s\n' "$cmd" "$input" >>"$out/calls.log"
+# A held reply waits for the scene to release it, at most 25 s (the store's
+# own deadline is 30 s), so a run that never releases still ends.
+if [ -s "$out/hold-$cmd" ]; then
+  printf '%s\n' "$cmd" >>"$out/held.log"
+  limit=$(($(date +%s) + 25))
+  while [ -s "$out/hold-$cmd" ]; do
+    if [ "$(date +%s)" -ge "$limit" ]; then
+      printf '%s\n' "$cmd" >>"$out/hold-expired.log"
+      exit 1
+    fi
+    sleep 0.05
+  done
+fi
 if [ -s "$out/slow-$cmd" ]; then sleep "$(cat "$out/slow-$cmd")"; fi
 if [ -s "$out/exit-$cmd" ]; then exit "$(cat "$out/exit-$cmd")"; fi
 cat "$out/reply-$cmd.json"
@@ -156,6 +171,24 @@ ShellRoot {
     var all = text ? text.split("\n").filter(function(line) { return line !== ""; }) : [];
     return command ? all.filter(function(line) { return line.split(" ")[0] === command; }) : all;
   }
+  // Held replies of the stand-in helper: hold(command) makes its next
+  // calls wait until release(command); held(command) is true once one of
+  // them waits (held.log lists each hold as it starts).
+  property var holdsAt: ({})
+  FileView { id: holdLog; path: shell.out + "/held.log"; blockAllReads: true; printErrors: false }
+  function holds(command) {
+    holdLog.reload();
+    var text = holdLog.text();
+    return text ? text.split("\n").filter(function(line) { return line === command; }).length : 0;
+  }
+  function hold(command) {
+    var at = Object.assign({}, shell.holdsAt);
+    at[command] = shell.holds(command);
+    shell.holdsAt = at;
+    shell.put("hold-" + command, "1");
+  }
+  function held(command) { return shell.holds(command) > shell.holdsAt[command]; }
+  function release(command) { shell.put("hold-" + command, ""); }
   // The snapshot with some tasks' fields changed ({id: {field: value}}).
   // The visible items under `item` whose text has Todoist's markup in it.
   function markupTexts(item) {
@@ -934,7 +967,7 @@ ShellRoot {
     case 18: return [function() { return store.error !== "" && !store.busy; }, 15000, "the failed sync"];
     case 19: return [function() { return one.wide && view.wide && one.popup.contentWidth === one.cardWidth; }, 10000, "the wide setting, the card's width settled"];
     case 20: return [function() { return store.model.truncated && !store.busy; }, 15000, "a truncated snapshot"];
-    case 21: return [function() { return !!store.unconfirmed && store.unconfirmed.t2 === true && store.syncing; }, 15000, "a failed completion is unconfirmed while the sync runs"];
+    case 21: return [function() { return !!store.unconfirmed && store.unconfirmed.t2 === true && store.syncing && shell.held("sync"); }, 15000, "a failed completion is unconfirmed while the sync is held"];
     case 22: return [function() { return !store.busy && !store.unconfirmed.t2; }, 15000, "the sync after the failed completion"];
     case 23: return [function() { return view && !view.addBusy && store.retryUntil > Date.now(); }, 15000, "the rate-limited add"];
     case 24: return [function() { return !store.busy && !view.addBusy && Object.keys(store.sending).length === 0; }, 5000, "the jobs refused while rate limited settled"];
@@ -1012,16 +1045,16 @@ ShellRoot {
     case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 101: return [function() { return !store.busy && store.signedIn && store.loaded; }, 15000, "signed in and idle, before a slow sync"];
-    case 102: return [function() { return store.current !== null && store.current.command === "sync"; }, 15000, "the slow sync runs"];
-    case 103: return [function() { return store.current !== null && store.current.command === "token-clear"; }, 15000, "the old sync's reply came, the sign-out runs"];
+    case 101: return [function() { return !store.busy && store.signedIn && store.loaded; }, 15000, "signed in and idle, before a held sync"];
+    case 102: return [function() { return store.current !== null && store.current.command === "sync" && shell.held("sync"); }, 15000, "the sync is held"];
+    case 103: return [function() { return store.current !== null && store.current.command === "token-clear" && shell.held("token-clear"); }, 15000, "the old sync's reply came, the sign-out is held"];
     case 104: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "signed out"];
     case 105: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the sign-out"];
     case 106: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "a SIGNED_OUT reply signed out"];
     case 107: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup while signed out elsewhere"];
     case 108: return [function() { return store.account === "error" && !store.busy; }, 15000, "a status that refused the stored value"];
     case 109: return [function() { return store.account === "signed_out" && !store.busy && !store.tokenBusy; }, 15000, "signed out from the account error"];
-    case 110: return [function() { return store.signedIn && store.current !== null && store.current.command === "sync"; }, 15000, "a token stored with a warning, its sync runs"];
+    case 110: return [function() { return store.signedIn && store.current !== null && store.current.command === "sync" && shell.held("sync"); }, 15000, "a token stored with a warning, its sync held"];
     case 111: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the SIGNED_OUT reply"];
     case 112: return [function() { return !store.tokenBusy && store.tokenError !== "" && store.signedIn && store.loaded && !store.busy; }, 15000, "a sign-out the keyring refused"];
     case 113: return [function() { return store.error === "Todoist didn't answer in time." && !store.busy; }, 15000, "a sync that timed out"];
@@ -1348,7 +1381,7 @@ ShellRoot {
       view.leaveSearch();
       // A completion whose apply call fails as a whole: unknown, so unconfirmed until a snapshot.
       shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
-      shell.put("slow-sync", "2");
+      shell.hold("sync");
       shell.put("reply-apply.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
       shell.callsBefore = shell.calls("sync").length;
       view.setView("today");
@@ -1361,10 +1394,10 @@ ShellRoot {
       store.complete("t2");
       store.moveToTomorrow("t2");
       if (!check(!store.struck.t2 && store.queue.length === 0, "an unconfirmed task can't be completed or moved again")) return;
+      shell.release("sync");
       break;
     case 22:
       if (!check(shell.calls("sync").length === shell.callsBefore + 1, "a sync followed the failed completion")) return;
-      shell.put("slow-sync", "");
       // Rate limited: an add records Todoist's retry time.
       shell.put("reply-add.json", JSON.stringify({ ok: false, code: "RATE_LIMITED", error: "Todoist is limiting requests. Try again in %1 seconds.\u001f60", retry_after: 60 }));
       view.field.text = "Rate me";
@@ -2618,22 +2651,23 @@ ShellRoot {
       break;
     case 101:
       // A sync still running when the user signs out: its reply is for the
-      // account that went and must show nothing (the sign-out waits behind it).
-      shell.put("slow-sync", "2");
-      shell.put("slow-token-clear", "1");
+      // account that went and must show nothing (the sign-out waits behind it,
+      // held until the step has looked).
+      shell.hold("sync");
+      shell.hold("token-clear");
       store.sync();
       break;
     case 102:
       shell.callsBefore = shell.calls("token-clear").length;
       store.signOut();
+      shell.release("sync");
       break;
     case 103:
       if (!check(store.snapshot === null && !store.loaded && !one.barContent.countLabel.visible, "a sync reply from before sign-out shows nothing of the old account (" + JSON.stringify([store.loaded, one.barContent.countLabel.visible]) + ")")) return;
+      shell.release("token-clear");
       break;
     case 104:
       if (!check(button.tooltipText === "Todoist: not signed in" && shell.calls("token-clear").length === shell.callsBefore + 1, "signed out: the bar says so, one token-clear (" + button.tooltipText + ")")) return;
-      shell.put("slow-sync", "");
-      shell.put("slow-token-clear", "");
       shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
       store.setToken("again");
       break;
@@ -2669,16 +2703,16 @@ ShellRoot {
     case 109:
       if (!check(shell.calls("token-clear").length === shell.callsBefore + 1 && !shell.find(view.settingsPage, "errorSignOutButton").visible, "Sign out ran one token-clear and is gone once signed out")) return;
       // A token stored whose new cache couldn't be written: the warning
-      // shows until a sync answers.
+      // shows until a sync answers (held until the step has seen it).
       shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user, warning: "Can't save the Todoist cache (%1).\u001fPermission denied (os error 13)" }));
       shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
-      shell.put("slow-sync", "2");
+      shell.hold("sync");
       store.setToken("again");
       break;
     case 110:
       if (!check(store.error === "Can't save the Todoist cache (Permission denied (os error 13)).", "token-set's warning shows (" + store.error + ")")) return;
       view.settingsClosed();
-      shell.put("slow-sync", "");
+      shell.release("sync");
       shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
       one.close();
       store.check();
@@ -2816,6 +2850,11 @@ try:
     # The kit's stand-in wl-paste: a paste reads "folder", never the real clipboard.
     run.env.update(hostenv.clipboard_fakes(run.base / "clipboard", env=run.env))
     run.run(timeout=200)
+    expired = run.out / "hold-expired.log"
+    if expired.exists():
+        print("FAIL: the scene never released a held reply:", *expired.read_text().split(), sep="\n  ")
+        print(run.log)
+        sys.exit(1)
     refused = run.host_commands()
     if refused:
         print("FAIL: the plugin ran host commands:", *refused, sep="\n  ")
