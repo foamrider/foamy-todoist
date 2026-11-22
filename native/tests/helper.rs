@@ -781,6 +781,43 @@ fn a_held_lock_is_busy_and_no_runtime_dir_is_unavailable() {
 }
 
 #[test]
+fn a_refused_runtime_dir_says_why() {
+    let home = Home::signed_in("refused-run");
+    let dir = home.0.join("run/foamy-todoist");
+    let elsewhere = home.0.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    set_mode(&elsewhere, 0o700);
+    // Either could be another user's doing: neither holds the lock.
+    let open = || {
+        fs::create_dir(&dir).unwrap();
+        set_mode(&dir, 0o755);
+    };
+    let link = || std::os::unix::fs::symlink(&elsewhere, &dir).unwrap();
+    let cases: [(&str, &dyn Fn(), &str); 2] = [
+        ("open to others", &open, "is accessible to other users"),
+        ("a symlink", &link, "is a symlink or not a directory"),
+    ];
+    for (case, make, reason) in cases {
+        make();
+        let (reply, _) = home.run("status", "", &closed());
+        let error = reply["error"].as_str().unwrap_or("");
+        assert_eq!(reply["code"], "LOCK_UNAVAILABLE", "{case}: {reply}");
+        assert!(
+            error.starts_with("Can't use the Todoist lock file (%1).\u{1f}")
+                && error.contains(reason),
+            "{case}: the reason is missing: {reply}"
+        );
+        // Nothing is read without the lock.
+        assert!(!home.bin().join("log").exists(), "{case}: secret-tool ran");
+        if dir.is_symlink() {
+            fs::remove_file(&dir).unwrap();
+        } else {
+            fs::remove_dir(&dir).unwrap();
+        }
+    }
+}
+
+#[test]
 fn wrong_arguments_are_refused() {
     let home = Home::new("args");
     for args in [vec![], vec!["sync", "extra"], vec!["delete"]] {

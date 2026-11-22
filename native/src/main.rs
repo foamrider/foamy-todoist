@@ -128,8 +128,9 @@
 //! Every command holds an exclusive lock on
 //! `$XDG_RUNTIME_DIR/foamy-todoist/state.lock` while it reads or writes the
 //! keyring or the cache, waiting up to 15 seconds (`BUSY`); without a usable
-//! runtime directory it is `LOCK_UNAVAILABLE`. A sync reads the token under
-//! that lock, so a sign-out can't be undone by a sync in flight.
+//! runtime directory it is `LOCK_UNAVAILABLE`, with the reason. A sync reads
+//! the token under that lock, so a sign-out can't be undone by a sync in
+//! flight.
 //!
 //! The cache is `$XDG_CACHE_HOME/foamy-todoist/cache.json` (else
 //! `~/.cache/foamy-todoist/`), directory 0700, file 0600, written
@@ -184,7 +185,7 @@ fn run(args: &[String]) -> Result<Value, Failure> {
     };
     let context = todoist::Context {
         vault: vault::SecretTool::new(),
-        lock_dir: foamy_helper::lock::runtime_dir("foamy-todoist").ok(),
+        lock_dir: todoist::lock_dir(foamy_helper::lock::runtime_dir("foamy-todoist")),
     };
     match command.as_str() {
         "status" => context.status(),

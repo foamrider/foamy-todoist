@@ -4,9 +4,10 @@ The helper is a stand-in (TodoStore.helperCommand): a shell script that logs
 each call with its standard input to $FOAMY_OUT/calls.log and answers with
 $FOAMY_OUT/reply-<command>.json (after $FOAMY_OUT/slow-<command> seconds;
 with $FOAMY_OUT/exit-<command> as its exit status instead, when that file
-is not empty). While $FOAMY_OUT/hold-<command> is not empty it holds its
-reply (the scene's shell.hold and shell.release) and lists the hold in
-$FOAMY_OUT/held.log. Nothing reaches Todoist or a keyring.
+is not empty). While $FOAMY_OUT/hold-<command> is not empty and holds the
+text it held when the call came, it holds its reply (the scene's shell.hold,
+shell.pass and shell.release) and lists the hold in $FOAMY_OUT/held.log.
+Nothing reaches Todoist or a keyring.
 
   python3 tests/runtime.py
 
@@ -41,11 +42,15 @@ out=$FOAMY_OUT
 input=$(cat)
 printf '%s %s\n' "$cmd" "$input" >>"$out/calls.log"
 # A held reply waits for the scene to release it, at most 25 s (the store's
-# own deadline is 30 s), so a run that never releases still ends.
+# own deadline is 30 s), so a run that never releases still ends. The hold
+# file's text is a ticket: a new one (shell.pass) lets the call held now
+# answer and holds the next one; an empty file lets every call answer. The
+# store runs one call at a time, so the next one reads the new ticket.
 if [ -s "$out/hold-$cmd" ]; then
+  ticket=$(cat "$out/hold-$cmd")
   printf '%s\n' "$cmd" >>"$out/held.log"
   limit=$(($(date +%s) + 25))
-  while [ -s "$out/hold-$cmd" ]; do
+  while [ -s "$out/hold-$cmd" ] && [ "$(cat "$out/hold-$cmd")" = "$ticket" ]; do
     if [ "$(date +%s)" -ge "$limit" ]; then
       printf '%s\n' "$cmd" >>"$out/hold-expired.log"
       exit 1
@@ -173,8 +178,11 @@ ShellRoot {
   }
   // Held replies of the stand-in helper: hold(command) makes its next
   // calls wait until release(command); held(command) is true once one of
-  // them waits (held.log lists each hold as it starts).
+  // them waits (held.log lists each hold as it starts). pass(command) lets
+  // the call held now answer and holds the next one: held() turns true
+  // again once that one waits.
   property var holdsAt: ({})
+  property int tickets: 0
   FileView { id: holdLog; path: shell.out + "/held.log"; blockAllReads: true; printErrors: false }
   function holds(command) {
     holdLog.reload();
@@ -188,6 +196,13 @@ ShellRoot {
     shell.put("hold-" + command, "1");
   }
   function held(command) { return shell.holds(command) > shell.holdsAt[command]; }
+  function pass(command) {
+    var at = Object.assign({}, shell.holdsAt);
+    at[command] = shell.holds(command);
+    shell.holdsAt = at;
+    shell.tickets++;
+    shell.put("hold-" + command, "ticket " + shell.tickets);
+  }
   function release(command) { shell.put("hold-" + command, ""); }
   // The snapshot with some tasks' fields changed ({id: {field: value}}).
   // The visible items under `item` whose text has Todoist's markup in it.
@@ -257,18 +272,18 @@ ShellRoot {
   function updatesSince(from) {
     return shell.calls("apply").slice(from).map(function(line) { return JSON.parse(line.slice("apply ".length)).commands[0]; });
   }
-  // A save reply for t4 with these fields (the slow helper reads it as it answers).
+  // A save reply for t4 with these fields (the helper reads it as it answers).
   function t4Reply(fields) {
     shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: fields }), { results: { t4: "ok" } })));
   }
-  // Two saves of one field before the first reply (the helper slow): each
-  // reply is matched to its own request, and each edit builds on the one in
-  // flight. Then `done`.
+  // Two saves of one field before the first reply (both held, then the
+  // first passed while the second waits): each reply is matched to its own
+  // request, and each edit builds on the one in flight. Then `done`.
   function racingSaves(view, done) {
     var store = Plugin.TodoStore;
     var editor = view.editor;
     var from = shell.calls("apply").length;
-    shell.put("slow-apply", "0.6");
+    shell.hold("apply");
     shell.t4Reply({ content: "One", priority: 4, labels: ["code", "calls"] });
     editor.contentField.focusInput();
     editor.contentField.selectAll();
@@ -277,10 +292,12 @@ ShellRoot {
     for (var c2 of " Two") ev.keyClickChar(c2, Qt.NoModifier, -1);
     ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
     if (!check(Object.keys(editor.pending).length === 2, "two saves of the text in flight")) return;
-    wait.waitFor(function() { return Object.keys(editor.pending).length === 1; }, 15000, function(ok) {
+    shell.passFirst("apply", function(ok) {
       // The first reply: Todoist has "One"; the newer text stays, still tracked.
-      if (!check(ok && store.model.byId.t4.content === "One" && editor.contentField.text === "One Two" && editor.newest("content") > 0, "the first reply kept the newer text (" + JSON.stringify(editor.contentField.text) + ")")) return;
+      var left = Object.keys(editor.pending).length;
+      if (!check(ok && left === 1 && store.model.byId.t4.content === "One" && editor.contentField.text === "One Two" && editor.newest("content") > 0, "the first reply kept the newer text (" + JSON.stringify([left, editor.contentField.text]) + ")")) return;
       shell.t4Reply({ content: "One Two", priority: 4, labels: ["code", "calls"] });
+      shell.release("apply");
       wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy; }, 15000, function(ok2) {
         var sent = shell.updatesSince(from).map(function(command) { return command.content; });
         if (!check(ok2 && JSON.stringify(sent) === JSON.stringify(["One", "One Two"]) && editor.contentField.text === "One Two" && editor.errorOf("content") === "" && !editor.dirty("content"), "both replies: the field shows the newest (" + JSON.stringify([sent, editor.contentField.text]) + ")")) return;
@@ -289,6 +306,7 @@ ShellRoot {
         if (!check(shell.calls("apply").length === from + 2, "the next blur sent nothing")) return;
         // Two labels removed before the first reply: the second keeps the first off.
         var from2 = shell.calls("apply").length;
+        shell.hold("apply");
         shell.t4Reply({ content: "One Two", priority: 4, labels: ["calls"] });
         // The chip's × by the pointer: it removes the label, the section's menu stays shut.
         var codeX = shell.find(shell.find(editor, "label-code"), "removeLabel");
@@ -296,17 +314,28 @@ ShellRoot {
         if (!check(!editor.menu.opened, "the × didn't open the label menu")) return;
         if (!check(shell.find(editor, "label-code") === null && shell.find(editor, "label-calls") !== null, "the chips show the list in flight")) return;
         shell.find(shell.find(editor, "label-calls"), "removeLabel").clicked();
-        wait.waitFor(function() { return Object.keys(editor.pending).length === 1; }, 15000, function(ok3) {
-          if (!check(ok3 && shell.find(editor, "label-code") === null && shell.find(editor, "label-calls") === null, "the first reply didn't bring a label back")) return;
+        shell.passFirst("apply", function(ok3) {
+          var left3 = Object.keys(editor.pending).length;
+          if (!check(ok3 && left3 === 1 && shell.find(editor, "label-code") === null && shell.find(editor, "label-calls") === null, "the first reply didn't bring a label back (" + left3 + " saves in flight)")) return;
           shell.t4Reply({ content: "One Two", priority: 4, labels: [] });
+          shell.release("apply");
           wait.waitFor(function() { return Object.keys(editor.pending).length === 0 && !store.busy; }, 15000, function(ok4) {
             var lists = shell.updatesSince(from2).map(function(command) { return command.labels; });
             if (!check(ok4 && JSON.stringify(lists) === JSON.stringify([["calls"], []]) && store.model.byId.t4.labels.length === 0, "each removal built on the one in flight (" + JSON.stringify(lists) + ")")) return;
-            shell.put("slow-apply", "");
             done();
           });
         });
       });
+    });
+  }
+  // The first held call of `command` answers while the next one waits:
+  // then(ok) once that next call is held. The store starts it only after
+  // it has handled the first reply. ok is false when that took over 15 s.
+  function passFirst(command, then) {
+    wait.waitFor(function() { return shell.held(command); }, 15000, function(held) {
+      if (!check(held, "a " + command + " call is held")) return;
+      shell.pass(command);
+      wait.waitFor(function() { return shell.held(command); }, 15000, then);
     });
   }
   // A field's baseline comes from what Todoist confirmed and the saves in
@@ -407,11 +436,80 @@ ShellRoot {
         { name: "dueField", open: "due" },
         { name: "descriptionField", open: "" }
       ], function() {
-        shell.menuLeave(ed, function() {
-          view.editor.back();
+        shell.editorRefusedPastes(ed, function() {
+          shell.menuLeave(ed, function() {
+            view.editor.back();
+            done();
+          });
+        });
+      });
+    });
+  }
+  // A paste each of the editor's text fields refuses: why shows under the
+  // field, without Retry (nothing was sent). Then done().
+  function editorRefusedPastes(ed, done) {
+    var fields = [
+      { name: "the title", field: ed.contentField, line: "contentError", focus: function() { ed.contentField.focusInput(); } },
+      { name: "the description", field: ed.descriptionField, line: "descriptionError", focus: function() { ed.descriptionField.focusInput(); } },
+      { name: "the Date field", field: ed.dueField, line: "section-due", focus: function() { ed.openField("due"); } },
+      { name: "the Deadline field", field: ed.deadlineField, line: "section-deadline", focus: function() { ed.openField("deadline"); } }
+    ];
+    var next = function(i) {
+      if (i === fields.length) { done(); return; }
+      var f = fields[i];
+      var part = function(name) { return function() { return shell.find(shell.find(ed, f.line), name); }; };
+      f.focus();
+      shell.refusedPaste(f.name, f.field, part("fieldErrorText"), part("fieldRetry"), function() { next(i + 1); });
+    };
+    next(0);
+  }
+  // In the pane, the description of a task without one refuses a paste;
+  // then another task without a description shows (the field's text stays
+  // ""): the line under it is clear. Then the pane is back on the first
+  // row, and done().
+  function pasteStaysWithItsTask(view, done) {
+    var store = Plugin.TodoStore;
+    var ed = view.editor;
+    var part = function(name) { return function() { return shell.find(shell.find(ed, "descriptionError"), name); }; };
+    var show = function(i, then) {
+      var id = view.rows[view.stops[i]].id;
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: id, description: "", truncated: false } }));
+      view.goTo(view.firstRowStop + i);
+      wait.waitFor(function() { var d = store.description; return view.paneTask === id && d.id === id && d.state === "ready" && ed.descriptionField.enabled; }, 15000, function(ok) {
+        if (!check(ok && ed.descriptionField.text === "", "row " + i + " in the pane, without a description (" + JSON.stringify([view.paneTask, store.description]) + ")")) return;
+        then();
+      });
+    };
+    show(2, function() {
+      ed.descriptionField.focusInput();
+      shell.refusedPaste("the pane's description", ed.descriptionField, part("fieldErrorText"), part("fieldRetry"), function() {
+        show(3, function() {
+          if (!check(!part("fieldErrorText")().visible, "the refused paste's message stayed with its task (" + part("fieldErrorText")().text + ")")) return;
+          view.goTo(view.firstRowStop);
           done();
         });
       });
+    });
+  }
+  // A paste the field (which has the keys) refuses, as the kit refuses a
+  // clipboard of more than 16 KiB (the stand-in's "large"): Ctrl+V changes
+  // nothing, and line(), the error line that belongs to the field, says
+  // why in the panel's words; retry(), when given, is that line's Retry,
+  // which a refused paste doesn't offer. Then the clipboard reads "folder"
+  // again and done().
+  function refusedPaste(name, field, line, retry, done) {
+    var clipboard = Quickshell.env("TEST_CLIPBOARD_STATE");
+    if (!shell.writeFile(clipboard, "large")) return;
+    var before = field.text;
+    ev.keyClick(Qt.Key_V, Qt.ControlModifier, -1);
+    if (!check(field.pasteRunning, name + ": Ctrl+V started a paste")) return;
+    wait.waitFor(function() { return !field.pasteRunning; }, 15000, function(ended) {
+      var shown = line();
+      var why = Kit.FoamyI18n.t("Clipboard text is too large or contains invalid characters.");
+      var offered = retry ? retry().visible : false;
+      if (!check(ended && field.text === before && shown.visible && shown.text === why && !offered, name + ": a refused paste changes nothing and its line says why, without Retry (" + JSON.stringify([ended, field.pasteError, field.text === before, shown.visible, shown.text, offered]) + ")")) return;
+      if (!shell.writeFile(clipboard, "normal")) return;
+      done();
     });
   }
   // A right-click on an editor field opens its context menu: the menu takes
@@ -953,7 +1051,7 @@ ShellRoot {
     switch (n) {
     case 0: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "the first status"];
     case 1: return [function() { return one.popup.bodyItem !== null; }, 10000, "the popup opened"];
-    case 2: return [function() { return store.signedIn && store.syncing; }, 15000, "signed in, syncing"];
+    case 2: return [function() { return store.signedIn && store.syncing && shell.held("sync"); }, 15000, "signed in, the first sync held"];
     case 3: return [function() { return store.loaded && !store.busy; }, 15000, "the first sync"];
     case 4: return [function() { return view && view.active; }, 10000, "the reopened popup"];
     case 5: return [function() { return view.fieldFocused && view.band.fieldProgress === 1; }, 10000, "the field has the keys, grown"];
@@ -975,7 +1073,7 @@ ShellRoot {
     case 26: return [function() { return !store.tokenBusy && store.tokenError !== ""; }, 15000, "the refused token"];
     case 27: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again"];
     case 28: return [function() { return shell.calls("add").length >= 1 && !view.addBusy && !store.busy; }, 15000, "an add after signing in again"];
-    case 29: return [function() { return one === null && !store.busy; }, 15000, "the sync that ends after the bar is gone"];
+    case 29: return [function() { return one === null && two === null && !store.polling && shell.held("sync"); }, 15000, "the bars gone, the sync held"];
     case 30: return [function() { return one !== null && two !== null && Kit.FoamyShared.memberCount("todoist") === 2; }, 10000, "the bar is back"];
     case 31: return [function() { return view && view.active; }, 10000, "the popup for autocomplete"];
     case 32: return [function() { return view.fieldFocused && view.band.fieldProgress === 1; }, 10000, "the add field for autocomplete, grown"];
@@ -1005,7 +1103,7 @@ ShellRoot {
     case 57: return [function() { return !view.addBusy && !store.busy && shell.calls("add").length > shell.callsBefore; }, 15000, "the add with an unknown outcome in Norwegian"];
     case 58: return [function() { return shell.othersChecked && store.othersTasks === "hide" && Kit.FoamyI18n.language === "en"; }, 10000, "the setting shown, then back to hide"];
     case 59: return [function() { return view.fieldFocused; }, 10000, "the field for an add across two monitors"];
-    case 60: return [function() { var v = two.popup.bodyItem; return two.opened && v && v.active && v.fieldFocused; }, 10000, "the other monitor's popup with the draft"];
+    case 60: return [function() { var v = two.popup.bodyItem; return two.opened && v && v.active && v.fieldFocused && shell.held("add"); }, 10000, "the other monitor's popup with the draft, the add held"];
     case 61: return [function() { var v = two.popup.bodyItem; return !store.busy && !v.addBusy && shell.calls("add").length > shell.callsBefore; }, 15000, "the add from the first monitor answered"];
     case 62: return [function() { return !store.busy; }, 15000, "the sync of the poll after midnight"];
     case 63: return [function() { return !store.busy && shell.calls("sync").length > shell.callsBefore; }, 15000, "a sync reply after another midnight"];
@@ -1021,7 +1119,7 @@ ShellRoot {
     case 74: return [function() { return shell.calls("apply").length === shell.callsBefore + 4 && !store.busy && !view.editor.saving; }, 15000, "the priority saved"];
     case 75: return [function() { return view.pageShown && store.description.state === "error"; }, 15000, "the failed description read"];
     case 76: return [function() { return store.description.state === "ready"; }, 15000, "the description read again"];
-    case 77: return [function() { return store.current !== null && store.current.command === "task"; }, 15000, "the slow description read runs"];
+    case 77: return [function() { return store.current !== null && store.current.command === "task" && shell.held("task"); }, 15000, "the description read is held"];
     case 78: return [function() { return !store.busy; }, 15000, "the late reply came"];
     case 79: return [function() { return store.description.state === "ready" && store.description.id === "t7"; }, 15000, "t7's description"];
     case 80: return [function() { return view.active && !view.wide && !view.pageShown; }, 20000, "Small's list again"];
@@ -1118,17 +1216,22 @@ ShellRoot {
       one.close();
       shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
       shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
-      shell.put("slow-sync", "1.5");
+      shell.hold("sync");
       store.check();
       break;
     case 2:
+      // The first sync answers once the popup has opened (the view asks
+      // for a refresh as it turns active), so the open comes during it.
       one.open();
+      wait.waitFor(function() { var v = one.popup.bodyItem; return v && v.active; }, 10000, function(opened) {
+        if (!check(opened && store.syncing && shell.held("sync"), "the popup opened during the first sync")) return;
+        shell.release("sync");
+      });
       break;
     case 3:
       // The first sync was still running when the popup opened.
       if (!check(shell.calls("sync").length === 1, "one sync after signing in (" + JSON.stringify(shell.calls()) + ")")) return;
       one.close();
-      shell.put("slow-sync", "");
       shell.afterClose(function() { one.open(); });
       break;
     case 4:
@@ -1302,11 +1405,14 @@ ShellRoot {
       break;
     case 14:
       if (!check(view.view === "today" && view.fieldFocused, "Alt+2 while typing shows Today and keeps the caret (" + view.view + ")")) return;
-      // Shift+Enter (with "Close the panel") adds and keeps the field open for the next task.
-      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
       shell.callsBefore = shell.calls("add").length;
-      for (var m of "Milk") ev.keyClickChar(m, Qt.NoModifier, -1);
-      ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+      // A paste the band's field refuses: the line under the band says why.
+      shell.refusedPaste("the band's field", view.field, function() { return shell.find(view, "errorLine"); }, null, function() {
+        // Shift+Enter (with "Close the panel") adds and keeps the field open for the next task.
+        shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+        for (var m of "Milk") ev.keyClickChar(m, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+      });
       break;
     case 15:
       if (!check(view.fieldOpen && view.fieldFocused && view.field.text === "" && view.addError === "", "after an add the field stays open, focused and empty (" + view.addError + ")")) return;
@@ -1464,11 +1570,17 @@ ShellRoot {
     case 26:
       if (!check(store.helperInput === "", "the token isn't kept after it was written (" + store.helperInput.length + " characters)")) return;
       if (!check(view.settingsPage.tokenField.secretText === "wrong-token", "a refused token stays in the field")) return;
-      shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
-      view.settingsPage.tokenField.clear();
-      view.settingsPage.tokenField.focusInput();
-      for (var r of "right-token") ev.keyClickChar(r, Qt.NoModifier, -1);
-      view.settingsPage.saveToken();
+      var tokenPage = view.settingsPage;
+      // A paste the token field refuses: its line says why, in place of
+      // the refused token's error.
+      tokenPage.tokenField.focusInput();
+      shell.refusedPaste("the token field", tokenPage.tokenField, function() { return shell.find(tokenPage, "tokenError"); }, null, function() {
+        shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+        tokenPage.tokenField.clear();
+        tokenPage.tokenField.focusInput();
+        for (var r of "right-token") ev.keyClickChar(r, Qt.NoModifier, -1);
+        tokenPage.saveToken();
+      });
       break;
     case 27:
       if (!check(view.settingsPage.tokenField.secretText === "" && view.settingsPage.tokenField.text === "" && store.helperInput === "", "a stored token leaves the field and memory")) return;
@@ -1479,18 +1591,22 @@ ShellRoot {
       break;
     case 28:
       if (!check(view.field.text === "" && view.addError === "", "the add after signing in again worked (" + view.addError + ")")) return;
-      // A reply after the last bar went: nothing restarts the poll.
+      // A reply after the last bar went: nothing restarts the poll. The
+      // sync is held until the bars are gone.
       one.close();
-      shell.put("slow-sync", "2");
+      shell.hold("sync");
       store.sync();
       shell.panelsAlive = false;
       break;
     case 29:
-      if (!check(!store.polling && !store.poll.running, "no poll without a bar (" + store.poll.running + ")")) return;
-      shell.callsBefore = shell.calls().length;
-      store.refreshIfStale(0);
-      shell.put("slow-sync", "");
-      shell.panelsAlive = true;
+      shell.release("sync");
+      wait.waitFor(function() { return !store.busy; }, 15000, function(answered) {
+        if (!check(answered, "the held sync answered after the bars went")) return;
+        if (!check(!store.polling && !store.poll.running, "no poll without a bar (" + store.poll.running + ")")) return;
+        shell.callsBefore = shell.calls().length;
+        store.refreshIfStale(0);
+        shell.panelsAlive = true;
+      });
       break;
     case 30:
       if (!check(shell.calls().length === shell.callsBefore && !store.busy, "no refresh ran without a bar")) return;
@@ -1844,9 +1960,9 @@ ShellRoot {
       // An add in flight is the shell's, not the popup's: sent on one
       // monitor, the popup closed, the other monitor's popup opened before
       // the reply shows the text as being added (no second add on Enter),
-      // and drops it once added.
+      // and drops it once added. The add is held until then.
       shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
-      shell.put("slow-add", "1.5");
+      shell.hold("add");
       shell.callsBefore = shell.calls("add").length;
       view.openAdd();
       break;
@@ -1862,6 +1978,7 @@ ShellRoot {
       if (!check(other.field.text === "Buy milk", "the other popup has the text (" + JSON.stringify(other.field.text) + ")")) return;
       if (!check(other.addBusy && shell.find(other, "addSpinner").visible, "and shows it being added")) return;
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      shell.release("add");
       break;
     case 61:
       var second = two.popup.bodyItem;
@@ -1869,7 +1986,6 @@ ShellRoot {
       if (!check(second.field.text === "" && store.addDraft === "", "added: the text is gone (" + JSON.stringify(second.field.text) + ", draft " + JSON.stringify(store.addDraft) + ")")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       two.close();
-      shell.put("slow-add", "");
       // A suspend across midnight: the clock moves on, the midnight timer
       // hasn't fired. The poll's next tick finds the new day.
       var barCount = one.barContent.countLabel;
@@ -2116,18 +2232,19 @@ ShellRoot {
       break;
     case 76:
       if (!check(view.editor.descriptionField.text === "Retried" && view.editor.descriptionField.enabled, "Retry read it")) return;
-      // A reply that comes after its editor closed is dropped.
-      shell.put("slow-task", "1.5");
+      // A reply that comes after its editor closed is dropped. The read is
+      // held until the editor has closed.
+      shell.hold("task");
       view.editor.back();
       view.openTask("t5", true);
       break;
     case 77:
       view.closeTask();
       if (!check(store.description.id === "" && store.description.state === "", "closed: no description")) return;
+      shell.release("task");
       break;
     case 78:
       if (!check(store.description.id === "" && store.description.state === "", "the late reply was dropped (" + JSON.stringify(store.description) + ")")) return;
-      shell.put("slow-task", "");
       shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t7", description: "Seven", truncated: false } }));
       view.openTask("t7", true);
       break;
@@ -2403,6 +2520,7 @@ ShellRoot {
       shell.draftThenComplete(big5, "title ring", function() {
       shell.draftThenComplete(big5, "ring", function() {
       shell.listSpace(big5, function() {
+      shell.pasteStaysWithItsTask(big5, function() {
       // Typed again, then the Week view from the rail: saved as the pane goes.
       big5.editor.contentField.focusInput();
       shell.paneFrom = big5.paneTask;
@@ -2419,6 +2537,7 @@ ShellRoot {
       var weekEntry = shell.find(big5, "rail-week");
       ev.mouseClick(weekEntry, weekEntry.width / 2, weekEntry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big5.weekShown && !big5.editor.visible && !big5.blocked, "the Week view; the pane went, the keys with the list")) return;
+      });
       });
       });
       });

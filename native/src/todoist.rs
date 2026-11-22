@@ -88,31 +88,37 @@ fn within_budget(cap: Duration) -> Duration {
     })
 }
 
+fn lock_unavailable(error: &dyn std::fmt::Display) -> Failure {
+    Failure::coded(
+        "LOCK_UNAVAILABLE",
+        message(
+            "Can't use the Todoist lock file (%1).",
+            &[&short(&error.to_string(), 120)],
+        ),
+    )
+}
+
+/// Where the state lock lives: the runtime directory
+/// (`$XDG_RUNTIME_DIR/foamy-todoist`) the kit's `lock::runtime_dir` gave.
+/// Without a usable one (XDG_RUNTIME_DIR unset or not a directory, a folder
+/// that is a symlink, another user's or open to others) every command fails
+/// with that reason. Never a second lock elsewhere: a helper in another
+/// environment would then change the same keyring item and cache at the
+/// same time, and a sync could undo a sign-out.
+pub fn lock_dir(runtime: std::io::Result<PathBuf>) -> Result<PathBuf, Failure> {
+    runtime.map_err(|error| lock_unavailable(&error))
+}
+
 /// The exclusive lock every command holds while it reads or writes the
-/// keyring or the cache: `$XDG_RUNTIME_DIR/foamy-todoist/state.lock`.
-pub fn state_lock(dir: Option<&Path>, wait: Duration) -> Result<FileLock, Failure> {
-    let dir = dir.ok_or_else(|| {
-        Failure::coded(
-            "LOCK_UNAVAILABLE",
-            message(
-                "Can't use the Todoist lock file (%1).",
-                &[&"no XDG_RUNTIME_DIR"],
-            ),
-        )
-    })?;
+/// keyring or the cache: `state.lock` in the [`lock_dir`].
+pub fn state_lock(dir: &Path, wait: Duration) -> Result<FileLock, Failure> {
     match FileLock::exclusive_within(&dir.join("state.lock"), wait) {
         Ok(Some(lock)) => Ok(lock),
         Ok(None) => Err(Failure::coded(
             "BUSY",
             "Another Todoist update is still running. Try again.",
         )),
-        Err(error) => Err(Failure::coded(
-            "LOCK_UNAVAILABLE",
-            message(
-                "Can't use the Todoist lock file (%1).",
-                &[&short(&error.to_string(), 120)],
-            ),
-        )),
+        Err(error) => Err(lock_unavailable(&error)),
     }
 }
 
@@ -308,12 +314,14 @@ fn result(reply: &Value, uuid: &str) -> Value {
 /// The paths and tools a command works with.
 pub struct Context {
     pub vault: SecretTool,
-    pub lock_dir: Option<PathBuf>,
+    /// The [`lock_dir`], or why there is none.
+    pub lock_dir: Result<PathBuf, Failure>,
 }
 
 impl Context {
     fn lock(&self) -> Result<FileLock, Failure> {
-        state_lock(self.lock_dir.as_deref(), within_budget(LOCK_WAIT))
+        let dir = self.lock_dir.as_ref().map_err(Failure::clone)?;
+        state_lock(dir, within_budget(LOCK_WAIT))
     }
 
     fn client() -> Result<Client, Failure> {
@@ -1304,19 +1312,15 @@ mod tests {
     fn a_held_lock_is_busy_and_a_missing_dir_unavailable() {
         let dir = std::env::temp_dir().join(format!("foamy-todoist-lock-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let held = state_lock(Some(&dir), Duration::ZERO).unwrap();
+        let held = state_lock(&dir, Duration::ZERO).unwrap();
         let started = Instant::now();
-        let busy = state_lock(Some(&dir), Duration::from_millis(100)).unwrap_err();
+        let busy = state_lock(&dir, Duration::from_millis(100)).unwrap_err();
         assert_eq!(busy.code, "BUSY");
         assert!(started.elapsed() >= Duration::from_millis(100));
         drop(held);
-        assert!(state_lock(Some(&dir), Duration::ZERO).is_ok());
+        assert!(state_lock(&dir, Duration::ZERO).is_ok());
         assert_eq!(
-            state_lock(None, Duration::ZERO).unwrap_err().code,
-            "LOCK_UNAVAILABLE"
-        );
-        assert_eq!(
-            state_lock(Some(&dir.join("missing")), Duration::ZERO)
+            state_lock(&dir.join("missing"), Duration::ZERO)
                 .unwrap_err()
                 .code,
             "LOCK_UNAVAILABLE"

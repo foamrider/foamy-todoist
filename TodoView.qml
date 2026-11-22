@@ -1192,6 +1192,10 @@ PanelKeyCatcher {
         root.suggestDismissed = false
         root.updateSuggest()
       }
+      // A refused paste (pasteError, a catalog key) is the newest news:
+      // like typing, it ends the add's error, so the line says why.
+      onPasteErrorChanged: if (pasteError !== "")
+        root.store.addError = ""
       onCursorPositionChanged: root.updateSuggest()
       onKeyPressed: function (event) {
         root.fieldKey(event)
@@ -1413,11 +1417,12 @@ PanelKeyCatcher {
         onClicked: root.clearSelection()
       }
 
-      // Lines at the top: why the last add, sync or change failed (an
-      // error, whole), and that the snapshot was cut (a note, while rows show).
+      // Lines at the top: why the last add, sync or change failed, or why
+      // the band's field refused a paste (an error, whole), and that the
+      // snapshot was cut (a note, while rows show).
       Column {
         id: errorLine
-        readonly property string message: root.addError !== "" ? root.addError : root.store.loaded ? root.store.error : ""
+        readonly property string message: root.addError !== "" ? root.addError : addField.pasteError !== "" ? FoamyI18n.t(addField.pasteError) : root.store.loaded ? root.store.error : ""
         readonly property bool truncated: root.store.model.truncated && (root.rows.length > 0 || root.weekCount > 0)
         visible: root.store.signedIn && (message !== "" || truncated)
         anchors.left: parent.left
