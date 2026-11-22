@@ -221,6 +221,10 @@ FocusScope {
     setText("description", descNow() && descNow().state === "ready" ? descNow().text : "")
     errors = ({})
     attempts = ({})
+    // A refused paste's message goes with its task too: a field whose
+    // text stays the same (two empty descriptions) would keep it.
+    for (const key of ["content", "due", "deadline", "description"])
+      inputOf(key).pasteError = ""
   }
   // Untouched fields follow the snapshot, also the one with the keys;
   // one the user changed, with a failed save's text or a save in flight

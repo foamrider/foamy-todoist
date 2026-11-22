@@ -463,6 +463,34 @@ ShellRoot {
     };
     next(0);
   }
+  // In the pane, the description of a task without one refuses a paste;
+  // then another task without a description shows (the field's text stays
+  // ""): the line under it is clear. Then the pane is back on the first
+  // row, and done().
+  function pasteStaysWithItsTask(view, done) {
+    var store = Plugin.TodoStore;
+    var ed = view.editor;
+    var part = function(name) { return function() { return shell.find(shell.find(ed, "descriptionError"), name); }; };
+    var show = function(i, then) {
+      var id = view.rows[view.stops[i]].id;
+      shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: id, description: "", truncated: false } }));
+      view.goTo(view.firstRowStop + i);
+      wait.waitFor(function() { var d = store.description; return view.paneTask === id && d.id === id && d.state === "ready" && ed.descriptionField.enabled; }, 15000, function(ok) {
+        if (!check(ok && ed.descriptionField.text === "", "row " + i + " in the pane, without a description (" + JSON.stringify([view.paneTask, store.description]) + ")")) return;
+        then();
+      });
+    };
+    show(2, function() {
+      ed.descriptionField.focusInput();
+      shell.refusedPaste("the pane's description", ed.descriptionField, part("fieldErrorText"), part("fieldRetry"), function() {
+        show(3, function() {
+          if (!check(!part("fieldErrorText")().visible, "the refused paste's message stayed with its task (" + part("fieldErrorText")().text + ")")) return;
+          view.goTo(view.firstRowStop);
+          done();
+        });
+      });
+    });
+  }
   // A paste the field (which has the keys) refuses, as the kit refuses a
   // clipboard of more than 16 KiB (the stand-in's "large"): Ctrl+V changes
   // nothing, and line(), the error line that belongs to the field, says
@@ -2492,6 +2520,7 @@ ShellRoot {
       shell.draftThenComplete(big5, "title ring", function() {
       shell.draftThenComplete(big5, "ring", function() {
       shell.listSpace(big5, function() {
+      shell.pasteStaysWithItsTask(big5, function() {
       // Typed again, then the Week view from the rail: saved as the pane goes.
       big5.editor.contentField.focusInput();
       shell.paneFrom = big5.paneTask;
@@ -2508,6 +2537,7 @@ ShellRoot {
       var weekEntry = shell.find(big5, "rail-week");
       ev.mouseClick(weekEntry, weekEntry.width / 2, weekEntry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big5.weekShown && !big5.editor.visible && !big5.blocked, "the Week view; the pane went, the keys with the list")) return;
+      });
       });
       });
       });
