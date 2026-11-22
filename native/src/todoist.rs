@@ -360,12 +360,15 @@ impl Context {
             .get("user")
             .and_then(model::normalize_user)
             .ok_or_else(unexpected)?;
+        // Another account's tasks never show under this one: the old cache
+        // goes before the token is stored, so a cache that can't be removed
+        // leaves the previous token and its cache together.
+        remove(&path)?;
         self.vault.put(token)?;
-        // Another account's tasks never show under this one: a new cache.
         let mut state = State::empty();
         state.user = Some(user.clone());
         let mut out = json!({"ok": true, "state": "signed_in", "user": user});
-        if let Err(failure) = remove(&path).and_then(|()| save(&path, &state)) {
+        if let Err(failure) = save(&path, &state) {
             out["warning"] = json!(failure.message);
         }
         Ok(out)

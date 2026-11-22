@@ -731,8 +731,14 @@ fn a_stored_value_that_is_not_a_token_is_refused_by_every_command() {
     // Something other than this helper stored the item.
     for stored in ["not a token", ""] {
         fs::write(home.bin().join("item"), stored).unwrap();
-        for command in ["status", "sync"] {
-            let (reply, _) = home.run(command, "", &closed());
+        for (command, input) in [
+            ("status", ""),
+            ("sync", ""),
+            ("apply", r#"{"commands":[{"op":"close","id":"T1"}]}"#),
+            ("add", r#"{"text":"Milk"}"#),
+            ("task", r#"{"id":"T1"}"#),
+        ] {
+            let (reply, _) = home.run(command, input, &closed());
             assert_eq!(
                 (reply["code"].as_str(), reply["error"].as_str()),
                 (
@@ -840,32 +846,118 @@ fn an_unusable_cache_is_found_before_the_token_is_stored() {
     assert!(server.seen().is_empty(), "nothing asked of Todoist");
 }
 
+/// A second account's token and user, for a change of account.
+const OTHER: &str = "fedcba9876543210fedcba9876543210fedcba98";
+
+fn other_user() -> Value {
+    json!({"id": "2", "full_name": "Grace Hopper", "email": "grace@example.com",
+           "inbox_project_id": "P9", "tz_info": {"timezone": "UTC"}})
+}
+
+fn set_mode(path: &std::path::Path, mode: u32) {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
 #[test]
-fn a_cache_that_cannot_be_written_after_storing_is_a_warning() {
-    let home = Home::new("cache-warn");
-    // cache.json is a directory: it can be neither removed nor replaced.
+fn a_cache_that_cannot_be_removed_stores_no_token() {
+    // cache.json is a directory: it can't be removed.
+    let home = Home::new("cache-dir");
     fs::create_dir_all(home.cache()).unwrap();
-    fs::set_permissions(
-        home.cache().parent().unwrap(),
-        fs::Permissions::from_mode(0o700),
-    )
-    .unwrap();
+    set_mode(home.cache().parent().unwrap(), 0o700);
     let server = Server::start(vec![ok(json!({"sync_token": "X", "user": user()}))], TOKEN);
     let (reply, _) = home.run(
         "token-set",
         &json!({"token": TOKEN}).to_string(),
         &server.base,
     );
-    assert_eq!(reply["ok"], true, "{reply}");
-    assert_eq!(reply["state"], "signed_in");
+    assert_eq!(reply["code"], "INTERNAL", "{reply}");
     assert!(
-        reply["warning"]
+        reply["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("Can't remove the Todoist cache (%1).\u{1f}"),
+        "{reply}"
+    );
+    assert!(
+        !home.bin().join("item").exists(),
+        "stored with a failed reply"
+    );
+    let (status, _) = home.run("status", "", &closed());
+    assert_eq!(status["state"], "signed_out", "{status}");
+
+    // The previous account's cache in a directory that can be read but not
+    // changed: the new account's token is refused, the old one stays with
+    // its own cache.
+    let home = synced("cache-readonly");
+    let dir = home.cache().parent().unwrap().to_path_buf();
+    set_mode(&dir, 0o500);
+    let server = Server::start(
+        vec![ok(json!({"sync_token": "X", "user": other_user()}))],
+        OTHER,
+    );
+    let (reply, _) = home.run(
+        "token-set",
+        &json!({"token": OTHER}).to_string(),
+        &server.base,
+    );
+    let (status, _) = home.run("status", "", &closed());
+    // Writable again before any assertion, so the home can be removed.
+    set_mode(&dir, 0o700);
+    assert_eq!(reply["code"], "INTERNAL", "{reply}");
+    assert!(
+        reply["error"]
             .as_str()
             .unwrap()
             .starts_with("Can't remove the Todoist cache (%1).\u{1f}"),
         "{reply}"
     );
     assert_eq!(fs::read_to_string(home.bin().join("item")).unwrap(), TOKEN);
+    assert_eq!(status["user"]["full_name"], "Ada Lovelace", "{status}");
+}
+
+#[test]
+fn a_cache_that_cannot_be_written_after_storing_is_a_warning() {
+    // The previous account's cache is removed, then the directory turns
+    // read-only once the new token is stored: the new cache can't be written.
+    let home = synced("cache-warn");
+    let dir = home.cache().parent().unwrap().to_path_buf();
+    fs::write(
+        home.bin().join("readonly-after-store"),
+        dir.to_str().unwrap(),
+    )
+    .unwrap();
+    let server = Server::start(
+        vec![ok(json!({"sync_token": "X", "user": other_user()}))],
+        OTHER,
+    );
+    let (reply, _) = home.run(
+        "token-set",
+        &json!({"token": OTHER}).to_string(),
+        &server.base,
+    );
+    let (status, _) = home.run("status", "", &closed());
+    // Writable again before any assertion, so the home can be removed.
+    set_mode(&dir, 0o700);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(reply["state"], "signed_in");
+    assert_eq!(reply["user"]["full_name"], "Grace Hopper");
+    assert!(
+        reply["warning"]
+            .as_str()
+            .unwrap()
+            .starts_with("Can't save the Todoist cache (%1).\u{1f}"),
+        "{reply}"
+    );
+    assert_eq!(fs::read_to_string(home.bin().join("item")).unwrap(), OTHER);
+    // Nothing of the previous account shows under the new token.
+    assert!(
+        !home.cache().exists(),
+        "the previous account's cache stayed"
+    );
+    assert_eq!(
+        status,
+        json!({"ok": true, "state": "signed_in", "user": null})
+    );
 }
 
 #[test]

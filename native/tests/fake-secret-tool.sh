@@ -3,8 +3,11 @@
 # gnome-keyring does (foamy-zendesk checked the same answers against a real
 # one). Its state is files next to it: `item` is the stored secret and
 # `locked` locks its keyring, every unlock prompt dismissed. `search-fails`
-# makes `search` fail and `lookup-dies` kills `lookup`. Each run's whole
-# argv is appended to `log`, so tests can check the secret never is in it.
+# makes `search` fail and `lookup-dies` kills `lookup`. `readonly-after-store`
+# names a directory that a successful `store` makes read-only (a cache that
+# breaks between the token being stored and the cache being written). Each
+# run's whole argv is appended to `log`, so tests can check the secret never
+# is in it.
 d=$(dirname "$0")
 echo "$*" >>"$d/log"
 # Every call names exactly this item.
@@ -60,6 +63,7 @@ case $verb in
       exit 1
     fi
     cat >"$d/item"
+    if [ -s "$d/readonly-after-store" ]; then chmod 500 "$(cat "$d/readonly-after-store")"; fi
     exit 0
     ;;
 esac
