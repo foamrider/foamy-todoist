@@ -127,14 +127,10 @@
 //!
 //! Every command holds an exclusive lock on
 //! `$XDG_RUNTIME_DIR/foamy-todoist/state.lock` while it reads or writes the
-//! keyring or the cache, waiting up to 15 seconds (`BUSY`). Without a
-//! runtime directory (the kit's `lock::runtime_dir` says `NotFound`, as for
-//! an unset `XDG_RUNTIME_DIR` or one that is not a directory) the lock is
-//! `state.lock` in the cache's directory (below, 0700). A lock that can't be
-//! used, such as a `foamy-todoist` runtime directory that is a symlink,
-//! another user's or open to others, is `LOCK_UNAVAILABLE` with the reason.
-//! A sync reads the token under that lock, so a sign-out can't be undone by
-//! a sync in flight.
+//! keyring or the cache, waiting up to 15 seconds (`BUSY`); without a usable
+//! runtime directory it is `LOCK_UNAVAILABLE`, with the reason. A sync reads
+//! the token under that lock, so a sign-out can't be undone by a sync in
+//! flight.
 //!
 //! The cache is `$XDG_CACHE_HOME/foamy-todoist/cache.json` (else
 //! `~/.cache/foamy-todoist/`), directory 0700, file 0600, written

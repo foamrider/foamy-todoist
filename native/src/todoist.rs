@@ -98,20 +98,15 @@ fn lock_unavailable(error: &dyn std::fmt::Display) -> Failure {
     )
 }
 
-/// Where the state lock lives, from what the kit's `lock::runtime_dir`
-/// gave: the runtime directory (`$XDG_RUNTIME_DIR/foamy-todoist`). Its
-/// `NotFound` means there is none (it says so for a caller to fall back):
-/// then the cache's private directory. Any other refusal of the runtime
-/// directory (a symlink, another user's, open to others) is an error with
-/// that reason.
+/// Where the state lock lives: the runtime directory
+/// (`$XDG_RUNTIME_DIR/foamy-todoist`) the kit's `lock::runtime_dir` gave.
+/// Without a usable one (XDG_RUNTIME_DIR unset or not a directory, a folder
+/// that is a symlink, another user's or open to others) every command fails
+/// with that reason. Never a second lock elsewhere: a helper in another
+/// environment would then change the same keyring item and cache at the
+/// same time, and a sync could undo a sign-out.
 pub fn lock_dir(runtime: std::io::Result<PathBuf>) -> Result<PathBuf, Failure> {
-    match runtime {
-        Ok(dir) => Ok(dir),
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            cache_dir().map_err(|error| lock_unavailable(&error))
-        }
-        Err(error) => Err(lock_unavailable(&error)),
-    }
+    runtime.map_err(|error| lock_unavailable(&error))
 }
 
 /// The exclusive lock every command holds while it reads or writes the
@@ -131,8 +126,9 @@ fn cache_failure(key: &str, error: &dyn std::fmt::Display) -> Failure {
     Failure::coded("INTERNAL", message(key, &[&short(&error.to_string(), 120)]))
 }
 
-/// `$XDG_CACHE_HOME/foamy-todoist` (else `~/.cache/…`), private.
-fn cache_dir() -> std::io::Result<PathBuf> {
+/// `$XDG_CACHE_HOME/foamy-todoist/cache.json` (else `~/.cache/…`), its
+/// directory private.
+pub fn cache_file() -> Result<PathBuf, Failure> {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -142,17 +138,11 @@ fn cache_dir() -> std::io::Result<PathBuf> {
                 .filter(|home| home.is_absolute())
                 .map(|home| home.join(".cache"))
         })
-        .ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "no home directory"))?;
+        .ok_or_else(|| cache_failure("Can't use the Todoist cache (%1).", &"no home directory"))?;
     let dir = base.join("foamy-todoist");
-    foamy_helper::fs::ensure_private_dir(&dir)?;
-    Ok(dir)
-}
-
-/// `cache.json` in the [`cache_dir`].
-pub fn cache_file() -> Result<PathBuf, Failure> {
-    cache_dir()
-        .map(|dir| dir.join("cache.json"))
-        .map_err(|error| cache_failure("Can't use the Todoist cache (%1).", &error))
+    foamy_helper::fs::ensure_private_dir(&dir)
+        .map_err(|error| cache_failure("Can't use the Todoist cache (%1).", &error))?;
+    Ok(dir.join("cache.json"))
 }
 
 /// The cached state; a missing, unreadable, oversized or corrupt cache is
