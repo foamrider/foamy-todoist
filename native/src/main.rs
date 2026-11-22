@@ -20,12 +20,15 @@
 //!
 //! - `status` (no network): `{"ok":true,"state":"signed_in"|"signed_out","user":{…}|null}`,
 //!   the user from the cache (null until a sync or `token-set` brought one).
+//!   A stored value that isn't a token is `INVALID_TOKEN`, as in `sync`.
 //! - `token-set` reads at most 4 KiB; the token is 1–256 printable ASCII
 //!   characters without whitespace. The cache directory is checked first,
 //!   then the token with a Sync request for the user (401/403:
-//!   `INVALID_TOKEN`); then it is stored, and the cache is replaced by one
-//!   holding only that user. Once stored the reply is `signed_in`, like
-//!   `status`, plus `warning` when the new cache can't be written.
+//!   `INVALID_TOKEN`). Then the old cache is removed (a cache that can't be
+//!   removed is an error, and nothing is stored), the token is stored, and
+//!   a cache holding only that user is written. Once stored the reply is
+//!   `signed_in`, like `status`, plus `warning` when that cache can't be
+//!   written.
 //! - `token-clear` removes the keyring item and the cache: `signed_out`.
 //!   A locked keyring is `KEYRING_LOCKED` and removes nothing.
 //! - `sync`, `apply` and `add` reply with the snapshot:

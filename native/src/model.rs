@@ -76,20 +76,36 @@ pub fn valid_date(text: &str) -> bool {
     }
 }
 
+/// A time of day `HH:MM:SS` that exists, then optionally a fraction of a
+/// second (`.` and digits).
+fn valid_time(text: &str) -> bool {
+    let (clock, fraction) = text.split_once('.').unwrap_or((text, "0"));
+    let bytes = clock.as_bytes();
+    if bytes.len() != 8 || bytes[2] != b':' || bytes[5] != b':' {
+        return false;
+    }
+    let below = |at: usize, limit: u8| {
+        let (tens, ones) = (bytes[at], bytes[at + 1]);
+        tens.is_ascii_digit() && ones.is_ascii_digit() && (tens - b'0') * 10 + (ones - b'0') < limit
+    };
+    below(0, 24)
+        && below(3, 60)
+        && below(6, 60)
+        && !fraction.is_empty()
+        && fraction.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// A due `date`: `YYYY-MM-DD`, optionally followed by a time
-/// (`THH:MM:SS`, fractions, `Z` for a fixed zone). Only its shape is
-/// checked here; the panel parses it.
+/// (`THH:MM:SS`, fractions, `Z` for a fixed zone). The panel parses it.
 fn valid_due_date(text: &str) -> bool {
     if text.len() > 40 || !valid_date(text.get(..10).unwrap_or("")) {
         return false;
     }
     let rest = &text[10..];
     rest.is_empty()
-        || (rest.starts_with('T')
-            && rest.len() >= 9
-            && rest[1..]
-                .bytes()
-                .all(|b| b.is_ascii_digit() || matches!(b, b':' | b'.' | b'Z')))
+        || rest
+            .strip_prefix('T')
+            .is_some_and(|time| valid_time(time.strip_suffix('Z').unwrap_or(time)))
 }
 
 /// `text` cut to `max` characters, the last one "…" when cut.
@@ -677,6 +693,9 @@ mod tests {
             "2026-11-16T12:00:00",
             "2026-11-16T12:00:00.000000",
             "2026-11-16T13:00:00Z",
+            "2026-11-16T13:00:00.5Z",
+            "2026-11-16T00:00:00",
+            "2026-11-16T23:59:59",
         ] {
             assert!(valid_due_date(good), "{good}");
         }
@@ -685,6 +704,20 @@ mod tests {
             "2026-11-16 12:00",
             "tomorrow",
             "2026-11-16T12:00:00+01:00",
+            // The time part must be a time of day, not only its characters.
+            "2026-11-16T::::::::",
+            "2026-11-16TZZZZZZZZ",
+            "2026-11-16T........",
+            "2026-11-16T12:00",
+            "2026-11-16T1200:00:",
+            "2026-11-16T12:00:00:00",
+            "2026-11-16T24:00:00",
+            "2026-11-16T12:60:00",
+            "2026-11-16T12:00:60",
+            "2026-11-16T12:00:00.",
+            "2026-11-16T12:00:00Z.5",
+            "2026-11-16T12:00:00ZZ",
+            "2026-11-16T12:00:00.5.5",
         ] {
             assert!(!valid_due_date(bad), "{bad}");
         }
@@ -736,6 +769,8 @@ mod tests {
         assert_eq!(normalize_task(&broken), Change::Drop("T1".into()));
         let mut bad_due = task("T1", "x");
         bad_due["due"] = json!({"date": "soon"});
+        assert_eq!(normalize_task(&bad_due), Change::Drop("T1".into()));
+        bad_due["due"] = json!({"date": "2026-11-16T::::::::"});
         assert_eq!(normalize_task(&bad_due), Change::Drop("T1".into()));
         assert_eq!(normalize_task(&json!({"id": "a b"})), Change::Skip);
         assert_eq!(

@@ -320,11 +320,16 @@ impl Context {
         Ok(Client::new(http::base()?, http::TIMEOUT))
     }
 
-    /// `{"ok":true,"state":…,"user":…}`, no network.
+    /// `{"ok":true,"state":…,"user":…}`, no network. A stored value that
+    /// isn't a token is `INVALID_TOKEN`, as in every other command.
     pub fn status(&self) -> Result<Value, Failure> {
         let _lock = self.lock()?;
-        if self.vault.get()?.is_none() {
-            return Ok(json!({"ok": true, "state": "signed_out", "user": null}));
+        match stored_token(&self.vault) {
+            Ok(_) => {}
+            Err(failure) if failure.code == "SIGNED_OUT" => {
+                return Ok(json!({"ok": true, "state": "signed_out", "user": null}));
+            }
+            Err(failure) => return Err(failure),
         }
         let state = load(&cache_file()?);
         Ok(json!({"ok": true, "state": "signed_in", "user": state.user}))
@@ -355,12 +360,15 @@ impl Context {
             .get("user")
             .and_then(model::normalize_user)
             .ok_or_else(unexpected)?;
+        // Another account's tasks never show under this one: the old cache
+        // goes before the token is stored, so a cache that can't be removed
+        // leaves the previous token and its cache together.
+        remove(&path)?;
         self.vault.put(token)?;
-        // Another account's tasks never show under this one: a new cache.
         let mut state = State::empty();
         state.user = Some(user.clone());
         let mut out = json!({"ok": true, "state": "signed_in", "user": user});
-        if let Err(failure) = remove(&path).and_then(|()| save(&path, &state)) {
+        if let Err(failure) = save(&path, &state) {
             out["warning"] = json!(failure.message);
         }
         Ok(out)

@@ -624,6 +624,10 @@ QtObject {
     tokenError = ""
     generation++
     resetData()
+    // The token is stored but its new cache wasn't written: shown until a
+    // sync answers.
+    if (reply.warning)
+      error = helperText(reply.warning)
     user = reply.user || null
     account = reply.state === "signed_in" ? "signed_in" : "signed_out"
     if (signedIn)

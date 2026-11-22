@@ -301,7 +301,9 @@ Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
 - **Account**: signed out, paste your API token and press **Save token**.
   Find it in Todoist under Settings → Integrations → Developer (**Open
   Todoist settings** goes there). The token is checked with Todoist before
-  it is stored. Signed in, the page shows who, and **Sign out**.
+  it is stored. Signed in, the page shows who, and **Sign out**. When the
+  stored token can't be used (for example Todoist refuses it), the page
+  shows why, the token field and **Sign out**.
 - **Size**: Small (default) or Wide (see "The panel"). A **Large** saved by
   an earlier version opens as Wide.
 - **After adding a task**: Close the panel (default) or Keep the field

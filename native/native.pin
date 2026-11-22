@@ -6,6 +6,6 @@ crate native
 binary foamy-todoist-helper
 toolchain 1.99.1
 kit 0.13.0
-source 2607ffbc21547ab8c50aff5402fa1832971b78f9f8d576652597e6ceb2002886
-39ad6f563724da6d6d9f69769e9ebeb644ea954eaebf598e8fcb70f9adddd81b  bin/aarch64/foamy-todoist-helper
-8fe03e6cec75d024490692b23737f63136c18ab26b5077be59ed76b62c204d6a  bin/x86_64/foamy-todoist-helper
+source a83d2f01519525b49467cd3fefc0e65a9d3b824785a12597a338de8997033896
+f757b968c8aa1779f2f2a5d230e81c5f51839aa89afb79e144e14c4cfcdcfc9a  bin/aarch64/foamy-todoist-helper
+30f59e620cd38176ba95db85041da390f105b3b5559dd6f63c91531f7bf94f03  bin/x86_64/foamy-todoist-helper

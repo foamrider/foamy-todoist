@@ -26,6 +26,11 @@ function literals() {
   for (const file of sources) {
     for (const [, fn, key] of code(read(file)).matchAll(new RegExp(`FoamyI18n\\.(tn?)\\(${STRING}`, 'g')))
       found.push({ file, fn, key: JSON.parse(`"${key}"`) });
+    // The kit's text fields word their context menu through the `translate`
+    // the plugin passes in (FoamyI18n.t).
+    if (file.startsWith('kit'))
+      for (const [, key] of code(read(file)).matchAll(new RegExp(`\\broot\\.translate\\(${STRING}`, 'g')))
+        found.push({ file, fn: 't', key: JSON.parse(`"${key}"`) });
     // The kit's FoamyI18n calls its own t/tn.
     if (file.endsWith('FoamyI18n.qml'))
       for (const [, fn, key] of code(read(file)).matchAll(new RegExp(`\\breturn (tn?)\\(${STRING}`, 'g')))
@@ -62,6 +67,19 @@ function helperKeys() {
   return [...keys];
 }
 
+// SafeTextField sets pasteError itself; SafeTextArea gets it from
+// FoamyClipboard's failed().
+function pasteErrors() {
+  const quoted = (line) => [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const field = code(read('kit/SafeTextField.qml'))
+    .split('\n')
+    .filter((line) => /\bpasteError = /.test(line))
+    .flatMap(quoted);
+  const clipboard = [...code(read('kit/FoamyClipboard.qml')).matchAll(/\breader\.failed\("([^"]+)"\)/g)].map((m) => m[1]);
+  assert.ok(field.length >= 3 && clipboard.length >= 3, `paste errors found: ${field.length}, ${clipboard.length}`);
+  return [...field, ...clipboard];
+}
+
 function dataKeys() {
   const prefs = read('kit/FoamyPrefs.js');
   const queue = read('kit/FoamyPrefsQueue.qml');
@@ -69,6 +87,9 @@ function dataKeys() {
     read('kit/FoamyNative.js').match(/UNAVAILABLE_TEXT = "([^"]+)"/)[1],
     ...[...prefs.matchAll(/^var [A-Z_]+ = "([^"]+)"/gm)].map((m) => m[1]),
     ...[...queue.matchAll(/error = "([^"]+)"/g)].map((m) => m[1]),
+    // A failed paste in a kit text field (FoamyTextSettingField shows it
+    // through FoamyI18n.t).
+    ...pasteErrors(),
     // json::run's reply when the helper panics.
     'internal error',
     // Model.emptyText's keys, translated by the view.
