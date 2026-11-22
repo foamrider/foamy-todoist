@@ -320,11 +320,16 @@ impl Context {
         Ok(Client::new(http::base()?, http::TIMEOUT))
     }
 
-    /// `{"ok":true,"state":…,"user":…}`, no network.
+    /// `{"ok":true,"state":…,"user":…}`, no network. A stored value that
+    /// isn't a token is `INVALID_TOKEN`, as in every other command.
     pub fn status(&self) -> Result<Value, Failure> {
         let _lock = self.lock()?;
-        if self.vault.get()?.is_none() {
-            return Ok(json!({"ok": true, "state": "signed_out", "user": null}));
+        match stored_token(&self.vault) {
+            Ok(_) => {}
+            Err(failure) if failure.code == "SIGNED_OUT" => {
+                return Ok(json!({"ok": true, "state": "signed_out", "user": null}));
+            }
+            Err(failure) => return Err(failure),
         }
         let state = load(&cache_file()?);
         Ok(json!({"ok": true, "state": "signed_in", "user": state.user}))

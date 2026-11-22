@@ -726,6 +726,30 @@ fn signed_out_and_locked_keyrings() {
 }
 
 #[test]
+fn a_stored_value_that_is_not_a_token_is_refused_by_every_command() {
+    let home = Home::new("bad-item");
+    // Something other than this helper stored the item.
+    for stored in ["not a token", ""] {
+        fs::write(home.bin().join("item"), stored).unwrap();
+        for command in ["status", "sync"] {
+            let (reply, _) = home.run(command, "", &closed());
+            assert_eq!(
+                (reply["code"].as_str(), reply["error"].as_str()),
+                (
+                    Some("INVALID_TOKEN"),
+                    Some("Todoist didn't accept the API token.")
+                ),
+                "{command} with {stored:?}: {reply}"
+            );
+        }
+    }
+    // Sign-out still removes it.
+    let (reply, _) = home.run("token-clear", "", &closed());
+    assert_eq!(reply["state"], "signed_out", "{reply}");
+    assert!(!home.bin().join("item").exists());
+}
+
+#[test]
 fn a_held_lock_is_busy_and_no_runtime_dir_is_unavailable() {
     let home = Home::signed_in("busy");
     let lock_dir = home.0.join("run/foamy-todoist");

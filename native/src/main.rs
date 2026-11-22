@@ -20,6 +20,7 @@
 //!
 //! - `status` (no network): `{"ok":true,"state":"signed_in"|"signed_out","user":{…}|null}`,
 //!   the user from the cache (null until a sync or `token-set` brought one).
+//!   A stored value that isn't a token is `INVALID_TOKEN`, as in `sync`.
 //! - `token-set` reads at most 4 KiB; the token is 1–256 printable ASCII
 //!   characters without whitespace. The cache directory is checked first,
 //!   then the token with a Sync request for the user (401/403:
