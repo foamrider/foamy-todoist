@@ -126,6 +126,17 @@ FoamySettingsPage {
         Item {
           Layout.fillWidth: true
         }
+        // A stored token that can't be used (refused, or the keyring
+        // failed): Sign out still removes the item and the cache.
+        FoamyButton {
+          objectName: "errorSignOutButton"
+          visible: page.store.account === "error"
+          focusable: true
+          text: FoamyI18n.t("Sign out")
+          kind: "destructive"
+          busy: page.store.tokenBusy
+          onClicked: page.store.signOut()
+        }
       }
     }
     PlainText {
