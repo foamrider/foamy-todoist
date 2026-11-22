@@ -130,8 +130,11 @@ FoamySettingsPage {
         Item {
           Layout.fillWidth: true
         }
-        // A stored token that can't be used (refused, or the keyring
-        // failed): Sign out still removes the item and the cache.
+        // The account check failed (a stored value that isn't a token, a
+        // locked or missing keyring, the lock or the cache folder): Sign
+        // out removes the item and the cache when the keyring and the
+        // cache folder can be used; a locked or missing keyring refuses it
+        // with its own message.
         FoamyButton {
           objectName: "errorSignOutButton"
           visible: page.store.account === "error"
