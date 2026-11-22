@@ -1150,7 +1150,7 @@ ShellRoot {
     case 105: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the sign-out"];
     case 106: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "a SIGNED_OUT reply signed out"];
     case 107: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup while signed out elsewhere"];
-    case 108: return [function() { return store.account === "error" && !store.busy; }, 15000, "a status that refused the stored value"];
+    case 108: return [function() { return store.account === "error" && !store.busy && shell.calls("status").length === shell.callsBefore + 2; }, 15000, "Retry checked the account again, which refused the stored value"];
     case 109: return [function() { return store.account === "signed_out" && !store.busy && !store.tokenBusy; }, 15000, "signed out from the account error"];
     case 110: return [function() { return store.signedIn && store.current !== null && store.current.command === "sync" && shell.held("sync"); }, 15000, "a token stored with a warning, its sync held"];
     case 111: return [function() { return store.signedIn && store.loaded && !store.busy; }, 15000, "signed in again after the SIGNED_OUT reply"];
@@ -2805,16 +2805,29 @@ ShellRoot {
       break;
     case 107:
       if (!check(shell.find(view, "stateText").text === "Add your Todoist API token in Settings" && view.rows.length === 0, "SIGNED_OUT: the popup asks for a token, no rows (" + JSON.stringify([shell.find(view, "stateText").text, view.rows.length]) + ")")) return;
-      // Another program stored a value that isn't a token.
-      shell.put("reply-status.json", JSON.stringify({ ok: false, code: "INVALID_TOKEN", error: "Todoist didn't accept the API token." }));
+      // The keyring is locked: unlocking it can fix that, so the popup
+      // offers Retry. Unlocked, it holds a value that another program
+      // stored and that isn't a token: Retry checks again (step 108).
+      shell.callsBefore = shell.calls("status").length;
+      shell.put("reply-status.json", JSON.stringify({ ok: false, code: "KEYRING_LOCKED", error: "The keyring that holds the Todoist token is locked. Unlock it and try again." }));
       store.check();
+      wait.waitFor(function() { return store.account === "error" && !store.busy; }, 15000, function(locked) {
+        var retry = shell.find(view, "stateButton");
+        if (!check(locked && shell.find(view, "stateText").text === "The keyring that holds the Todoist token is locked. Unlock it and try again." && retry.visible && retry.text === "Retry", "a locked keyring: the popup says so, with Retry (" + JSON.stringify([locked, shell.find(view, "stateText").text, retry.text]) + ")")) return;
+        shell.put("reply-status.json", JSON.stringify({ ok: false, code: "INVALID_TOKEN", error: "Todoist didn't accept the API token." }));
+        retry.clicked();
+      });
       break;
     case 108:
       if (!check(shell.find(view, "stateText").text === "Todoist didn't accept the API token.", "a refused stored value: the popup says so (" + shell.find(view, "stateText").text + ")")) return;
-      // Settings: the token form with the reason, and Sign out to remove
+      // Retry would get the same refusal: the popup's button opens
+      // Settings, with the token form, the reason, and Sign out to remove
       // the stored value and the cache without a working token.
-      view.settingsRequested();
+      var toSettings = shell.find(view, "stateButton");
+      if (!check(toSettings.visible && toSettings.text === "Open settings", "a refused stored value: the popup offers Open settings, not Retry (" + toSettings.text + ")")) return;
+      toSettings.clicked();
       var refusedPage = view.settingsPage;
+      if (!check(view.editingSettings, "Open settings opened Settings")) return;
       if (!check(shell.find(refusedPage, "signedOutForm").visible && !shell.find(refusedPage, "signedInRow").visible && shell.find(refusedPage, "tokenError").text === "Todoist didn't accept the API token.", "a refused stored value: the token form and the reason (" + shell.find(refusedPage, "tokenError").text + ")")) return;
       var errorSignOut = shell.find(refusedPage, "errorSignOutButton");
       if (!check(errorSignOut && errorSignOut.visible && errorSignOut.text === "Sign out", "a refused stored value: Sign out is offered")) return;
@@ -2834,10 +2847,28 @@ ShellRoot {
     case 110:
       if (!check(store.error === "Can't save the Todoist cache (Permission denied (os error 13)).", "token-set's warning shows (" + store.error + ")")) return;
       view.settingsClosed();
+      // No tasks yet, so the list says why a sync failed. The held sync
+      // finds the keyring locked: Retry. The next one is refused by
+      // Todoist: Open settings, where Sign out and a new token are.
+      shell.put("reply-sync.json", JSON.stringify({ ok: false, code: "KEYRING_LOCKED", error: "The keyring that holds the Todoist token is locked. Unlock it and try again." }));
       shell.release("sync");
-      shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
-      one.close();
-      store.check();
+      wait.waitFor(function() { return store.errorCode === "KEYRING_LOCKED" && !store.busy; }, 15000, function(locked) {
+        var stateButton = shell.find(view, "stateButton");
+        if (!check(locked && !store.loaded && shell.find(view, "stateText").text === "The keyring that holds the Todoist token is locked. Unlock it and try again." && stateButton.visible && stateButton.text === "Retry", "a sync that found the keyring locked: no tasks, why, Retry (" + JSON.stringify([locked, store.loaded, shell.find(view, "stateText").text, stateButton.text]) + ")")) return;
+        shell.put("reply-sync.json", JSON.stringify({ ok: false, code: "INVALID_TOKEN", error: "Todoist didn't accept the API token." }));
+        var syncs = shell.calls("sync").length;
+        stateButton.clicked();
+        wait.waitFor(function() { return shell.calls("sync").length === syncs + 1 && !store.busy; }, 15000, function(retried) {
+          if (!check(retried && shell.find(view, "stateText").text === "Todoist didn't accept the API token." && stateButton.text === "Open settings", "Retry synced again; a token Todoist refused: why, with Open settings, not Retry (" + JSON.stringify([retried, shell.find(view, "stateText").text, stateButton.text]) + ")")) return;
+          stateButton.clicked();
+          if (!check(view.editingSettings && shell.find(view.settingsPage, "signedInRow").visible && shell.find(view.settingsPage, "signOutButton").visible, "Open settings opened Settings, signed in, with Sign out")) return;
+          view.settingsClosed();
+          shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
+          shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+          one.close();
+          store.check();
+        });
+      });
       break;
     case 111:
       // A sign-out the keyring refuses (locked): the token stays, so the

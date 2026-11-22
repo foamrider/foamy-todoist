@@ -1552,6 +1552,8 @@ PanelKeyCatcher {
         bottomPadding: FoamyStyle.gapLarge
         spacing: FoamyStyle.gap
         readonly property bool failure: kind === "failed" || kind === "accountError" || kind === "unavailable"
+        // The helper's code for the failure shown ("" for none).
+        readonly property string code: kind === "accountError" ? root.store.accountErrorCode : kind === "failed" ? root.store.errorCode : ""
         PlainText {
           objectName: "stateText"
           x: FoamyStyle.padding
@@ -1581,14 +1583,19 @@ PanelKeyCatcher {
         FoamyButton {
           id: stateButton
           objectName: "stateButton"
+          // A token that can't be used (Todoist refused it, or the keyring
+          // holds a value that isn't one) is fixed in Settings, with a new
+          // token or Sign out: Retry would only get the same refusal. Other
+          // failures, such as a locked keyring, can pass: Retry.
+          readonly property bool opensSettings: stateBox.kind === "signedOut" || stateBox.code === "INVALID_TOKEN"
           visible: stateBox.kind === "signedOut" || stateBox.kind === "failed" || stateBox.kind === "accountError"
           anchors.horizontalCenter: parent.horizontalCenter
-          text: stateBox.kind === "signedOut" ? FoamyI18n.t("Open settings") : FoamyI18n.t("Retry")
+          text: opensSettings ? FoamyI18n.t("Open settings") : FoamyI18n.t("Retry")
           kind: stateBox.kind === "signedOut" ? "primary" : "secondary"
           hasCursor: viewCursor.at(root.firstRowStop) && !root.stops.length
           onHoveredChanged: if (hovered)
             viewCursor.hover(root.firstRowStop)
-          onClicked: stateBox.kind === "signedOut" ? root.settingsRequested() : root.store.retry()
+          onClicked: opensSettings ? root.settingsRequested() : root.store.retry()
         }
       }
     }

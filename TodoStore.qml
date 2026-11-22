@@ -32,6 +32,9 @@ QtObject {
   readonly property bool signedIn: account === "signed_in"
   property var user: null
   property string accountError: ""
+  // The helper's code for accountError ("" without one): the view offers
+  // Settings instead of Retry for a stored value that isn't a token.
+  property string accountErrorCode: ""
   // Why the last token-set or token-clear failed (shown in Settings).
   property string tokenError: ""
   property int generation: 0
@@ -533,6 +536,7 @@ QtObject {
     if (FoamyNative.unavailable(code)) {
       account = "unavailable"
       accountError = FoamyI18n.t(FoamyNative.UNAVAILABLE_TEXT)
+      accountErrorCode = ""
       const waiting = queue
       queue = []
       waiting.forEach(function (queued) {
@@ -602,9 +606,11 @@ QtObject {
     if (!ok) {
       account = "error"
       accountError = failureText(reply, code)
+      accountErrorCode = reply && typeof reply.code === "string" ? reply.code : ""
       return
     }
     accountError = ""
+    accountErrorCode = ""
     user = reply.user || null
     account = reply.state === "signed_in" ? "signed_in" : "signed_out"
     if (signedIn)
