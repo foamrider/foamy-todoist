@@ -407,11 +407,52 @@ ShellRoot {
         { name: "dueField", open: "due" },
         { name: "descriptionField", open: "" }
       ], function() {
-        shell.menuLeave(ed, function() {
-          view.editor.back();
-          done();
+        shell.editorRefusedPastes(ed, function() {
+          shell.menuLeave(ed, function() {
+            view.editor.back();
+            done();
+          });
         });
       });
+    });
+  }
+  // A paste each of the editor's text fields refuses: why shows under the
+  // field, without Retry (nothing was sent). Then done().
+  function editorRefusedPastes(ed, done) {
+    var fields = [
+      { name: "the title", field: ed.contentField, line: "contentError", focus: function() { ed.contentField.focusInput(); } },
+      { name: "the description", field: ed.descriptionField, line: "descriptionError", focus: function() { ed.descriptionField.focusInput(); } },
+      { name: "the Date field", field: ed.dueField, line: "section-due", focus: function() { ed.openField("due"); } },
+      { name: "the Deadline field", field: ed.deadlineField, line: "section-deadline", focus: function() { ed.openField("deadline"); } }
+    ];
+    var next = function(i) {
+      if (i === fields.length) { done(); return; }
+      var f = fields[i];
+      var part = function(name) { return function() { return shell.find(shell.find(ed, f.line), name); }; };
+      f.focus();
+      shell.refusedPaste(f.name, f.field, part("fieldErrorText"), part("fieldRetry"), function() { next(i + 1); });
+    };
+    next(0);
+  }
+  // A paste the field (which has the keys) refuses, as the kit refuses a
+  // clipboard of more than 16 KiB (the stand-in's "large"): Ctrl+V changes
+  // nothing, and line(), the error line that belongs to the field, says
+  // why in the panel's words; retry(), when given, is that line's Retry,
+  // which a refused paste doesn't offer. Then the clipboard reads "folder"
+  // again and done().
+  function refusedPaste(name, field, line, retry, done) {
+    var clipboard = Quickshell.env("TEST_CLIPBOARD_STATE");
+    if (!shell.writeFile(clipboard, "large")) return;
+    var before = field.text;
+    ev.keyClick(Qt.Key_V, Qt.ControlModifier, -1);
+    if (!check(field.pasteRunning, name + ": Ctrl+V started a paste")) return;
+    wait.waitFor(function() { return !field.pasteRunning; }, 15000, function(ended) {
+      var shown = line();
+      var why = Kit.FoamyI18n.t("Clipboard text is too large or contains invalid characters.");
+      var offered = retry ? retry().visible : false;
+      if (!check(ended && field.text === before && shown.visible && shown.text === why && !offered, name + ": a refused paste changes nothing and its line says why, without Retry (" + JSON.stringify([ended, field.pasteError, field.text === before, shown.visible, shown.text, offered]) + ")")) return;
+      if (!shell.writeFile(clipboard, "normal")) return;
+      done();
     });
   }
   // A right-click on an editor field opens its context menu: the menu takes
@@ -1302,11 +1343,14 @@ ShellRoot {
       break;
     case 14:
       if (!check(view.view === "today" && view.fieldFocused, "Alt+2 while typing shows Today and keeps the caret (" + view.view + ")")) return;
-      // Shift+Enter (with "Close the panel") adds and keeps the field open for the next task.
-      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
       shell.callsBefore = shell.calls("add").length;
-      for (var m of "Milk") ev.keyClickChar(m, Qt.NoModifier, -1);
-      ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+      // A paste the band's field refuses: the line under the band says why.
+      shell.refusedPaste("the band's field", view.field, function() { return shell.find(view, "errorLine"); }, null, function() {
+        // Shift+Enter (with "Close the panel") adds and keeps the field open for the next task.
+        shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+        for (var m of "Milk") ev.keyClickChar(m, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+      });
       break;
     case 15:
       if (!check(view.fieldOpen && view.fieldFocused && view.field.text === "" && view.addError === "", "after an add the field stays open, focused and empty (" + view.addError + ")")) return;
@@ -1464,11 +1508,17 @@ ShellRoot {
     case 26:
       if (!check(store.helperInput === "", "the token isn't kept after it was written (" + store.helperInput.length + " characters)")) return;
       if (!check(view.settingsPage.tokenField.secretText === "wrong-token", "a refused token stays in the field")) return;
-      shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
-      view.settingsPage.tokenField.clear();
-      view.settingsPage.tokenField.focusInput();
-      for (var r of "right-token") ev.keyClickChar(r, Qt.NoModifier, -1);
-      view.settingsPage.saveToken();
+      var tokenPage = view.settingsPage;
+      // A paste the token field refuses: its line says why, in place of
+      // the refused token's error.
+      tokenPage.tokenField.focusInput();
+      shell.refusedPaste("the token field", tokenPage.tokenField, function() { return shell.find(tokenPage, "tokenError"); }, null, function() {
+        shell.put("reply-token-set.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
+        tokenPage.tokenField.clear();
+        tokenPage.tokenField.focusInput();
+        for (var r of "right-token") ev.keyClickChar(r, Qt.NoModifier, -1);
+        tokenPage.saveToken();
+      });
       break;
     case 27:
       if (!check(view.settingsPage.tokenField.secretText === "" && view.settingsPage.tokenField.text === "" && store.helperInput === "", "a stored token leaves the field and memory")) return;

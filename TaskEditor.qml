@@ -729,6 +729,8 @@ FocusScope {
               translate: FoamyI18n.t
               Accessible.name: FoamyI18n.t("Task")
               onTextEdited: editor.setError("content", "")
+              onPasteErrorChanged: if (pasteError !== "")
+                editor.setError("content", "")
               onEditingFinished: editor.saveField("content")
               onKeyPressed: function (event) {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -769,6 +771,7 @@ FocusScope {
           objectName: "contentError"
           Layout.leftMargin: editor.gutter
           error: editor.errorOf("content")
+          pasteError: contentInput.pasteError
           onRetry: editor.retry("content")
         }
 
@@ -809,6 +812,8 @@ FocusScope {
               translate: FoamyI18n.t
               Accessible.name: FoamyI18n.t("Description")
               onTextEdited: editor.setError("description", "")
+              onPasteErrorChanged: if (pasteError !== "")
+                editor.setError("description", "")
               onEditingFinished: if (enabled)
                 editor.saveField("description")
               onKeyPressed: function (event) {
@@ -846,6 +851,7 @@ FocusScope {
           objectName: "descriptionError"
           Layout.leftMargin: editor.gutter
           error: editor.errorOf("description") !== "" ? editor.errorOf("description") : editor.desc && editor.desc.state === "error" ? editor.desc.error : ""
+          pasteError: descriptionInput.pasteError
           onRetry: editor.desc && editor.desc.state === "error" ? editor.store.loadDescription(editor.taskId) : editor.retry("description")
         }
       }
@@ -895,6 +901,7 @@ FocusScope {
           hasValue: editor.dueLabel !== "" || editor.opened === "due"
           accessibleName: dueRow.visible ? FoamyI18n.t("Date") + ": " + dueRow.text : FoamyI18n.t("Add date")
           error: editor.errorOf("due")
+          pasteError: dueInput.pasteError
           onActivated: editor.openField("due")
           onRetry: editor.retry("due")
           ValueRow {
@@ -916,6 +923,8 @@ FocusScope {
             translate: FoamyI18n.t
             Accessible.name: FoamyI18n.t("Date")
             onTextEdited: editor.setError("due", "")
+            onPasteErrorChanged: if (pasteError !== "")
+              editor.setError("due", "")
             onEditingFinished: {
               editor.saveField("due")
               editor.closeField("due", false)
@@ -936,6 +945,7 @@ FocusScope {
           hasValue: editor.deadlineLabel !== "" || editor.opened === "deadline"
           accessibleName: deadlineRow.visible ? FoamyI18n.t("Deadline") + ": " + deadlineRow.text : FoamyI18n.t("Add deadline")
           error: editor.errorOf("deadline")
+          pasteError: deadlineInput.pasteError
           onActivated: editor.openField("deadline")
           onRetry: editor.retry("deadline")
           ValueRow {
@@ -957,6 +967,8 @@ FocusScope {
             translate: FoamyI18n.t
             Accessible.name: FoamyI18n.t("Deadline")
             onTextEdited: editor.setError("deadline", "")
+            onPasteErrorChanged: if (pasteError !== "")
+              editor.setError("deadline", "")
             onEditingFinished: {
               editor.saveField("deadline")
               editor.closeField("deadline", false)
@@ -1174,8 +1186,8 @@ FocusScope {
   // click anywhere in it, or Enter or Space on its one cursor stop, does
   // what its value does (`activated`: a menu, or the one-line field). The
   // label chips' × and an open field keep their own clicks (the click
-  // target lies under the content). A failed save's error and Retry sit
-  // under it, outside the target.
+  // target lies under the content). A failed save's error and Retry, or a
+  // refused paste into its field, sit under it, outside the target.
   component Section: ColumnLayout {
     id: section
     property string caption: ""
@@ -1191,6 +1203,8 @@ FocusScope {
     // the slot's own.
     property bool hasValue: true
     property string error: ""
+    // Its field's pasteError (a catalog key).
+    property string pasteError: ""
     readonly property alias addButton: plus
     default property alias content: slot.data
     signal activated(bool keyboard)
@@ -1291,6 +1305,7 @@ FocusScope {
       Layout.leftMargin: FoamyStyle.gap
       Layout.bottomMargin: FoamyStyle.gap
       error: section.error
+      pasteError: section.pasteError
       onRetry: section.retry()
     }
   }
@@ -1334,25 +1349,30 @@ FocusScope {
     color: FoamyPalette.divider
   }
 
-  // A failed save (or read): why, and Retry.
+  // A failed save (or read): why, and Retry. Else why the field refused a
+  // paste (its pasteError, a catalog key), without Retry: nothing was sent
+  // to try again. A refused paste ends the save's error, as typing does.
   component ErrorLine: RowLayout {
     id: line
     property string error: ""
+    property string pasteError: ""
+    readonly property string shown: error !== "" ? error : pasteError !== "" ? FoamyI18n.t(pasteError) : ""
     signal retry
     objectName: "fieldError"
-    visible: error !== ""
+    visible: shown !== ""
     Layout.fillWidth: true
     spacing: FoamyStyle.gap
     PlainText {
       objectName: "fieldErrorText"
       Layout.fillWidth: true
-      text: line.error
+      text: line.shown
       font.pixelSize: FoamyStyle.font.caption
       color: Commons.Color.urgent
       Accessible.role: Accessible.AlertMessage
     }
     FoamyButton {
       objectName: "fieldRetry"
+      visible: line.error !== ""
       text: FoamyI18n.t("Retry")
       onClicked: line.retry()
     }

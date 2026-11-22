@@ -120,8 +120,10 @@ after Enter closed it before Todoist answered, the draft is kept for this
 session and comes back, with the caret at its end and the error if the add
 failed, the next time the panel opens. Adding the task or clearing it with
 Esc ends the draft. A suggestion that would make the text longer than 500
-characters isn't put in (the line under the band says so). At most 500
-characters. The text goes to Todoist's Quick Add (see below).
+characters isn't put in (the line under the band says so). A paste the
+field can't take (over 16 KiB, not plain text, or no answer from the
+clipboard within two seconds) changes nothing, and the line says why. At
+most 500 characters. The text goes to Todoist's Quick Add (see below).
 
 **Suggestions**: typing `#` at the start of a word lists your projects (the
 Inbox too), `@` your labels (your personal ones and the shared labels on
@@ -222,7 +224,8 @@ stop each), changes it.
   view or size, closing the panel) saves what you typed first; a change
   that can't be sent then, such as a deadline that isn't a day, is said on
   the list's error line. A save Todoist refuses shows why under the part,
-  with **Retry**, and keeps your text. Only what you typed is sent: a field
+  with **Retry**, and keeps your text; so does a paste the field can't
+  take, without **Retry**. Only what you typed is sent: a field
   you haven't changed follows the task when it changes in Todoist (also
   while it has the caret); one you changed keeps your text, and saving it
   replaces Todoist's.

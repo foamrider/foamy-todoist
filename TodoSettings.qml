@@ -103,6 +103,10 @@ FoamySettingsPage {
         translate: FoamyI18n.t
         Accessible.name: FoamyI18n.t("API token")
         onAccepted: page.saveToken()
+        // A refused paste (pasteError, a catalog key) is the newest news:
+        // it ends the last token error, so the line says why.
+        onPasteErrorChanged: if (pasteError !== "")
+          page.store.tokenError = ""
       }
       RowLayout {
         width: parent.width
@@ -139,9 +143,11 @@ FoamySettingsPage {
         }
       }
     }
+    // Why the token failed, why the token field refused a paste, or why
+    // the account can't be used.
     PlainText {
       objectName: "tokenError"
-      readonly property string message: page.store.tokenError !== "" ? page.store.tokenError : page.store.account === "unavailable" || page.store.account === "error" ? page.store.accountError : ""
+      readonly property string message: page.store.tokenError !== "" ? page.store.tokenError : tokenInput.pasteError !== "" ? FoamyI18n.t(tokenInput.pasteError) : page.store.account === "unavailable" || page.store.account === "error" ? page.store.accountError : ""
       visible: message !== ""
       width: parent.width
       text: message
