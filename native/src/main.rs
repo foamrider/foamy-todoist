@@ -29,8 +29,14 @@
 //!   a cache holding only that user is written. Once stored the reply is
 //!   `signed_in`, like `status`, plus `warning` when that cache can't be
 //!   written.
-//! - `token-clear` removes the keyring item and the cache: `signed_out`.
-//!   A locked keyring is `KEYRING_LOCKED` and removes nothing.
+//! - `token-clear` removes the cache, then the keyring item: `signed_out`.
+//!   A cache that can't be removed is an error and removes nothing, so the
+//!   token stays with its cache, as in `token-set`. A locked keyring is
+//!   `KEYRING_LOCKED`: the cache is gone and the token stays. That is safe:
+//!   the cache never holds the token and is only a copy of what Todoist
+//!   keeps; while the keyring is locked `status` and `sync` fail with
+//!   `KEYRING_LOCKED` anyway, and once it is unlocked the account is still
+//!   signed in and its next sync is a full one.
 //! - `sync`, `apply` and `add` reply with the snapshot:
 //!   `{"ok":true,"user":{"id","full_name","email","inbox_project_id","timezone"}|null,
 //!   "projects":[{"id","name","color","parent_id","child_order","inbox","shared"}],

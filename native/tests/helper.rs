@@ -714,11 +714,21 @@ fn signed_out_and_locked_keyrings() {
         let (reply, _) = home.run(command, "", &closed());
         assert_eq!(reply["code"], "KEYRING_LOCKED", "{command}: {reply}");
     }
-    // A locked keyring is not a sign-out: the token and the cache stay.
-    assert!(home.bin().join("item").exists(), "still stored");
-    assert!(home.cache().exists(), "the cache was removed");
-    // Unlocked, sign-out removes the item and the cache.
+    // A locked keyring is not a sign-out: the token stays, so the account
+    // is still signed in once it is unlocked. The cache went first: it
+    // never holds the token, and the next sync writes it again.
+    assert!(home.bin().join("item").exists(), "the token was removed");
+    assert!(!home.cache().exists(), "the cache stayed");
     fs::remove_file(home.bin().join("locked")).unwrap();
+    let (reply, _) = home.run("status", "", &closed());
+    assert_eq!(
+        reply,
+        json!({"ok": true, "state": "signed_in", "user": null})
+    );
+    let server = Server::start(vec![ok(full_sync())], TOKEN);
+    home.run("sync", "", &server.base);
+    assert!(home.cache().exists(), "the sync wrote no cache");
+    // Unlocked, sign-out removes the item and the cache.
     let (reply, _) = home.run("token-clear", "", &closed());
     assert_eq!(reply["state"], "signed_out", "{reply}");
     assert!(!home.bin().join("item").exists());
@@ -950,6 +960,53 @@ fn a_cache_that_cannot_be_removed_stores_no_token() {
     );
     assert_eq!(fs::read_to_string(home.bin().join("item")).unwrap(), TOKEN);
     assert_eq!(status["user"]["full_name"], "Ada Lovelace", "{status}");
+}
+
+#[test]
+fn a_sign_out_that_cannot_remove_the_cache_keeps_the_token() {
+    // Nothing is removed: the token stays with its cache, still signed in,
+    // so Sign out can run again once the folder is fixed, and no cache is
+    // left without its token to block the next token-set.
+    let kept = |home: &Home, case: &str, key: &str| {
+        let (reply, _) = home.run("token-clear", "", &closed());
+        assert_eq!(reply["code"], "INTERNAL", "{case}: {reply}");
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with(&format!("{key}\u{1f}")),
+            "{case}: {reply}"
+        );
+        assert_eq!(
+            fs::read_to_string(home.bin().join("item")).unwrap_or_default(),
+            TOKEN,
+            "{case}: the token went without its cache"
+        );
+        assert!(home.cache().exists(), "{case}: the cache went");
+    };
+
+    // cache.json is a directory: it can't be removed.
+    let home = Home::signed_in("clear-cache-dir");
+    fs::create_dir_all(home.cache()).unwrap();
+    set_mode(home.cache().parent().unwrap(), 0o700);
+    kept(
+        &home,
+        "cache.json is a directory",
+        "Can't remove the Todoist cache (%1).",
+    );
+
+    // A cache folder open to others: cache_file() refuses it, also before
+    // the keyring.
+    let home = Home::signed_in("clear-cache-open");
+    let dir = home.cache().parent().unwrap().to_path_buf();
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(home.cache(), "{}").unwrap();
+    set_mode(&dir, 0o755);
+    kept(
+        &home,
+        "the cache folder is open to others",
+        "Can't use the Todoist cache (%1).",
+    );
 }
 
 #[test]

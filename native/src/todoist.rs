@@ -382,10 +382,15 @@ impl Context {
         Ok(out)
     }
 
+    /// The cache goes first, as in `token_set`: a cache that can't be
+    /// removed leaves the token and its cache together (still signed in,
+    /// Sign out can run again), never a cache without its token. A keyring
+    /// that then refuses keeps the token without a cache, which the next
+    /// sync writes again in full.
     pub fn token_clear(&self) -> Result<Value, Failure> {
         let _lock = self.lock()?;
-        self.vault.delete()?;
         remove(&cache_file()?)?;
+        self.vault.delete()?;
         Ok(json!({"ok": true, "state": "signed_out", "user": null}))
     }
 
