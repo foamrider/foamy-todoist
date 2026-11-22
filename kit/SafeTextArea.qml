@@ -1,4 +1,4 @@
-// foamy-kit 0.13.1 271fe6f04ed5c0695185bc328b0813c7163f78b21e7c283ecee7f19efcca64a3 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.13.1 7553db52a3e957cca0815cf30008ebc6ba824dc8dc579eb5bb283e48f5f38b0f — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.Commons
@@ -416,11 +416,32 @@ Flickable {
     }
   }
 
+  // Keep the horizontal scroll inside the text, as SafeTextField does: the
+  // attached TextArea leaves the view scrolled to contentX = -leftPadding,
+  // which put the text one padding too far in, and in RTL pushed the ends
+  // of the lines past the field's edge. The lines wrap, so this is 0.
+  function _clampScroll() {
+    if (!editorReady)
+      return
+    var max = contentWidth > width ? contentWidth - width : 0
+    if (contentX < 0)
+      contentX = 0
+    else if (contentX > max)
+      contentX = max
+  }
+  onWidthChanged: _clampScroll()
+  onContentWidthChanged: _clampScroll()
+  onContentXChanged: _clampScroll()
   onHeightChanged: _followCursor()
   Component.onCompleted: {
     editorReady = true
+    // A maximumLength lowered while the page is created, after the editor
+    // took its text and before this runs (Qt completes in reverse creation
+    // order: a root's or a later sibling's Component.onCompleted comes
+    // first), was not applied: onMaximumLengthChanged waits for editorReady.
     if (editor.length > _limit())
       editor.remove(_cutAt(editor.text, _limit()), editor.length)
+    _clampScroll()
   }
   // Runs when maximumLength changes after creation (see SafeTextField: no
   // JS globals here).
