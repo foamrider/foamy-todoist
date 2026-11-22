@@ -2506,6 +2506,9 @@ ShellRoot {
       // A draft that can't be sent (a deadline that isn't a day), then
       // another task: the list's error line says why, nothing is sent.
       big5.editor.deadlineField.focusInput();
+      // The task may already have a deadline, and a full field takes no
+      // more keys: select it, so the typed day replaces it.
+      ev.keyClick(Qt.Key_A, Qt.ControlModifier, -1);
       for (var d5 of "2026-02-30") ev.keyClickChar(d5, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       if (!check(big5.editor.errorOf("deadline") === "Enter a deadline as YYYY-MM-DD.", "the bad deadline is caught in the pane")) return;
