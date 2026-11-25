@@ -1053,7 +1053,10 @@ ShellRoot {
     case 1: return [function() { return one.popup.bodyItem !== null; }, 10000, "the popup opened"];
     case 2: return [function() { return store.signedIn && store.syncing && shell.held("sync"); }, 15000, "signed in, the first sync held"];
     case 3: return [function() { return store.loaded && !store.busy; }, 15000, "the first sync"];
-    case 4: return [function() { return view && view.active; }, 10000, "the reopened popup"];
+    // Reopened, the list first builds the rows of its closed height; the
+    // rest come when the popup's own window lays it out, which can be
+    // after the frames advance() waits for (another window's).
+    case 4: return [function() { return view && view.active && shell.builtRows(view).length >= 6; }, 10000, "the reopened popup built its today rows"];
     case 5: return [function() { return view.fieldFocused && view.band.fieldProgress === 1; }, 10000, "the field has the keys, grown"];
     case 6: return [function() { return view.fieldFocused; }, 10000, "a opened the field"];
     case 9: return [function() { return shell.calls("apply").length === 1 && !store.busy && Object.keys(store.sending).length === 0; }, 15000, "the completion was sent when the undo window ended"];
@@ -1237,7 +1240,6 @@ ShellRoot {
     case 4:
       // Reopened: no field, no cursor; the band has +, Search and ⋯ (Settings in it).
       if (!check(!view.fieldFocused && !view.fieldOpen && view.cursor.index === -1 && !view.blocked, "nothing has the cursor on open (" + view.cursor.index + ")")) return;
-      if (!check(shell.builtRows(view).length >= 6, "the today rows are built (" + shell.builtRows(view).length + ")")) return;
       if (!check(shell.highlighted(view).length === 0, "no row highlight on open")) return;
       var actions = view.band.shownTrailing.map(function(item) { return item.objectName; });
       if (!check(JSON.stringify(actions) === JSON.stringify(["addAction", "searchAction"]) && view.band.settingsInMenu && view.band.menuButton.visible, "the band: +, Search, ⋯ (" + JSON.stringify(actions) + ", Settings in the menu " + view.band.settingsInMenu + ")")) return;
