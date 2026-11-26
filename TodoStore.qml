@@ -504,11 +504,16 @@ QtObject {
   // Why the field's last add failed, or its warning ("" when it worked):
   // it stays with the draft, also when the reply came after closing.
   property string addError: ""
+  // A failed add's draft and reason wait in a closed popup (none was open
+  // when the reply came): the bar buttons say so until a popup opens and
+  // shows them (TodoView.prepare clears it).
+  property bool addUnseen: false
   signal fieldAdded(string text)
   function addFromField(text, dueDate, projectId) {
     if (addPending)
       return false
     addError = ""
+    addUnseen = false
     var request = add(text, dueDate, projectId)
     if (request < 0)
       return false
@@ -523,11 +528,13 @@ QtObject {
     pendingAdd = -1
     pendingAddText = ""
     addError = message
+    // A popup open on any monitor shows the reply (its demand is up).
+    addUnseen = !ok && addDraft !== "" && FoamyShared.demandCount("todoist") === 0
     if (!ok)
       return
-    // Cleared only where it still holds what was added (typing went on).
-    if (addDraft === sent)
-      addDraft = ""
+    // What was added leaves the draft; text typed after it stays (as in
+    // the field: Model.typedAfter).
+    addDraft = Model.typedAfter(addDraft, sent)
     fieldAdded(sent)
   }
 
@@ -894,6 +901,7 @@ QtObject {
   function resetData() {
     addDraft = ""
     addError = ""
+    addUnseen = false
     snapshot = null
     syncedAt = 0
     error = ""

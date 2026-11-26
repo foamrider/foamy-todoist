@@ -65,6 +65,15 @@ function priorityRole(priority) {
   return priority === 4 ? "error" : priority === 3 ? "warning" : priority === 2 ? "accent" : "muted"
 }
 
+// The completion ring by priority, so the priority reads by more than its
+// hue: p1 a thicker, filled ring, p4 a thin, empty one ({border px, fill
+// alpha at rest}; hover adds RING_HOVER, the completed look is RING_DONE).
+var RING_HOVER = 0.16
+var RING_DONE = 0.9
+function ringLook(priority) {
+  return priority === 4 ? { border: 2, fill: 0.4 } : priority === 1 ? { border: 1, fill: 0 } : { border: 1.5, fill: 0.12 }
+}
+
 // ---- days -------------------------------------------------------------------
 
 function pad(n) {
@@ -1590,7 +1599,7 @@ function msToMidnight(now) {
 
 if (typeof module !== "undefined")
   module.exports = {
-    WEB, webUrl, validId, validDate, colorRole, priorityRole, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
+    WEB, webUrl, validId, validDate, colorRole, priorityRole, ringLook, RING_HOVER, RING_DONE, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion, suggestionTyped, typedAfter,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,

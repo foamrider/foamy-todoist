@@ -107,7 +107,7 @@ Ui.Panel {
     labelVisible: false
     hasVisualContent: true
     fixedWidth: root.bar && root.bar.vertical ? -1 : Math.max(Style.bar.iconSlot, barContent.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
-    tooltipText: !TodoStore.signedIn ? FoamyI18n.t("Todoist: not signed in") : !TodoStore.loaded ? "Todoist" : FoamyI18n.t("Todoist: %1, %2", [FoamyI18n.tn("%1 left today", TodoStore.counts.today), FoamyI18n.tn("%1 overdue", TodoStore.counts.overdue)])
+    tooltipText: !TodoStore.signedIn ? FoamyI18n.t("Todoist: not signed in") : TodoStore.addUnseen ? FoamyI18n.t("Todoist: your last task wasn't added. Open the panel to see why.") : !TodoStore.loaded ? "Todoist" : FoamyI18n.t("Todoist: %1, %2", [FoamyI18n.tn("%1 left today", TodoStore.counts.today), FoamyI18n.tn("%1 overdue", TodoStore.counts.overdue)])
     onPressed: function (pressedButton) {
       if (pressedButton === Qt.RightButton)
         settingsState.show()
@@ -117,6 +117,7 @@ Ui.Panel {
     Row {
       id: barContent
       readonly property alias countLabel: countLabel
+      readonly property alias addMark: addMark
       anchors.centerIn: parent
       spacing: Style.space(1)
       Item {
@@ -128,6 +129,21 @@ Ui.Panel {
           width: Style.bar.iconSize
           height: width
           color: button.foreground
+        }
+        // A failed add waits unseen in the closed popup: a dot on the
+        // icon's corner (as foamy-notification-center's), in the bar's
+        // urgent colour (the button's activeColor). Inside the icon's
+        // canvas: the button keeps its width, across or upright.
+        Rectangle {
+          id: addMark
+          objectName: "addMark"
+          visible: TodoStore.addUnseen
+          anchors.top: parent.top
+          anchors.right: parent.right
+          width: Style.space(6)
+          height: width
+          radius: width / 2
+          color: button.activeColor
         }
       }
       // One number, as foamy-zendesk's bar: the tasks left today (the

@@ -1141,6 +1141,8 @@ PanelKeyCatcher {
     // The draft comes back with why its add failed (the reply may have
     // come after the popup closed); setView clears the error otherwise.
     var draftError = store.addDraft !== "" ? store.addError : ""
+    // Shown now: the bar buttons' mark goes.
+    store.addUnseen = false
     editingTask = ""
     paneTask = ""
     setView(next, store.lastProject)
@@ -1270,7 +1272,8 @@ PanelKeyCatcher {
         return FoamyI18n.tn("%1 tasks", counts.inbox)
       if (view === "upcoming")
         return FoamyI18n.tn("%1 tasks in the next 7 days", counts.week)
-      const date = formatDate(Model.dayDate(store.today), translate("ddd d MMM"))
+      // It starts the line: a capital, as the rows' dates (Norwegian "tor.").
+      const date = Model.capitalized(formatDate(Model.dayDate(store.today), translate("ddd d MMM")))
       const leftNow = date + " · " + FoamyI18n.tn("%1 left", counts.today)
       return counts.overdue ? leftNow + " · " + FoamyI18n.tn("%1 overdue", counts.overdue) : leftNow
     }
@@ -1596,6 +1599,7 @@ PanelKeyCatcher {
               }
               PlainText {
                 id: railCount
+                objectName: "railCount"
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
                 anchors.rightMargin: FoamyStyle.gap
@@ -1603,7 +1607,9 @@ PanelKeyCatcher {
                 wrapMode: Text.NoWrap
                 font.family: FoamyStyle.monoFamily
                 font.pixelSize: FoamyStyle.font.caption
-                color: railRow.modelData.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.mutedText
+                // mutedText measures under 4.5:1, and secondaryText under it
+                // on the selected row's fill: there the text's own colour.
+                color: railRow.modelData.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : railRow.selected ? FoamyPalette.text : FoamyPalette.secondaryText
               }
             }
           }

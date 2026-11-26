@@ -115,11 +115,13 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: FoamyStyle.rowPadding
         anchors.verticalCenter: parent.verticalCenter
+        objectName: "weekCount"
         text: columnItem.count ? FoamyI18n.number(columnItem.count) : ""
         wrapMode: Text.NoWrap
         font.family: FoamyStyle.monoFamily
         font.pixelSize: FoamyStyle.font.caption
-        color: FoamyPalette.mutedText
+        // secondaryText: mutedText measures under 4.5:1 (dark theme).
+        color: FoamyPalette.secondaryText
       }
       Rectangle {
         anchors.bottom: parent.bottom
@@ -196,8 +198,16 @@ Item {
           onClicked: week.clicked(columnItem.index, entryItem.card)
           Accessible.role: Accessible.ListItem
           Accessible.name: entryItem.isDay ? "" : entryItem.modelData.text
-          readonly property color ringColor: entryItem.isDay ? FoamyPalette.mutedText : week.roleColor(entryItem.modelData.priorityRole)
           readonly property bool struck: !entryItem.isDay && entryItem.modelData.struck === true
+          // Completed without a priority: the secondary tone (as the list's ring).
+          readonly property color ringColor: entryItem.isDay ? FoamyPalette.mutedText : struck && entryItem.modelData.priorityRole === "muted" ? FoamyPalette.secondaryText : week.roleColor(entryItem.modelData.priorityRole)
+          // As the list's ring: its look by priority, the check in the ink
+          // that reads on the completed fill.
+          readonly property var ringLook: Model.ringLook(entryItem.isDay ? 0 : entryItem.modelData.priority)
+          readonly property color checkInk: {
+            const fill = Qt.tint(FoamyPalette.background, Qt.alpha(ringColor, Model.RING_DONE))
+            return FoamyPalette.contrastRatio(FoamyPalette.text, fill) >= FoamyPalette.contrastRatio(FoamyPalette.background, fill) ? FoamyPalette.text : FoamyPalette.background
+          }
           MouseArea {
             id: ringArea
             objectName: "weekRing"
@@ -213,20 +223,22 @@ Item {
             Accessible.checked: cardSurface.struck
             Accessible.name: FoamyI18n.t("Complete")
             Rectangle {
+              objectName: "weekRingMark"
               anchors.centerIn: parent
               width: 14
               height: 14
               radius: 7
-              border.width: 1.5
+              border.width: cardSurface.ringLook.border
               border.color: cardSurface.ringColor
-              color: Qt.alpha(cardSurface.ringColor, cardSurface.struck ? 0.9 : ringArea.containsMouse ? 0.28 : 0.12)
+              color: Qt.alpha(cardSurface.ringColor, cardSurface.struck ? Model.RING_DONE : cardSurface.ringLook.fill + (ringArea.containsMouse ? Model.RING_HOVER : 0))
               FoamyIcon {
+                objectName: "weekRingCheck"
                 visible: cardSurface.struck || ringArea.containsMouse
                 anchors.centerIn: parent
                 width: 10
                 height: 10
                 name: "check"
-                color: cardSurface.struck ? FoamyPalette.onSurface(FoamyPalette.background) : cardSurface.ringColor
+                color: cardSurface.struck ? cardSurface.checkInk : cardSurface.ringColor
               }
             }
           }

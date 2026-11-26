@@ -553,6 +553,248 @@ ShellRoot {
   function afterClose(then) {
     wait.waitFor(function() { return !one.popup.visible; }, 5000, function(ok) { if (check(ok, "the popup closed")) then(); });
   }
+  // The rail's counts in the plain tone (not the urgent one): how many,
+  // how many on the selected row, and those under 4.5:1 on their row's
+  // fill ([name, ratio]).
+  function railCounts(view) {
+    var counts = shell.findAll(shell.find(view, "rail"), "railCount").filter(function(count) { return count.visible && count.text !== "" && !count.parent.parent.modelData.urgent; });
+    var P = Kit.FoamyPalette;
+    return {
+      counts: counts.length,
+      selected: counts.filter(function(count) { return count.parent.parent.selected; }).length,
+      low: counts.map(function(count) {
+        var surface = count.parent.parent.selected ? Qt.tint(P.background, P.selectedFill) : P.background;
+        return [count.parent.parent.modelData.text, P.contrastRatio(count.color, surface)];
+      }).filter(function(pair) { return pair[1] < 4.5; })
+    };
+  }
+  // An item's tooltip (a popup: in its data, not its children).
+  function tipOf(item, name) {
+    for (var i = 0; i < item.data.length; i++)
+      if (item.data[i].objectName === name) return item.data[i];
+    return null;
+  }
+  // Two colours that show the same (computed tints differ below 8 bits,
+  // which Qt.colorEqual tells apart).
+  function sameColor(a, b) { return String(a) === String(b); }
+  // The contrast of a check mark on its ring's fill (the ring's colour
+  // over the popup's background).
+  function checkContrast(ringMark, mark) {
+    var P = Kit.FoamyPalette;
+    return P.contrastRatio(mark.color, Qt.tint(P.background, ringMark.color));
+  }
+  // A ring's look: "" when its border is `width` px and its fill `fill`
+  // (alpha); else what it is.
+  function ringIs(ringMark, width, fill) {
+    return Math.abs(ringMark.border.width - width) < 0.01 && Math.abs(ringMark.color.a - fill) < 0.01 ? "" : "border " + ringMark.border.width + ", fill " + ringMark.color.a.toFixed(2);
+  }
+  // A list row's ring tells the priority apart by more than its hue: p1 2 px
+  // filled .40, p2 and p3 1.5 px .12, p4 1 px empty. Completed, each check
+  // reads on its fill (4.5:1). "" or what is off.
+  function ringLooks() {
+    var looks = [[4, "error", 2, 0.4], [3, "warning", 1.5, 0.12], [2, "accent", 1.5, 0.12], [1, "muted", 1, 0]];
+    var off = [];
+    for (var look of looks) {
+      probeRow.entry = shell.probeEntry({ priority: look[0], priorityRole: look[1] });
+      var ring = shell.find(probeRow, "ringMark");
+      var at = shell.ringIs(ring, look[2], look[3]);
+      if (at !== "") off.push("p" + (5 - look[0]) + ": " + at);
+      probeRow.entry = shell.probeEntry({ priority: look[0], priorityRole: look[1], struck: true });
+      var mark = shell.find(probeRow, "ringCheck");
+      var ratio = shell.checkContrast(shell.find(probeRow, "ringMark"), mark);
+      if (!mark.visible || ratio < 4.5) off.push("p" + (5 - look[0]) + " completed: the check " + (mark.visible ? ratio.toFixed(2) + ":1" : "hidden"));
+    }
+    probeRow.entry = shell.probeEntry({});
+    return off.join("; ");
+  }
+  // A heading too long for its row ends with "…" beside its count, its
+  // whole text on hover; a short one shows whole, no tooltip. Today's
+  // Overdue heading's Move to today names its key on hover. Then done().
+  function headingLooks(view, done) {
+    var long = "A section with a name much too long to fit beside its count in this row";
+    probeRow.entry = { kind: "header", key: "header:long", title: long, count: 12, projectRole: "accent" };
+    var title = shell.find(probeRow, "headerTitle");
+    var count = shell.find(probeRow, "headerCountInline");
+    var tip = shell.tipOf(title, "headerTitleTip");
+    // The Row lays its parts out by the next frame.
+    shell.afterFrame(probeRow, function() {
+    var countEnd = count.mapToItem(probeRow, 0, 0).x + count.width;
+    if (!check(title.truncated && title.text === long && count.visible && count.text === "12" && count.mapToItem(probeRow, 0, 0).x >= title.mapToItem(probeRow, 0, 0).x + title.width && countEnd <= probeRow.width - probeRow.contentInset + 0.5, "a long heading elides before its count (" + JSON.stringify([title.truncated, title.width, count.x, countEnd, probeRow.width]) + ")")) return;
+    // The count reads (4.5:1 on the list).
+    var ratio = Kit.FoamyPalette.contrastRatio(count.color, Kit.FoamyPalette.background);
+    if (!check(ratio >= 4.5, "a heading's count reads: " + ratio.toFixed(2) + ":1")) return;
+    ev.mouseMove(title, title.width / 2, title.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+    wait.waitFor(function() { return tip.visible; }, 5000, function(shown) {
+      if (!check(shown && tip.text === long, "hover on the cut heading shows it whole (" + tip.text + ")")) return;
+      ev.mouseMove(frameProbe, 1, 1, -1, Qt.NoButton, Qt.NoModifier);
+      probeRow.entry = { kind: "header", key: "header:short", title: "Review", count: 2, projectRole: "accent" };
+      ev.mouseMove(title, title.width / 2, title.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      if (!check(!title.truncated && title.width === title.implicitWidth && !tip.visible, "a short heading shows whole, no tooltip (" + JSON.stringify([title.truncated, title.width, title.implicitWidth, tip.visible]) + ")")) return;
+      ev.mouseMove(frameProbe, 1, 1, -1, Qt.NoButton, Qt.NoModifier);
+      probeRow.entry = shell.probeEntry({});
+      var overdue = view.list.contentItem.children.find(function(r) { return r.hasOwnProperty("entry") && r.visible && r.entry && r.entry.kind === "header" && r.entry.moveAll === true; });
+      if (!check(!!overdue, "Today shows the Overdue heading")) return;
+      var move = shell.find(overdue, "moveAllToToday");
+      var moveTip = shell.tipOf(move, "moveAllTip");
+      if (!check(move.visible && !moveTip.visible, "Move to today shows, no tooltip yet")) return;
+      ev.mouseMove(move, move.width / 2, move.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      wait.waitFor(function() { return moveTip.visible; }, 5000, function(hovered) {
+        if (!check(hovered && moveTip.text === "Move to today (T)", "Move to today names its key (" + moveTip.text + ")")) return;
+        ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+        done();
+      });
+    });
+    });
+  }
+  property bool headingsChecked: false
+  // The pane's task completed from the pane's ring: the ring has the
+  // completed look (its check reads on the fill), the title is struck in
+  // the muted tone, and the header says Completed with Undo, as the row
+  // shows it. The header's Undo, the ring again, and Undo with the keys
+  // bring it back in the pane and the row. The card keeps its height
+  // throughout, and nothing is sent. Then done().
+  function paneCompleted(view, done) {
+    var store = Plugin.TodoStore;
+    var ed = view.editor;
+    var id = view.paneTask;
+    var card = one.popup.cardItem;
+    var height = card.height;
+    var apply = shell.calls("apply").length;
+    var ring = shell.find(ed.ring, "editRingMark");
+    var mark = shell.find(ed.ring, "editRingCheck");
+    var header = shell.find(ed, "paneHeader");
+    var undo = shell.find(header, "paneUndo");
+    var said = shell.find(header, "paneCompleted");
+    var row = function() { return shell.builtRows(view).find(function(r) { return r.entry.id === id; }); };
+    var titleColor = function() { return ed.titleRendered ? shell.find(ed, "editTitleText").color : ed.contentField.color; };
+    // "" when the pane and the row show the task completed (done) or not.
+    var looks = function(completed) {
+      var off = [];
+      var r = row();
+      if (Model.has(store.struck, id) !== completed) off.push("struck " + !completed);
+      if (completed && (!mark.visible || Math.abs(ring.color.a - 0.9) > 0.01 || shell.checkContrast(ring, mark) < 4.5)) off.push("the ring (" + [mark.visible, ring.color.a.toFixed(2), shell.checkContrast(ring, mark).toFixed(2)] + ")");
+      if (!completed && Math.abs(ring.color.a - 0.9) < 0.01) off.push("the ring still filled");
+      if (ed.contentField.font.strikeout !== completed || shell.sameColor(titleColor(), Kit.FoamyPalette.mutedText) !== completed) off.push("the title (strikeout " + ed.contentField.font.strikeout + ", " + titleColor() + ")");
+      if (said.visible !== completed || undo.visible !== completed || (completed && (said.text !== "Completed" || undo.label !== "Undo"))) off.push("the header (" + [said.visible, said.text, undo.visible] + ")");
+      if (!r || shell.find(r, "undo").visible !== completed || shell.find(r, "taskText").font.strikeout !== completed) off.push("the row");
+      if (Math.abs(card.height - height) > 0.5) off.push("the card " + card.height + " high, was " + height);
+      return off.join(", ");
+    };
+    if (!check(looks(false) === "", "the pane's task before: " + looks(false))) return;
+    var clickRing = function() { ev.mouseClick(ed.ring, ed.ring.width / 2, ed.ring.height / 2, Qt.LeftButton, Qt.NoModifier, -1); };
+    clickRing();
+    shell.afterFrame(card, function() {
+      if (!check(looks(true) === "", "completed from the pane's ring: " + looks(true))) return;
+      ev.mouseClick(undo, undo.width / 2, undo.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      shell.afterFrame(card, function() {
+        if (!check(looks(false) === "", "the header's Undo: back in the pane and the row: " + looks(false))) return;
+        clickRing();
+        if (!check(looks(true) === "", "completed again: " + looks(true))) return;
+        clickRing();
+        shell.afterFrame(card, function() {
+          if (!check(looks(false) === "", "the ring again undoes: " + looks(false))) return;
+          // With the keys: Tab reaches the header's Undo; Space on it undoes.
+          clickRing();
+          if (!check(undo.activeFocusOnTab, "the header's Undo takes the keys")) return;
+          undo.forceActiveFocus();
+          ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+          shell.afterFrame(card, function() {
+            if (!check(looks(false) === "", "Space on Undo: back: " + looks(false))) return;
+            if (!check(shell.calls("apply").length === apply && !store.pending, "nothing was sent")) return;
+            view.focusList();
+            done();
+          });
+        });
+      });
+    });
+  }
+  // The bar buttons, both monitors'.
+  function barButtons() {
+    return [one, two].map(function(panel) { return panel.children.find(function(item) { return item.objectName === "todoistButton"; }); });
+  }
+  readonly property string unseenText: "Todoist: your last task wasn't added. Open the panel to see why."
+  // "" when no bar button shows the unseen add (its mark or its tooltip);
+  // else which do.
+  function unseenShown() {
+    var buttons = shell.barButtons();
+    return [one, two].map(function(panel, i) {
+      return panel.barContent.addMark.visible || buttons[i].tooltipText === shell.unseenText ? "bar " + (i + 1) + " (" + buttons[i].tooltipText + ")" : "";
+    }).filter(function(text) { return text !== ""; }).join(", ");
+  }
+  // The add mark lies on the button, which kept `widths`: "" or what is off.
+  function markPlacement(widths) {
+    var buttons = shell.barButtons();
+    return [one, two].map(function(panel, i) {
+      var mark = panel.barContent.addMark;
+      var at = mark.mapToItem(buttons[i], 0, 0);
+      var off = [];
+      if (!mark.visible) off.push("no mark");
+      if (buttons[i].tooltipText !== shell.unseenText) off.push("tooltip " + JSON.stringify(buttons[i].tooltipText));
+      if (Math.abs(buttons[i].width - widths[i]) > 0.5) off.push("width " + buttons[i].width + ", was " + widths[i]);
+      if (at.x < 0 || at.y < 0 || at.x + mark.width > buttons[i].width + 0.5 || at.y + mark.height > buttons[i].height + 0.5) off.push("the mark at " + at.x + "," + at.y + " off the " + buttons[i].width + "x" + buttons[i].height + " button");
+      return off.length ? "bar " + (i + 1) + ": " + off.join(", ") : "";
+    }).filter(function(text) { return text !== ""; }).join("; ");
+  }
+  // A failed add after "Close the panel" (the default): the draft and why
+  // wait in the closed popup, and every bar button says so (a mark on the
+  // icon, the tooltip), in a horizontal and a vertical bar, at the width
+  // it had. The other monitor's popup opens with the draft and why: the
+  // mark and the tooltip text go. Then the first popup is open again, its
+  // field open, and done().
+  function unseenAdd(view, done) {
+    var store = Plugin.TodoStore;
+    var widths = shell.barButtons().map(function(button) { return button.width; });
+    shell.put("slow-add", "");
+    shell.put("reply-add.json", JSON.stringify({ ok: false, code: "HTTP", error: "Todoist answered HTTP %1.\u001f400" }));
+    view.openAdd();
+    wait.waitFor(function() { return view.fieldFocused; }, 10000, function(ok) {
+      if (!check(ok, "the field for an add that fails after closing")) return;
+      for (var c of "Water plants") ev.keyClickChar(c, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(!one.opened && store.addPending, "Enter sent it and closed the panel")) return;
+      wait.waitFor(function() { return !store.addPending && !store.busy; }, 15000, function(ok2) {
+        if (!check(ok2 && store.addDraft === "Water plants" && store.addError === "Todoist answered HTTP 400.", "refused: the draft and why wait (" + JSON.stringify([store.addDraft, store.addError]) + ")")) return;
+        var off = shell.markPlacement(widths);
+        if (!check(off === "", "a horizontal bar shows the unseen add: " + off)) return;
+        bar.position = "left";
+        shell.afterFrame(frameProbe, function() {
+          var upright = shell.barButtons().map(function(button) { return button.width; });
+          var offUpright = shell.markPlacement(upright);
+          bar.position = "top";
+          if (!check(offUpright === "", "a vertical bar shows it too: " + offUpright)) return;
+          shell.afterFrame(frameProbe, function() {
+            if (!check(shell.markPlacement(widths) === "", "the horizontal bar again: " + shell.markPlacement(widths))) return;
+            two.open();
+            wait.waitFor(function() { var v = two.popup.bodyItem; return two.opened && v && v.active && v.fieldFocused; }, 10000, function(ok3) {
+              var other = two.popup.bodyItem;
+              var line = other ? shell.find(other, "errorLine") : null;
+              if (!check(ok3 && other.field.text === "Water plants" && line.visible && line.text === "Todoist answered HTTP 400.", "the other monitor's popup shows the draft and why (" + JSON.stringify([other && other.field.text, line && line.text]) + ")")) return;
+              if (!check(shell.unseenShown() === "", "shown: the mark and the tooltip text are gone: " + shell.unseenShown())) return;
+              // Sent again from there, the field kept open: refused again,
+              // seen in the open popup, so no bar shows it.
+              ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+              wait.waitFor(function() { return !store.addPending && !store.busy && two.opened; }, 15000, function(again) {
+                if (!check(again && store.addError === "Todoist answered HTTP 400." && store.addDraft !== "" && shell.unseenShown() === "", "refused with the popup open: no mark (" + JSON.stringify([store.addError, store.addDraft]) + "; " + shell.unseenShown() + ")")) return;
+                // Esc drops the draft and why; closed, nothing comes back.
+                ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+                two.close();
+                wait.waitFor(function() { return !two.popup.visible; }, 5000, function(ok4) {
+                  if (!check(ok4 && store.addDraft === "" && store.addError === "" && shell.unseenShown() === "", "dropped: no draft, no mark (" + shell.unseenShown() + ")")) return;
+                  one.open();
+                  wait.waitFor(function() { return one.opened && view.active; }, 10000, function(ok5) {
+                    if (!check(ok5, "the first popup again")) return;
+                    view.openAdd();
+                    done();
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+  property bool unseenChecked: false
   // Calls `then` once `item`'s window has drawn a frame (layouts done).
   function afterFrame(item, then) {
     var window = item.Window.window;
@@ -1309,14 +1551,16 @@ ShellRoot {
       sourceComponent: Plugin.Panel { settings: shell.entry }
       onLoaded: { item.bar = bar; item.moduleName = "foamy.todoist"; }
     }
-  }
-  // A row on its own, to give it one entry after another (as a reused
-  // delegate gets them).
-  Plugin.TaskRow {
-    id: probeRow
-    width: 400
-    height: 42
-    entry: shell.probeEntry({})
+    // A row on its own, to give it one entry after another (as a reused
+    // delegate gets them). In the window, away from the bars' popups, so
+    // the pointer can hover it.
+    Plugin.TaskRow {
+      id: probeRow
+      x: 0; y: 1000
+      width: 400
+      height: 42
+      entry: shell.probeEntry({})
+    }
   }
   function probeEntry(extra) {
     return Object.assign({ kind: "task", key: "task:p", id: "p", text: "Gjøre ting", priority: 1, priorityRole: "muted", depth: 0,
@@ -1394,10 +1638,10 @@ ShellRoot {
     case 45: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the reopened popup after Esc"];
     case 46: return [function() { return view.fieldFocused; }, 10000, "the field for a draft before search"];
     case 48: return [function() { return view.view === "today" && shell.builtRows(view).length >= 4; }, 10000, "Today again, on reused rows"];
-    case 49: return [function() { return view.fieldFocused; }, 10000, "the field for an add that ends after closing"];
+    case 49: return [function() { return shell.headingsChecked && view.fieldFocused; }, 15000, "the headings checked, the field for an add that ends after closing"];
     case 50: return [function() { return !view.addBusy && !one.opened; }, 15000, "the add's reply, the popup closed"];
     case 51: return [function() { return one.opened && view.active; }, 10000, "the reopened popup"];
-    case 52: return [function() { return view.fieldFocused; }, 10000, "the field for an add edited after submitting"];
+    case 52: return [function() { return shell.unseenChecked && view.fieldFocused; }, 15000, "the unseen failed add checked, the field for an add edited after submitting"];
     case 53: return [function() { return !view.addBusy && !one.opened; }, 15000, "the second add's reply"];
     case 54: return [function() { return one.opened && view.active && view.fieldFocused; }, 10000, "the reopened popup with the edit"];
     case 55: return [function() { return !view.addBusy && !store.busy && shell.calls("sync").length > shell.callsBefore; }, 15000, "an add with an unknown outcome, then a sync"];
@@ -1941,10 +2185,28 @@ ShellRoot {
     case 21:
       var row = view.rows.find(function(r) { return r.id === "t2"; });
       if (!check(row && row.unconfirmed, "t2 is shown, marked unconfirmed")) return;
-      store.complete("t2");
-      store.moveToTomorrow("t2");
-      if (!check(!store.struck.t2 && store.queue.length === 0, "an unconfirmed task can't be completed or moved again")) return;
-      shell.release("sync");
+      // It reads whole, not dimmed: the title in the secondary tone, a
+      // plain 1 px ring, a refresh mark in the time's place that says why.
+      var pendingRow = shell.builtRows(view).find(function(r) { return r.entry.id === "t2"; });
+      var pendingSurface = shell.find(pendingRow, "taskSurface");
+      var pendingTitle = shell.find(pendingRow, "taskText");
+      var pendingRing = shell.find(pendingRow, "ringMark");
+      var checking = shell.find(pendingRow, "taskChecking");
+      if (!check(pendingRow.opacity === 1 && pendingSurface.opacity === 1 && shell.find(pendingRow, "taskDetail").opacity === 1, "the unconfirmed row isn't dimmed (" + [pendingRow.opacity, pendingSurface.opacity] + ")")) return;
+      if (!check(shell.sameColor(pendingTitle.color, Kit.FoamyPalette.secondaryText) && shell.ringIs(pendingRing, 1, 0) === "", "its title in the secondary tone, a plain ring (" + pendingTitle.color + " vs " + Kit.FoamyPalette.secondaryText + ", " + shell.ringIs(pendingRing, 1, 0) + ")")) return;
+      var checkingTip = shell.tipOf(checking, "taskCheckingTip");
+      var checkingEnd = checking.mapToItem(pendingSurface, 0, 0).x + checking.width;
+      if (!check(checking.visible && checking.name === "refresh-cw" && checkingEnd <= pendingSurface.width && checking.mapToItem(pendingSurface, 0, 0).x > pendingTitle.mapToItem(pendingSurface, 0, 0).x + pendingTitle.width, "the refresh mark in the trailing slot")) return;
+      ev.mouseMove(checking, checking.width / 2, checking.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      // The sync stays held (gate 22 waits for it) until this is done.
+      wait.waitFor(function() { return checkingTip.visible; }, 5000, function(hovered) {
+        if (!check(hovered && checkingTip.text === "Checking with Todoist…", "its tooltip says why (" + checkingTip.text + ")")) return;
+        ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+        store.complete("t2");
+        store.moveToTomorrow("t2");
+        if (!check(!store.struck.t2 && store.queue.length === 0, "an unconfirmed task can't be completed or moved again")) return;
+        shell.release("sync");
+      });
       break;
     case 22:
       if (!check(shell.calls("sync").length === shell.callsBefore + 1, "a sync followed the failed completion")) return;
@@ -2279,7 +2541,11 @@ ShellRoot {
       if (!check(shell.switches === 0 && view.field.text === "Keep me" && view.fieldFocused && one.opened, "Tab with text did nothing (" + shell.switches + ")")) return;
       // The draft outlives the popup: reopened, the field has it, with the keys.
       one.close();
-      shell.afterClose(function() { one.open(); });
+      shell.afterClose(function() {
+        // Typed, never sent: the bar shows nothing.
+        if (!check(shell.unseenShown() === "", "a draft never sent marks no bar: " + shell.unseenShown())) return;
+        one.open();
+      });
       break;
     case 44:
       var back = one.popup.bodyItem;
@@ -2337,15 +2603,19 @@ ShellRoot {
       if (!check(shell.find(probeRow, "taskDetail").visible && shell.find(probeRow, "taskProject").visible && shell.find(probeRow, "taskProject").text === "Gjøremål", "a row reused for a project-only task shows the project")) return;
       probeRow.entry = shell.probeEntry({ recurring: true, detail: true });
       if (!check(shell.find(probeRow, "taskDetail").visible && shell.find(probeRow, "taskRepeat").visible, "and the repeat icon alone")) return;
+      if (!check(shell.ringLooks() === "", "the rings by priority: " + shell.ringLooks())) return;
       // Today shows the project of a task in another project, also on a reused row.
       for (var r of shell.builtRows(view)) {
         var project = shell.find(r, "taskProject");
         if (!check(r.entry.showProject && shell.find(r, "taskDetail").visible && project.visible && project.text === r.entry.projectName && project.text !== "", "Today: " + r.entry.id + " shows its project (" + project.text + ", detail " + shell.find(r, "taskDetail").visible + ")")) return;
       }
-      // An add whose reply comes after the popup closed leaves no draft.
-      shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
-      shell.put("slow-add", "1.5");
-      view.openAdd();
+      shell.headingLooks(view, function() {
+        // An add whose reply comes after the popup closed leaves no draft.
+        shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+        shell.put("slow-add", "1.5");
+        view.openAdd();
+        shell.headingsChecked = true;
+      });
       break;
     case 49:
       // Enter ("Close the panel", the default): sent, the field and the panel close.
@@ -2355,25 +2625,34 @@ ShellRoot {
       break;
     case 50:
       if (!check(store.addDraft === "", "the added text isn't a draft (" + JSON.stringify(store.addDraft) + ")")) return;
+      if (!check(shell.unseenShown() === "", "an add that worked marks no bar: " + shell.unseenShown())) return;
       one.open();
       break;
     case 51:
       if (!check(!view.fieldOpen && view.field.text === "", "reopened without a draft (" + JSON.stringify(view.field.text) + ")")) return;
-      view.openAdd();
+      shell.unseenAdd(view, function() {
+        // The next steps' add answers after the popup closed.
+        shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+        shell.put("slow-add", "1.5");
+        shell.unseenChecked = true;
+      });
       break;
     case 52:
-      // Edited after submitting: the edit is the draft and stays.
+      // Typed on after submitting: once added, what was typed after the
+      // sent text stays the draft (as in the field), without its space.
       for (var e of "Eggs") ev.keyClickChar(e, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
       for (var h of " and ham") ev.keyClickChar(h, Qt.NoModifier, -1);
       one.close();
       break;
     case 53:
-      if (!check(store.addDraft === "Eggs and ham", "the edit stays the draft (" + JSON.stringify(store.addDraft) + ")")) return;
+      if (!check(store.addDraft === "and ham", "what was typed after the added text stays the draft (" + JSON.stringify(store.addDraft) + ")")) return;
+      // Added, with typing after it: not a failed add.
+      if (!check(shell.unseenShown() === "", "the draft after an add that worked marks no bar: " + shell.unseenShown())) return;
       one.open();
       break;
     case 54:
-      if (!check(view.field.text === "Eggs and ham", "the edit is back (" + JSON.stringify(view.field.text) + ")")) return;
+      if (!check(view.field.text === "and ham", "the typed-after text is back (" + JSON.stringify(view.field.text) + ")")) return;
       // Quick Add sent, no answer: the task may exist. Say so, keep the text, sync.
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       shell.put("slow-add", "");
@@ -2386,6 +2665,8 @@ ShellRoot {
       var line = shell.find(view, "errorLine");
       if (!check(line.visible && line.text === shell.unknownText, "the warning shows under the band (" + line.text + ")")) return;
       if (!check(view.field.text === "Call Bob" && view.fieldOpen, "the text is kept")) return;
+      // Failed with the popup open: seen, so the bar shows nothing.
+      if (!check(shell.unseenShown() === "", "a failure the open popup shows marks no bar: " + shell.unseenShown())) return;
       // The whole message shows, wrapped at the top of the list.
       if (!check(shell.addErrorLayout(view, shell.unknownText) === "", "the add error at standard width: " + shell.addErrorLayout(view, shell.unknownText))) return;
       shell.pickLanguage("no");
@@ -2396,6 +2677,9 @@ ShellRoot {
       ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
       break;
     case 57:
+      // Small's band line starts with the day, capitalised as the rows' dates.
+      var bandLine = view.band.meta;
+      if (!check(view.view === "today" && /^Ons\. /.test(bandLine), "Norwegian: the band's line starts with a capital (" + bandLine + ")")) return;
       var norwegian = Kit.FoamyI18n.t(shell.unknownText);
       if (!check(norwegian !== shell.unknownText, "a Norwegian text (" + norwegian + ")")) return;
       if (!check(shell.addErrorLayout(view, norwegian) === "", "the add error in Norwegian: " + shell.addErrorLayout(view, norwegian))) return;
@@ -2856,11 +3140,20 @@ ShellRoot {
           if (!check(ring.Accessible.name === "Complete" && ring.activeFocusOnTab, "the ring is named and on the Tab path")) return;
           ev.mouseClick(ring, ring.width / 2, ring.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
           if (!check(store.struck.t4 === true && !view.pageShown, "the ring completed it, back to the list")) return;
-          // Undone within its window: nothing is sent.
-          store.toggleComplete("t4");
-          if (!check(!store.struck.t4 && shell.calls("apply").length === shell.callsBefore + 1, "and undone, nothing sent")) return;
-          // The size as a version before this one saved it: "large".
-          shell.editorMenus(view, function() { shell.entry = Object.assign({}, shell.entry, { panelWidth: "large" }); });
+          // Opened again while its Undo time runs: the page shows it
+          // completed, its band offers Undo, which brings it back and stays.
+          view.openTask("t4", false);
+          shell.afterFrame(pageEditor, function() {
+            var pageUndo = shell.find(pageEditor, "pageUndo");
+            var pageMark = shell.find(pageEditor.ring, "editRingCheck");
+            if (!check(view.pageShown && pageUndo.visible && pageUndo.label === "Undo" && pageMark.visible && pageEditor.contentField.font.strikeout, "the page of a completed task: struck, with Undo (" + JSON.stringify([view.pageShown, pageUndo.visible, pageMark.visible]) + ")")) return;
+            ev.mouseClick(pageUndo, pageUndo.width / 2, pageUndo.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+            // Undone within its window: nothing is sent.
+            if (!check(!store.struck.t4 && view.pageShown && !pageUndo.visible && !pageMark.visible && !pageEditor.contentField.font.strikeout && shell.calls("apply").length === shell.callsBefore + 1, "the page's Undo: back, still on the page, nothing sent")) return;
+            pageEditor.back();
+            // The size as a version before this one saved it: "large".
+            shell.editorMenus(view, function() { shell.entry = Object.assign({}, shell.entry, { panelWidth: "large" }); });
+          });
         });
       });
       });
@@ -2913,6 +3206,9 @@ ShellRoot {
       // Held ↓ repeats about every 30 ms: a read only after a real pause
       // keeps the rows it passes from each reading a description.
       if (!check(shell.readAt - shell.keyAt >= 250, "the read waited for the selection to rest (" + (shell.readAt - shell.keyAt) + " ms)")) return;
+      // The rail's counts read (4.5:1).
+      var railRead = shell.railCounts(big1);
+      if (!check(railRead.counts > 1 && railRead.low.length === 0, "the rail's counts read (" + JSON.stringify(railRead) + ")")) return;
       var area1 = shell.find(big1, "listArea");
       if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "a task in the pane: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
       // The band stays as it is (+, Search, ⋯); the pane has its own header:
@@ -3035,6 +3331,7 @@ ShellRoot {
       shell.listSpace(big5, function() {
       shell.pasteStaysWithItsTask(big5, function() {
       shell.paneKeys(big5, function() {
+      shell.paneCompleted(big5, function() {
       // Typed again, then the Week view from the rail: saved as the pane goes.
       big5.editor.contentField.focusInput();
       shell.paneFrom = big5.paneTask;
@@ -3051,6 +3348,7 @@ ShellRoot {
       var weekEntry = shell.find(big5, "rail-week");
       ev.mouseClick(weekEntry, weekEntry.width / 2, weekEntry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big5.weekShown && !big5.editor.visible && !big5.blocked, "the Week view; the pane went, the keys with the list")) return;
+      });
       });
       });
       });
@@ -3077,6 +3375,17 @@ ShellRoot {
       if (!check(big2.cursorRow().id === "t2", "back on t2")) return;
       ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
       if (!check(store.struck.t2 === true, "Space completes")) return;
+      // The card's ring as the list's: its priority's look, the completed
+      // check reading on its fill; the columns' counts read.
+      var weekCard = shell.find(big2.week, "card-t2");
+      var weekRing = shell.find(weekCard, "weekRingMark");
+      var weekMark = shell.find(weekCard, "weekRingCheck");
+      if (!check(weekMark.visible && Math.abs(weekRing.color.a - 0.9) < 0.01 && shell.checkContrast(weekRing, weekMark) >= 4.5, "the completed card's check reads (" + shell.checkContrast(weekRing, weekMark).toFixed(2) + ":1)")) return;
+      var p1Ring = shell.find(shell.find(big2.week, "card-t1"), "weekRingMark");
+      if (!check(shell.ringIs(p1Ring, 2, 0.4) === "", "a p1 card's ring: " + shell.ringIs(p1Ring, 2, 0.4))) return;
+      var weekCount = shell.find(shell.find(big2.week, "weekColumn-today"), "weekCount");
+      var weekRatio = Kit.FoamyPalette.contrastRatio(weekCount.color, Kit.FoamyPalette.background);
+      if (!check(weekCount.text !== "" && weekRatio >= 4.5, "a column's count reads (" + weekRatio.toFixed(2) + ":1)")) return;
       ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
       if (!check(!store.struck.t2, "and undoes")) return;
       // Ctrl+→: a day later with the due op; the cursor follows the task.
@@ -3146,6 +3455,9 @@ ShellRoot {
       // leaves the card as tall as it has been, and never under 12 rows.
       var heldBody = big4.bodyHeight;
       big4.setView("inbox");
+      // The Inbox selected in the rail: its count reads on the selected fill.
+      var railInbox = shell.railCounts(big4);
+      if (!check(railInbox.selected === 1 && railInbox.low.length === 0, "the selected rail row's count reads (" + JSON.stringify(railInbox) + ")")) return;
       if (!check(big4.fittedBodyHeight < heldBody - 1 && big4.bodyHeight === heldBody && heldBody >= Kit.FoamyStyle.rowHeight * 12, "a shorter view keeps the card's height (" + JSON.stringify([big4.fittedBodyHeight, big4.bodyHeight, heldBody]) + ")")) return;
       big4.setView("week");
       // Overdue with thousands of tasks: only the cards in view are built,

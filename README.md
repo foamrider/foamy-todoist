@@ -12,7 +12,10 @@ The bar shows the Todoist mark and, in the bar's urgent colour, the number
 of tasks left today (overdue plus due today), like Foamy Zendesk's count.
 Nothing left today, or **Show in the bar: Icon only**, leaves just the mark;
 signed out, the mark stands alone. The tooltip says how many are left and how
-many of them are overdue.
+many of them are overdue. When a task you added with the panel closed
+wasn't added, a dot in the bar's urgent colour sits on the mark's corner
+(the button keeps its width) and the tooltip says so, until the panel opens
+on any monitor and shows the text with why.
 
 ## The panel
 
@@ -74,7 +77,9 @@ is last). Nothing has the cursor when the panel opens.
   **Open on: Last view**.
 
 Each row has a ring in the priority's colour (p1 red, p2 orange, p3 accent,
-p4 grey), the task (Markdown links show their text), and a line with what
+p4 grey) that also differs in weight, so it doesn't rest on colour alone: p1
+thicker and filled, p2 and p3 lightly filled, p4 thin and empty (the same
+in the editor and on the Week cards). Then the task (Markdown links show their text), and a line with what
 the view doesn't already say, in this order: the date ("Yesterday", a
 weekday within the coming week, else "Mon 23 Nov" in your language, so
 last Friday never reads like next Friday; an overdue date is red with a
@@ -87,7 +92,9 @@ whole; the project and then the labels are cut with "…" when the line is
 full. A due time shows on the right: today, a time that has passed is red
 and the next one ahead is bright. The ring and the time stand on the
 task's first line. A heading's count stands beside its word (after a date
-range, at the row's end).
+range, at the row's end); a heading too long for its row ends with "…" and
+shows whole on hover. **Move to today** on Today's Overdue heading names
+its key (T) on hover.
 
 In Small the band's line leaves the view's name to the tabs: Today says the
 date first ("Thu 26 Nov · 6 left · 2 overdue"), the Inbox and Upcoming
@@ -99,8 +106,10 @@ pending one is sent to Todoist in one request (at once when the panel
 closes). Undo only takes it back here, so nothing is sent. If Todoist
 refuses a completion the task comes back and the line under the band says
 why. When the request fails as a whole (no answer, the network), Todoist may
-or may not have done it, so those tasks show dimmed and can't be completed
-or moved again until the next refresh, which starts at once. A recurring
+or may not have done it, so those tasks show with a plain ring, the title in
+a softer tone and a refresh mark ("Checking with Todoist…") in the time's
+place, and can't be completed or moved again until the next refresh, which
+starts at once. A recurring
 task moves to its next date, as in Todoist.
 
 **Moving** to another day: the row under the cursor shows two buttons in
@@ -151,7 +160,7 @@ from an empty field goes to the next panel), and when the panel closes, also
 after Enter closed it before Todoist answered, the draft is kept for this
 session and comes back, with the caret at its end and the error if the add
 failed, the next time the panel opens. Adding the task or clearing it with
-Esc ends the draft. A suggestion that would make the text longer than 500
+Esc ends the draft; text typed after the sent text stays the draft. A suggestion that would make the text longer than 500
 characters isn't put in (the line under the band says so). A paste the
 field can't take (over 16 KiB, not plain text, or no answer from the
 clipboard within two seconds) changes nothing, and the line says why. At
@@ -288,7 +297,11 @@ anywhere in it, or Enter on it (one Tab stop each), changes it.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
 - The **ring** beside the title completes the task. **Open in Todoist** is
-  an icon in the page's band, or in Wide in the pane's header.
+  an icon in the page's band, or in Wide in the pane's header. While a
+  completion can be undone the ring shows it completed, the title is
+  struck through, and **Undo** is in the page's band, or in Wide in the
+  pane's header after "Completed"; the ring undoes too. In Small the ring
+  completes and goes back to the list, where the row has its Undo.
   Completing the task (here, or with its row's ring or Space) saves what
   you typed first. A task completed or deleted elsewhere meanwhile: the
   page says it is no longer in Todoist.
