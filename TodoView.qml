@@ -2238,6 +2238,8 @@ PanelKeyCatcher {
       id: keyHints
       objectName: "keyHints"
       visible: root.keyHintsShown || root.weekHintsShown
+      // On the footer's line (beside the taller Todoist action in Week).
+      anchors.verticalCenter: parent ? parent.verticalCenter : undefined
       spacing: FoamyStyle.gapLarge
       readonly property bool closing: root.closeAfterAdd === "close"
       readonly property string enterText: closing ? FoamyI18n.t("add and close") : FoamyI18n.t("add, keep typing")
