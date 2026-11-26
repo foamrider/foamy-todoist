@@ -107,7 +107,7 @@ task moves to its next date, as in Todoist.
 its time's place: **Tomorrow** (`t`) and a calendar (`d`) with **Today**,
 **Tomorrow**, **Next week** (the first day of your locale's next week) and
 **No date**. Today's **Overdue** heading has **Move to today** for all its
-tasks. A moved task keeps its time (a 14:00 task moved to tomorrow is due
+tasks (`T` on an overdue row). A moved task keeps its time (a 14:00 task moved to tomorrow is due
 tomorrow at 14:00). Like a completion, the row stays where it is, dimmed,
 with its new day in the accent colour and **Undo**; the move is sent with
 the completions four seconds after the last change (at once when the panel
@@ -119,7 +119,10 @@ so the line says to open it and change the date there (in its own words).
 button across the band (the band keeps its height, and nothing moves under
 it). Its placeholder says where the task goes: "Add a task to the Inbox…",
 "for today…", for Upcoming's day, or to the project you are looking at;
-that date or project applies when the text gives none. The Quick Add parts
+that date or project applies when the text gives none. In the Week view
+the task goes to the day of the column the cursor is in when the field
+opens: today from Overdue and Today, tomorrow from Tomorrow, the card's day
+from Later, and today with the cursor off the board. The Quick Add parts
 show in colour as you type: `#project`, `/section` and `+person` in the
 accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
 the urgent colour, `{deadline}` and ` // description` muted; dates are left
@@ -129,7 +132,8 @@ shows its keys:
 - **Enter** does what **After adding a task** says. **Close the panel**
   (the default) sends the task and closes the field and the panel. **Keep
   the field open** sends it and keeps the caret in the field, which empties
-  once Todoist has the task.
+  once Todoist has the task. You can type the next task meanwhile: when
+  Todoist answers, only the sent text leaves the field.
 - **Shift+Enter** does the other one.
 - **Esc** clears the text, and on an empty field closes it (the field
   shrinks back into **+**).
@@ -168,7 +172,10 @@ them, `/` and `+` suggest nothing; `+` neither in a project only you are in.
 The Quick Add docs say how to write project names with spaces (`\ `), not
 labels, sections or people; the plugin escapes them the same way, which is
 not verified against Todoist yet. Esc closes only the list. With the list
-closed, Enter adds the task as before. Search never shows suggestions.
+closed, Enter adds the task as before; so does Enter when the word is already
+the highlighted entry in full (`#home` for Home), while Tab still puts it
+in. The footer shows the list's keys while it is open. Search never shows
+suggestions.
 
 **Search** (the button, or `/`): the same field grows out of **Search** and
 searches every open task by text, project name and labels; a word that
@@ -220,7 +227,10 @@ Small the editor takes the panel's place, like the settings page:
 cursor. Its band says "Saving…" while a change is sent. In Wide it is
 the details pane on the right (the left in right-to-left languages), which
 shows the selected task (the one the keys or a click moved to; pointing at
-a row doesn't change it). Its header row shows the task's project (and
+a row doesn't change it). While it shows a task, the task keys (Space,
+Enter, `e`, `t`, `d`, `T`, Ctrl+O, and Ctrl+←/→ in the Week view) act on
+it, also with the pointer on another row; after an arrow key they act on
+the cursor's row, which the pane then shows. Its header row shows the task's project (and
 section), **Open in Todoist** and **Close** (as Esc in the list). `e` or a
 click on a part puts the caret there, Tab moves through the parts (the
 header's two buttons last), and Esc gives the keys back to the list.
@@ -326,13 +336,14 @@ accent tint and a bar at its start.
 | Enter | the search field | go to the results |
 | ↓ | the field | the first row |
 | Esc | the field | clear the text; when empty close the field (and leave search) |
-| ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list |
+| ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list (Enter on a word that already is the entry: add the task) |
 | ↑ ↓ j k | the list | move; ↑ on the first row goes to the tabs (the rail), ↑ from there to ⋯, Search and + |
 | Space | a row | complete (again, or on a moved row: undo) |
 | Enter, e | a row | open the task in the editor (Wide: the caret in the details pane) |
 | Ctrl+O | a row | open the task in Todoist |
 | t | a row | move to tomorrow, keeping the time (not for recurring tasks) |
 | d | a row | the menu of days: Today, Tomorrow, Next week, No date |
+| T | an Overdue row in Today | move all of Overdue to today, as **Move to today** |
 | / | the list | search |
 | ← → | the tabs | pick a view (Enter or Space shows it) |
 | ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |

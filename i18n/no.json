@@ -94,6 +94,7 @@
   "Clipboard text is too large or contains invalid characters.": "Teksten på utklippstavlen er for stor eller inneholder ugyldige tegn.",
   "Close": "Lukk",
   "Close search": "Lukk søket",
+  "close the list": "lukk listen",
   "Close the panel": "Lukk panelet",
   "Complete": "Fullfør",
   "Copy": "Kopier",
@@ -134,6 +135,7 @@
     "one": "Innboks · %1 oppgave",
     "other": "Innboks · %1 oppgaver"
   },
+  "insert": "sett inn",
   "internal error": "intern feil",
   "Keep the field open": "La feltet stå åpent",
   "Labels": "Etiketter",

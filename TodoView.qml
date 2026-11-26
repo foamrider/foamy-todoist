@@ -97,7 +97,7 @@ PanelKeyCatcher {
   function chordKey(event) {
     if (!(event.modifiers & Qt.ControlModifier) || root.blocked)
       return
-    var row = cursorRow()
+    var row = keyTarget()
     if (event.key === Qt.Key_O) {
       if (row && row.kind === "task")
         store.openView("task", row.id)
@@ -191,6 +191,7 @@ PanelKeyCatcher {
     projectId = next === "project" ? project : ""
     overdueOpen = false
     upcomingDay = ""
+    weekAddDay = ""
     weekPaneOpen = false
     store.addError = ""
     store.lastView = next
@@ -308,6 +309,8 @@ PanelKeyCatcher {
       closeTask()
     if (searching)
       leaveSearch()
+    if (weekShown)
+      weekAddDay = weekCursorDay()
     fieldOpen = true
     viewCursor.index = -1
     addField.focusInput()
@@ -488,6 +491,22 @@ PanelKeyCatcher {
       return on(firstRowStop) ? weekCurrent() : null
     var i = viewCursor.index - firstRowStop
     return i >= 0 && i < stops.length ? rows[stops[i]] : null
+  }
+  // The task row (or Week card) a key acts on: the cursor's, except in
+  // Wide while the pane shows a task and the pointer has put the cursor
+  // on another one (hover lights a row, the pane stays): then the pane's,
+  // the task being read. The arrow keys still move from the cursor. The
+  // pane's task is its list row, else (the Week view, or not listed) its
+  // id alone, which is all a key needs there.
+  function keyTarget() {
+    var row = cursorRow()
+    if (!paneShown || viewCursor.byKeys || !row || row.kind !== "task" || row.id === paneTask)
+      return row
+    var stop = stopOf(paneTask)
+    return stop >= 0 ? rows[stops[stop - firstRowStop]] : {
+      kind: "task",
+      id: paneTask
+    }
   }
   function reveal() {
     if (weekShown) {
@@ -829,7 +848,20 @@ PanelKeyCatcher {
   // a popup opened on another monitor before the reply shows it too.
   readonly property string addError: store.addError
   readonly property bool addBusy: store.addPending
-  readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : ""
+  readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : view === "week" ? (weekAddDay || store.today) : ""
+  // The Week view's add date, fixed as the field opens (openAdd): the
+  // cursor leaves the board for the field, as Upcoming keeps its day.
+  property string weekAddDay: ""
+  // The day the Week cursor's column stands for: Overdue and Today today,
+  // Tomorrow tomorrow, Later the card's own day (a pending move's); today
+  // without the cursor on the board.
+  function weekCursorDay() {
+    var card = weekShown && on(firstRowStop) ? weekCurrent() : null
+    if (!card)
+      return store.today
+    var key = weekColumns[weekColumn].key
+    return key === "tomorrow" ? Model.addDays(store.today, 1) : key === "later" ? card.dueDay : store.today
+  }
   readonly property string closeAfterAdd: pref("afterAdd")
   // Enter (alternate false) does what "After adding a task" says,
   // Shift+Enter the other: close (the field and the panel; the text stays
@@ -852,13 +884,17 @@ PanelKeyCatcher {
   }
   Connections {
     target: root.store
-    // Added: cleared only where it still holds what was added (typing
-    // went on), also after the popup closed or a search started.
+    // Added: what was added leaves the field, also after the popup closed
+    // or a search started. Text typed after it while the add was on its
+    // way (the field stays open for the next task) stays, without the
+    // spaces before it; text that no longer starts with it stays whole.
     function onFieldAdded(sent) {
-      if (root.field.text === sent && !root.searching)
-        root.field.text = ""
-      if (root.searchDraft === sent)
-        root.searchDraft = ""
+      var rest = Model.typedAfter(root.field.text, sent)
+      if (!root.searching && rest !== root.field.text) {
+        root.field.text = rest
+        root.field.cursorPosition = rest.length
+      }
+      root.searchDraft = Model.typedAfter(root.searchDraft, sent)
     }
   }
   // The Quick Add tokens' colours (Model.quickAddRuns), on the band.
@@ -895,7 +931,7 @@ PanelKeyCatcher {
       return openViewInTodoist()
     if (!weekShown && !stops.length && at === firstRowStop && stateButton.visible)
       return stateButton.clicked()
-    var row = cursorRow()
+    var row = keyTarget()
     if (!row)
       return
     if (row.kind === "fold")
@@ -978,7 +1014,7 @@ PanelKeyCatcher {
     }
     if (!viewCursor.plain(modifiers))
       return
-    var row = cursorRow()
+    var row = keyTarget()
     if (text === "a")
       openAdd()
     else if (text === "/")
@@ -993,6 +1029,8 @@ PanelKeyCatcher {
       store.moveToTomorrow(row.id)
     else if (text === "d" && row && row.kind === "task" && !weekShown)
       openDateMenu(row.id, null, true)
+    else if (text === "T" && row && row.kind === "task" && row.overdue && view === "today" && !searchActive)
+      moveOverdueToToday()
   }
   // ---- autocomplete (#project, @label) in the add field ---------------------------------------
   // Model.suggestions for the word at the caret, or null. Esc dismisses the
@@ -1032,6 +1070,9 @@ PanelKeyCatcher {
     addField.textEdited()
     addField.focusInput()
   }
+  // The word at the caret already is the highlighted entry ("#home" typed
+  // in full): Enter adds the task instead of inserting it again.
+  readonly property bool suggestTyped: suggestOpen && Model.suggestionTyped(addField.text, suggest, suggest.items[suggestIndex])
   // The list's keys while it shows: true when the key was its.
   function suggestKey(event) {
     if (!suggestOpen)
@@ -1039,6 +1080,8 @@ PanelKeyCatcher {
     if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
       const last = suggest.items.length - 1
       suggestIndex = Math.max(0, Math.min(last, suggestIndex + (event.key === Qt.Key_Down ? 1 : -1)))
+    } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && suggestTyped) {
+      return false
     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Tab) {
       insertSuggestion(suggestIndex)
     } else if (event.key === Qt.Key_Escape) {
@@ -2089,17 +2132,33 @@ PanelKeyCatcher {
         root.openViewInTodoist()
       }
     }
-    // The add field's keys, as "After adding a task" sets them.
+    // The add field's keys, as "After adding a task" sets them; while the
+    // suggestion list shows, its keys (Enter adds when the word already is
+    // the highlighted entry).
     Row {
       id: keyHints
       objectName: "keyHints"
       visible: root.keyHintsShown
       spacing: FoamyStyle.gapLarge
       readonly property bool closing: root.closeAfterAdd === "close"
-      readonly property var hints: [
+      readonly property string enterText: closing ? FoamyI18n.t("add and close") : FoamyI18n.t("add, keep typing")
+      readonly property var hints: root.suggestOpen ? [
         {
           key: "↵",
-          text: closing ? FoamyI18n.t("add and close") : FoamyI18n.t("add, keep typing")
+          text: root.suggestTyped ? enterText : FoamyI18n.t("insert")
+        },
+        {
+          key: "Tab",
+          text: FoamyI18n.t("insert")
+        },
+        {
+          key: "Esc",
+          text: FoamyI18n.t("close the list")
+        }
+      ] : [
+        {
+          key: "↵",
+          text: enterText
         },
         {
           key: "⇧↵",

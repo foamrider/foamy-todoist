@@ -528,6 +528,42 @@ test('applying a suggestion: the word replaced, spaces escaped, one space, caret
   assert.equal(Model.suggestions(suggestModel(), after.text, after.caret), null);
 });
 
+test('a word typed in full is its suggestion already (Enter adds): case aside, escapes and all', () => {
+  const m = suggestModel();
+  const typed = (text, caret, index) => {
+    const suggest = Model.suggestions(m, text, caret);
+    return Model.suggestionTyped(text, suggest, suggest.items[index || 0]);
+  };
+  const table = [
+    ['Buy #Work', 9, true],
+    ['Buy #work', 9, true],
+    ['Buy #Wor', 8, false],
+    // The caret inside the word: the whole word counts.
+    ['Buy #Work', 6, true],
+    ['Pay @waiting\\ on', 16, true],
+    ['Pay @waiting', 12, false],
+  ];
+  for (const [text, caret, expected] of table) assert.equal(typed(text, caret), expected, text);
+  // Another entry highlighted than the one typed: Enter inserts it.
+  assert.deepEqual(names(Model.suggestions(m, '@o', 2)), ['office', 'code', 'Waiting on']);
+  assert.equal(typed('@office', 7, 0), true);
+  assert.equal(typed('@office', 7, 1), false);
+  assert.equal(Model.suggestionTyped('#Work', null, null), false);
+});
+
+test('added while typing on: the next task stays in the field, the added text and its spaces go', () => {
+  const table = [
+    ['Buy milk', 'Buy milk', ''],
+    ['Buy milkCall mum', 'Buy milk', 'Call mum'],
+    ['Buy milk  Call mum', 'Buy milk', 'Call mum'],
+    // Edited before the reply: not what was added, so it stays whole.
+    ['Buy oat milk', 'Buy milk', 'Buy oat milk'],
+    ['', 'Buy milk', ''],
+    ['Buy', '', 'Buy'],
+  ];
+  for (const [text, sent, expected] of table) assert.equal(Model.typedAfter(text, sent), expected, JSON.stringify([text, sent]));
+});
+
 // ---- sections and assignees -------------------------------------------------------
 const peopleModel = () => {
   const base = Fixtures.snapshot(TODAY);
@@ -715,18 +751,21 @@ test('detail parts: no project in its own view, in the Inbox or in search; Upcom
   assert.deepEqual(partsOf('search', { query: 'ting' }).mine, ['date:today', 'labels:hjem', 'assignee:Bo', 'recurring'], 'search heads each project');
 });
 
-test('detail dates: relative words, the weekday within a week, else "man. 23. nov." (the year when not this one)', () => {
+test('detail dates: relative words, the weekday within a week, else "Man. 23. nov." (the year when not this one), with a capital as I dag has', () => {
   const row = (day) => ({ kind: 'task', dueDay: day, dateKind: Model.dayKind(day, '2026-11-02') });
   const nb = (day) => Model.detailDate(row(day), formatter('nb'), catalog('nb'), '2026-11-02');
   const en = (day) => Model.detailDate(row(day), formatter('en'), catalog('en'), '2026-11-02');
   assert.equal(nb('2026-11-02'), 'I dag');
   assert.equal(nb('2026-11-01'), 'I går');
   assert.equal(nb('2026-11-03'), 'I morgen');
-  assert.equal(nb('2026-11-06'), 'fredag');
-  assert.equal(nb('2026-11-23'), 'man. 23. nov.');
+  assert.equal(nb('2026-11-06'), 'Fredag');
+  assert.equal(nb('2026-11-23'), 'Man. 23. nov.');
   assert.equal(en('2026-11-23'), 'Mon 23 Nov');
-  assert.equal(nb('2027-01-05'), 'tir. 5. jan. 2027');
-  assert.equal(nb('2026-10-01'), 'tor. 1. okt.');
+  assert.equal(nb('2027-01-05'), 'Tir. 5. jan. 2027');
+  assert.equal(nb('2026-10-01'), 'Tor. 1. okt.');
+  // The editor's Date and a deadline use the same words.
+  assert.equal(Model.dayWords('2026-11-06', formatter('nb'), catalog('nb'), '2026-11-02'), 'Fredag');
+  assert.equal(Model.dueWords({ due: { day: '2026-11-23', time: '09:00' } }, formatter('nb'), catalog('nb'), '2026-11-02'), 'Man. 23. nov. 09:00');
   assert.equal(Model.detailDate({ kind: 'task', dueDay: '', dateKind: '' }, formatter('nb'), catalog('nb'), '2026-11-02'), '');
 });
 
@@ -832,8 +871,6 @@ test('the add placeholder says where the task goes', () => {
   assert.equal(Model.addPlaceholder('today', TODAY, TODAY, '', format, t), 'Add a task for today…');
   assert.equal(Model.addPlaceholder('upcoming', '2026-11-19', TODAY, '', format, t), 'Add a task for Thursday 19 November…');
   assert.equal(Model.addPlaceholder('project', '', TODAY, 'Work', format, t), 'Add a task to Work…');
-  // Search and the Week view add like the Inbox (no default).
-  assert.equal(Model.addPlaceholder('week', '', TODAY, '', format, t), 'Add a task to the Inbox…');
 });
 
 test('the editor date in the panel words', () => {

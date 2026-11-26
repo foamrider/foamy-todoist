@@ -839,6 +839,118 @@ ShellRoot {
   function builtHeaders(view) {
     return view.list.contentItem.children.filter(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry.kind === "header"; });
   }
+  // Wide, a list: task A in the pane, then the pointer on row B (the
+  // cursor goes there, the pane stays). The task keys act on A, the task
+  // being read: Space, d, t, e and Ctrl+O. After an arrow key they act on
+  // the cursor's row again (the pane follows it). Then `done`, A in the
+  // pane again and nothing changed.
+  function paneKeys(view, done) {
+    var store = Plugin.TodoStore;
+    var editor = view.editor;
+    view.focusList();
+    view.goTo(view.firstRowStop);
+    var a = view.cursorRow();
+    var bStop = view.firstRowStop + 1;
+    var b = view.rows[view.stops[1]];
+    var c = view.rows[view.stops[2]];
+    if (!check(a.kind === "task" && b.kind === "task" && c.kind === "task" && !a.recurring && view.paneTask === a.id, "three task rows, the first in the pane (" + JSON.stringify([a.id, b.id, c.id, view.paneTask]) + ")")) return;
+    var rowB = shell.builtRows(view).find(function(r) { return r.entry.id === b.id; });
+    var surfaceB = shell.find(rowB, "taskSurface");
+    ev.mouseMove(surfaceB, surfaceB.width * 0.4, surfaceB.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+    if (!check(view.cursor.index === bStop && !view.cursor.byKeys && view.paneTask === a.id, "the pointer on " + b.id + ": the cursor there, the pane on " + a.id + " (" + JSON.stringify([view.cursor.index, view.cursor.byKeys, view.paneTask]) + ")")) return;
+    ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+    if (!check(store.struck[a.id] === true && !Model.has(store.struck, b.id), "Space completed the pane's task, not the pointed row (" + JSON.stringify(store.struck) + ")")) return;
+    ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+    if (!check(!Model.has(store.struck, a.id) && !store.pending, "Space again undid it")) return;
+    view.cursor.emitTextKey(view, "t");
+    if (!check(store.moves[a.id] === Model.addDays(shell.today, 1) && Object.keys(store.moves).length === 1, "t moved the pane's task to tomorrow (" + JSON.stringify(store.moves) + ")")) return;
+    store.undo(a.id);
+    view.cursor.emitTextKey(view, "d");
+    if (!check(view.dateMenuItem.opened && view.dateMenuTask === a.id, "d opened the pane's task's menu of days (" + view.dateMenuTask + ")")) return;
+    view.dateMenuItem.close();
+    view.focusList();
+    view.cursor.emitTextKey(view, "e");
+    shell.afterFrame(view, function() {
+      if (!check(editor.contentField.inputActiveFocus && view.paneTask === a.id && editor.taskId === a.id, "e put the caret in the pane's task")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!view.blocked && view.cursor.index === bStop && !view.cursor.byKeys, "Esc: the keys back, the cursor still on the pointed row")) return;
+      shell.openedBefore = shell.opened().length;
+      ev.keyClick(Qt.Key_O, Qt.ControlModifier, -1);
+      wait.waitFor(function() { return shell.opened().length > shell.openedBefore && !store.launchRunning; }, 15000, function(ok) {
+        var launched = shell.opened().slice(shell.openedBefore);
+        if (!check(ok && launched.length === 1 && launched[0].indexOf(Model.webUrl("task", a.id)) >= 0, "Ctrl+O opened the pane's task (" + JSON.stringify(launched) + ")")) return;
+        // ↓ moves from the cursor; the pane follows, and the keys act there.
+        shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: c.id, description: "", truncated: false } }));
+        ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
+        if (!check(view.cursorRow().id === c.id && view.paneTask === c.id && view.cursor.byKeys, "↓ from the pointed row: the next row, in the pane (" + view.paneTask + ")")) return;
+        ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+        if (!check(store.struck[c.id] === true && !Model.has(store.struck, a.id) && !Model.has(store.struck, b.id), "after ↓, Space completed the cursor's row (" + JSON.stringify(store.struck) + ")")) return;
+        ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+        wait.waitFor(function() { var d = store.description; return d.id === c.id && d.state === "ready"; }, 15000, function(read) {
+          if (!check(read && !store.pending && Object.keys(store.moves).length === 0, "undone, " + c.id + "'s description read")) return;
+          shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: a.id, description: "", truncated: false } }));
+          view.goTo(view.firstRowStop);
+          wait.waitFor(function() { var d = store.description; return view.paneTask === a.id && d.id === a.id && d.state === "ready"; }, 15000, function(back) {
+            if (check(back, a.id + " in the pane again")) done();
+          });
+        });
+      });
+    });
+  }
+  // The Week view with its pane open on t4, the pointer on t6: Space and
+  // Ctrl+→ act on t4. Then `done`, the pane closed and nothing changed.
+  function weekPaneKeys(view, done) {
+    var store = Plugin.TodoStore;
+    shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: "t4", description: "", truncated: false } }));
+    view.focusList();
+    view.weekPlace(1, 1);
+    view.goTo(view.firstRowStop);
+    ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+    ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+    if (!check(view.weekPaneOpen && view.paneTask === "t4" && !view.blocked, "Enter opened the pane on t4 (" + view.paneTask + ")")) return;
+    var card = shell.find(view.week, "card-t6");
+    ev.mouseMove(card, card.width / 2, card.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+    if (!check(view.cursorRow() && view.cursorRow().id === "t6" && !view.cursor.byKeys && view.paneTask === "t4", "the pointer on t6: the cursor there, the pane on t4 (" + JSON.stringify([view.cursorRow() && view.cursorRow().id, view.cursor.byKeys, view.paneTask]) + ")")) return;
+    ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+    if (!check(store.struck.t4 === true && !Model.has(store.struck, "t6"), "Week: Space completed the pane's card (" + JSON.stringify(store.struck) + ")")) return;
+    ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
+    ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
+    if (!check(!Model.has(store.struck, "t4") && store.moves.t4 === Model.addDays(shell.today, 1) && !Model.has(store.moves, "t6"), "Week: Ctrl+→ moved the pane's card (" + JSON.stringify(store.moves) + ")")) return;
+    store.undo("t4");
+    wait.waitFor(function() { var d = store.description; return d.id === "t4" && d.state === "ready"; }, 15000, function(read) {
+      if (!check(read && !store.pending, "t4's description read, nothing pending")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!view.weekPaneOpen, "Esc closed the week's pane")) return;
+      done();
+    });
+  }
+  // The Week view: `a` adds for the day of the column the cursor is in
+  // (`cases`: [what, column, card or -1 for no cursor, day, placeholder]),
+  // each sent with Shift+Enter (the field stays) and answered before the
+  // next. Then `done`.
+  function weekAdds(view, cases, done) {
+    if (!cases.length) { done(); return; }
+    var store = Plugin.TodoStore;
+    var c = cases[0];
+    view.focusList();
+    if (c[2] >= 0) {
+      view.weekPlace(c[1], c[2]);
+      view.goTo(view.firstRowStop);
+    } else
+      view.clearSelection();
+    view.cursor.emitTextKey(view, "a");
+    if (!check(view.fieldFocused && view.field.placeholderText === c[4], c[0] + ": the placeholder (" + view.field.placeholderText + ")")) return;
+    var before = shell.calls("add").length;
+    for (var ch of "Week " + c[0]) ev.keyClickChar(ch, Qt.NoModifier, -1);
+    ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+    wait.waitFor(function() { return shell.calls("add").length === before + 1 && !store.addPending && !store.busy; }, 15000, function(ok) {
+      var sent = ok ? JSON.parse(shell.calls("add").pop().slice("add ".length)) : null;
+      if (!check(sent && sent.text === "Week " + c[0] && sent.due_date === c[3], c[0] + ": added for " + c[3] + " (" + JSON.stringify(sent) + ")")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!view.fieldOpen, c[0] + ": Esc closed the empty field")) return;
+      shell.weekAdds(view, cases.slice(1), done);
+    });
+  }
   // Wide: a click on the pane's empty space takes the keys from its title
   // (the typed text saved) and keeps the selection; a click on the list's
   // space that isn't a row (below the rows, a heading, the top margin)
@@ -1295,7 +1407,7 @@ ShellRoot {
     case 65: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.pref("afterAdd") === "keep"; }, 10000, "the popup with Keep the field open"];
     case 66: return [function() { return view.fieldFocused && view.band.fieldProgress === 1; }, 10000, "the add field (keep)"];
     case 67: return [function() { return shell.calls("add").length === shell.callsBefore + 1 && !view.addBusy && !store.busy; }, 15000, "the add with Enter (keep)"];
-    case 68: return [function() { return shell.calls("add").length === shell.callsBefore + 2 && !store.addPending && !store.busy; }, 15000, "the add with Shift+Enter (keep)"];
+    case 68: return [function() { return shell.calls("add").length === shell.callsBefore + 3 && !store.addPending && !store.busy; }, 20000, "the add with Shift+Enter (keep)"];
     case 69: return [function() { return one.opened && view && view.active && view.pref("afterAdd") === "close" && shell.builtRows(view).some(function(r) { return r.entry.id === "t4"; }); }, 10000, "the popup for the editor"];
     case 70: return [function() { return view.pageShown && store.description.state === "ready" && store.description.id === "t4"; }, 15000, "the editor page with the description"];
     case 71: return [function() { return shell.calls("apply").length === shell.callsBefore + 1 && !store.busy && !view.editor.saving; }, 15000, "the text saved"];
@@ -1741,6 +1853,15 @@ ShellRoot {
       view.cursor.emitTextKey(view, "d");
       if (!check(dayMenu.opened && dayMenu.currentIndex === 0, "d opens the menu from the keys")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // T on an Overdue row: as the heading's Move to today; elsewhere nothing.
+      view.goTo(view.stopOf("t4"));
+      view.cursor.emitTextKey(view, "T", Qt.ShiftModifier);
+      if (!check(Object.keys(store.moves).length === 0, "T on a row due today does nothing (" + JSON.stringify(store.moves) + ")")) return;
+      view.goTo(view.stopOf("t2"));
+      view.cursor.emitTextKey(view, "T", Qt.ShiftModifier);
+      if (!check(store.moves.t1 === shell.today && store.moves.t2 === shell.today && Object.keys(store.moves).length === 2, "T on an Overdue row: both overdue tasks (" + JSON.stringify(store.moves) + ")")) return;
+      store.undo("t1");
+      store.undo("t2");
       // Overdue's Move to today: its tasks, each with Undo.
       var moveAll = shell.find(view, "moveAllToToday");
       if (!check(moveAll.visible, "Today's Overdue heading offers Move to today")) return;
@@ -1964,6 +2085,9 @@ ShellRoot {
       // Esc closes only the list; the next Esc clears as before.
       for (var h of "#Ho") ev.keyClickChar(h, Qt.NoModifier, -1);
       if (!check(list.visible, "#Ho shows the list")) return;
+      // While it shows, the footer says what its keys do.
+      var listHints = function() { var row = shell.find(view, "keyHints"); return row.visible ? [0, 1, 2].map(function(i) { var hint = shell.find(row, "keyHint" + i); return hint.modelData.key + " " + hint.label; }) : []; };
+      if (!check(JSON.stringify(listHints()) === JSON.stringify(["↵ insert", "Tab insert", "Esc close the list"]), "the footer: the list's keys (" + JSON.stringify(listHints()) + ")")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!list.visible && view.field.text === "#Inbox @office #Ho" && view.fieldOpen && view.fieldFocused, "Esc closed only the list")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
@@ -1977,12 +2101,15 @@ ShellRoot {
       var row = shell.find(list, "suggestion-Launch");
       ev.mouseClick(row, row.width / 2, row.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(view.field.text === "#Launch " && view.fieldFocused && !list.visible, "a click inserts #Launch (" + JSON.stringify(view.field.text) + ")")) return;
-      // With the list closed, Enter adds (Shift: and the field stays).
-      ev.keyClickChar("x", Qt.NoModifier, -1);
+      // A project typed in full (another case): the list shows it, the
+      // footer says Enter adds, and Enter adds (Shift: and the field stays).
+      for (var hm of "x #home") ev.keyClickChar(hm, Qt.NoModifier, -1);
+      if (!check(list.visible && shell.find(list, "suggestion-Home").hasCursor && JSON.stringify(listHints()) === JSON.stringify(["↵ add and close", "Tab insert", "Esc close the list"]), "#home typed in full: Home highlighted, the footer says Enter adds (" + JSON.stringify(listHints()) + ")")) return;
       ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+      if (!check(view.field.text === "#Launch x #home" && view.addBusy, "Shift+Enter added it as typed (" + JSON.stringify(view.field.text) + ")")) return;
       break;
     case 33:
-      if (!check(JSON.parse(shell.calls("add").pop().slice("add ".length)).text === "#Launch x", "Enter with the list closed added the text")) return;
+      if (!check(JSON.parse(shell.calls("add").pop().slice("add ".length)).text === "#Launch x #home", "Enter on a project typed in full added the text")) return;
       // Search never suggests.
       view.startSearch();
       ev.keyClickChar("#", Qt.NoModifier, -1);
@@ -2360,12 +2487,33 @@ ShellRoot {
       for (var k1 of "Keep one") ev.keyClickChar(k1, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       if (!check(one.opened && view.fieldOpen && view.addBusy, "Enter (keep): sent, the panel stays")) return;
+      // The next task typed before Todoist answers (the field takes keys
+      // while the add is on its way; Enter waits for it).
+      for (var k3 of "Next") ev.keyClickChar(k3, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.field.text === "Keep oneNext" && view.addBusy && store.pendingAddText === "Keep one", "typed on while busy, Enter sent nothing more (" + JSON.stringify([view.field.text, store.pendingAddText]) + ")")) return;
       break;
     case 67:
-      if (!check(one.opened && view.fieldOpen && view.fieldFocused && view.field.text === "", "the field is empty for the next task, the caret in it (" + JSON.stringify(view.field.text) + ")")) return;
-      for (var k2 of "Close two") ev.keyClickChar(k2, Qt.NoModifier, -1);
-      ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
-      if (!check(!one.opened && store.addDraft === "Close two", "Shift+Enter (keep): sent, the panel closes")) return;
+      if (!check(one.opened && view.fieldOpen && view.fieldFocused && view.field.text === "Next" && view.field.cursorPosition === 4, "the sent text left the field, the next task stays, the caret at its end (" + JSON.stringify([view.field.text, view.field.cursorPosition]) + ")")) return;
+      // Typed on, then search before Todoist answers: the put-aside draft
+      // loses the sent text and the spaces after it, and comes back so.
+      view.field.selectAll();
+      for (var k5 of "Third") ev.keyClickChar(k5, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      for (var k6 of "  Fourth") ev.keyClickChar(k6, Qt.NoModifier, -1);
+      // A click away from the field (it stays open with its text), then /.
+      view.leaveField();
+      view.cursor.emitTextKey(view, "/");
+      if (!check(view.searching && view.searchDraft === "Third  Fourth" && view.addBusy, "Search put the draft aside while the add is on its way (" + JSON.stringify(view.searchDraft) + ")")) return;
+      wait.waitFor(function() { return !view.addBusy && !store.busy; }, 15000, function(added) {
+        if (!check(added && shell.calls("add").length === shell.callsBefore + 2 && view.searchDraft === "Fourth", "added: the put-aside draft without the sent text (" + JSON.stringify(view.searchDraft) + ")")) return;
+        ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+        if (!check(!view.searching && view.field.text === "Fourth" && view.field.cursorPosition === 6 && view.fieldFocused, "Esc: the draft back in the field (" + JSON.stringify(view.field.text) + ")")) return;
+        view.field.selectAll();
+        for (var k2 of "Close two") ev.keyClickChar(k2, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
+        check(!one.opened && store.addDraft === "Close two", "Shift+Enter (keep): sent, the panel closes");
+      });
       break;
     case 68:
       if (!check(store.addDraft === "" && store.addError === "", "added: no draft left (" + JSON.stringify(store.addDraft) + ")")) return;
@@ -2881,6 +3029,7 @@ ShellRoot {
       shell.draftThenComplete(big5, "ring", function() {
       shell.listSpace(big5, function() {
       shell.pasteStaysWithItsTask(big5, function() {
+      shell.paneKeys(big5, function() {
       // Typed again, then the Week view from the rail: saved as the pane goes.
       big5.editor.contentField.focusInput();
       shell.paneFrom = big5.paneTask;
@@ -2897,6 +3046,7 @@ ShellRoot {
       var weekEntry = shell.find(big5, "rail-week");
       ev.mouseClick(weekEntry, weekEntry.width / 2, weekEntry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big5.weekShown && !big5.editor.visible && !big5.blocked, "the Week view; the pane went, the keys with the list")) return;
+      });
       });
       });
       });
@@ -3016,8 +3166,27 @@ ShellRoot {
       ev.keyClick(Qt.Key_Left, Qt.NoModifier, -1);
       if (!check(big4.weekColumn === 0 && big4.weekCard === big4.weekCards(1) - 1, "←: that row in Overdue (" + big4.weekCard + ")")) return;
       store.snapshot = shell.snapshot();
-      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
-      if (!check(!one.opened, "Esc: the popup closes")) return;
+      shell.weekPaneKeys(big4, function() {
+        // A task moved to Monday the 23rd: its card stands there (the undo
+        // window held, so the move isn't sent meanwhile).
+        store.holdUndo(true);
+        store.move("t11", "2026-11-23");
+        shell.put("reply-add.json", JSON.stringify(Object.assign(shell.snapshot(), { added: "t1" })));
+        var tomorrow = Model.addDays(shell.today, 1);
+        shell.weekAdds(big4, [
+          ["overdue", 0, 0, shell.today, "Add a task for today…"],
+          ["today", 1, 2, shell.today, "Add a task for today…"],
+          ["tomorrow", 2, 0, tomorrow, "Add a task for Thursday 19 November…"],
+          ["later", 3, 0, "2026-11-21", "Add a task for Saturday 21 November…"],
+          ["moved", 3, 1, "2026-11-23", "Add a task for Monday 23 November…"],
+          ["off the board", 0, -1, shell.today, "Add a task for today…"]
+        ], function() {
+          store.undo("t11");
+          store.holdUndo(false);
+          ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+          check(!one.opened, "Esc: the popup closes");
+        });
+      });
       break;
     case 89:
       // Closing lets the held height go.

@@ -94,6 +94,7 @@
   "Clipboard text is too large or contains invalid characters.": "Clipboard text is too large or contains invalid characters.",
   "Close": "Close",
   "Close search": "Close search",
+  "close the list": "close the list",
   "Close the panel": "Close the panel",
   "Complete": "Complete",
   "Copy": "Copy",
@@ -134,6 +135,7 @@
     "one": "Inbox · %1 task",
     "other": "Inbox · %1 tasks"
   },
+  "insert": "insert",
   "internal error": "internal error",
   "Keep the field open": "Keep the field open",
   "Labels": "Labels",

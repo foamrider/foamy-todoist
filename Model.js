@@ -415,10 +415,29 @@ function matchNames(pool, query) {
 // Add reads them), then one space (unless one follows already); the caret
 // after that space.
 function applySuggestion(text, start, end, item) {
-  var token = ({ project: "#", label: "@", section: "/", assignee: "+" })[item.kind] + item.name.replace(/ /g, "\\ ")
+  var token = suggestionToken(item)
   var rest = text.slice(end)
   var spaced = /^\s/.test(rest) ? rest : " " + rest
   return { text: text.slice(0, start) + token + spaced, caret: start + token.length + 1 }
+}
+
+// The text an entry puts in the field.
+function suggestionToken(item) {
+  return ({ project: "#", label: "@", section: "/", assignee: "+" })[item.kind] + item.name.replace(/ /g, "\\ ")
+}
+
+// Whether the word at the caret (`suggest`, as suggestions() gives it)
+// already is `item` as applySuggestion would put it, ignoring case: "#home"
+// typed in full for Home. Inserting it would only put it back, so Enter adds.
+function suggestionTyped(text, suggest, item) {
+  return !!suggest && !!item && text.slice(suggest.start, suggest.end).toLowerCase() === suggestionToken(item).toLowerCase()
+}
+
+// The add field's text once Todoist has `sent`: what was typed after it
+// (the field stays open for the next task), its leading spaces dropped;
+// text that no longer starts with `sent` is someone's edit and stays whole.
+function typedAfter(text, sent) {
+  return sent !== "" && text.startsWith(sent) ? text.slice(sent.length).replace(/^\s+/, "") : text
 }
 
 // ---- Quick Add tokens (the add field's colours) ---------------------------------
@@ -1304,7 +1323,10 @@ function upcomingHeading(row, format, t) {
 
 // A task row's date on its detail line: the words for yesterday, today
 // and tomorrow, the weekday within a week, else the short weekday, day and
-// month ("man. 23. nov."), with the year when it isn't this one.
+// month ("Man. 23. nov."), with the year when it isn't this one. It starts
+// a line or stands alone (a row's detail line, a Week card, the editor's
+// Date and deadline, the overview), so it starts with a capital letter,
+// beside "I dag", where the locale writes its names in lower case.
 var DETAIL_KEYS = ["Today", "Yesterday", "Tomorrow", "ddd d MMM", "ddd d MMM yyyy"]
 function detailDate(row, format, t, today) {
   if (!row || !row.dateKind || !row.dueDay)
@@ -1318,9 +1340,9 @@ function detailDate(row, format, t, today) {
   case "tomorrow":
     return t("Tomorrow")
   case "weekday":
-    return format(day, "dddd")
+    return capitalized(format(day, "dddd"))
   default:
-    return format(day, t(row.dueDay.slice(0, 4) === today.slice(0, 4) ? "ddd d MMM" : "ddd d MMM yyyy"))
+    return capitalized(format(day, t(row.dueDay.slice(0, 4) === today.slice(0, 4) ? "ddd d MMM" : "ddd d MMM yyyy")))
   }
 }
 
@@ -1570,7 +1592,7 @@ if (typeof module !== "undefined")
   module.exports = {
     WEB, webUrl, validId, validDate, colorRole, priorityRole, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
-    TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
+    TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion, suggestionTyped, typedAfter,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
     MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
     weekEndOf, searchWords, matchRuns, movedDue, movedDate, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
