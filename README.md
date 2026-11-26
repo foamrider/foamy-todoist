@@ -124,12 +124,14 @@ task moves to its next date, as in Todoist.
 its time's place: **Tomorrow** (`t`) and a calendar (`d`) with **Today**,
 **Tomorrow**, **Next week** (the first day of your locale's next week) and
 **No date**. Today's **Overdue** heading has **Move to today** for all its
-tasks (`T` on an overdue row). A moved task keeps its time (a 14:00 task moved to tomorrow is due
-tomorrow at 14:00). Like a completion, the row stays where it is, dimmed,
-with its new day in the accent colour and **Undo**; the move is sent with
-the completions four seconds after the last change (at once when the panel
-closes), and a refusal brings the task back with the reason on the line
-under the band. A recurring task isn't moved: its rule decides its dates,
+tasks (`T` on an overdue row). A moved task keeps its time as your clock
+shows it (a 14:00 task moved to tomorrow is due tomorrow at 14:00) and,
+when its time is fixed to a time zone, that zone. Like a completion, the
+row stays where it is, dimmed, with its new day in the accent colour and
+**Undo**; the move is sent with the completions four seconds after the last
+change (at once when the panel closes), and a refusal brings the task back
+with the reason on the line under the band. A recurring task isn't moved:
+its rule decides its dates,
 so the line says to open it and change the date there (in its own words).
 
 **Adding**: click **+** or press `a` anywhere: a field grows out of the
