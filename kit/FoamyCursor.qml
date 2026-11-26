@@ -1,4 +1,4 @@
-// foamy-kit 0.15.0 a584c06fb2a3506d6c7525d289ffe516832af9363162268d90b50e221eb79985 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.15.0 1604f2e9bb6c6e2b05a42d33486a69adbcdb32bf731528ec44ce7aeb2d1814e3 — do not edit; change foamy-kit and run sync
 import QtQuick
 
 // The panel's single cursor over a flat list of stops (rows, then buttons),
@@ -47,6 +47,7 @@ QtObject {
   }
   function reset() {
     index = -1
+    byKeys = false
   }
   // A letter shortcut with no Ctrl/Alt/Meta held (Shift is fine).
   function plain(modifiers) {

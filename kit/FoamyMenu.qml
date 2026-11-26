@@ -1,5 +1,5 @@
 pragma ComponentBehavior: Bound
-// foamy-kit 0.15.0 519028e137e890f0763ef16fda0defe6e53f304451b28476f73ecca519fefded — do not edit; change foamy-kit and run sync
+// foamy-kit 0.15.0 399fff048da536c56732e31d87e4d4ebf2e4a442d87566f4cd773f58799e8705 — do not edit; change foamy-kit and run sync
 import QtQuick
 import qs.Commons as Commons
 
@@ -248,6 +248,9 @@ QtObject {
     if (!_parentEntry)
       return false
     var from = _parentEntry
+    // No highlight while the level changes (else the old index lights a
+    // row of the new level for a frame).
+    _index = -1
     _parentEntry = null
     _index = _entries.indexOf(from)
     overlay.decideGrowth()
@@ -367,10 +370,12 @@ QtObject {
         menuWheel.scrollTo(y, false)
     }
     onWidthChanged: place()
-    // The card grows after a keyboard open: keep the entry in view.
+    // The card grows after a keyboard open: keep the entry in view (only
+    // while it grows for this menu, so a wheel scroll otherwise stays).
     onHeightChanged: {
       place()
-      reveal()
+      if (root._grow)
+        reveal()
     }
     onNaturalHeightChanged: place()
 
