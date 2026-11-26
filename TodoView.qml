@@ -1873,6 +1873,10 @@ PanelKeyCatcher {
         cursorColumn: root.weekColumn
         cursorCard: root.weekCard
         selectedId: root.weekPaneOpen ? root.paneTask : ""
+        keysTaskId: {
+          var target = root.weekShown ? root.keyTarget() : null
+          return target && target.kind === "task" ? target.id : ""
+        }
         onHovered: function (column, card) {
           if (root.fieldFocused)
             return
@@ -1890,6 +1894,11 @@ PanelKeyCatcher {
         onCompleteRequested: function (id) {
           root.leaveField()
           root.completeTask(id)
+        }
+        // A card's move action: what Ctrl+←/→ do, for the card it is on.
+        onShiftRequested: function (id, delta) {
+          root.leaveField()
+          root.store.shiftDue(id, delta)
         }
         onSpaceClicked: root.clearSelection()
       }
@@ -2156,6 +2165,8 @@ PanelKeyCatcher {
   // An add draft stays open while the pane edits a task: the save's status
   // takes the key hints' place for its moment, then the hints come back.
   readonly property bool keyHintsShown: adding && saveStatus === ""
+  // The Week board has the keys: the footer names them (README, Keyboard).
+  readonly property bool weekHintsShown: weekShown && on(firstRowStop) && !blocked && !adding
   // While adding, the keys and what they do; else where the tasks come
   // from, how fresh they are, and Refresh.
   FoamyPanelFooter {
@@ -2203,15 +2214,32 @@ PanelKeyCatcher {
     }
     // The add field's keys, as "After adding a task" sets them; while the
     // suggestion list shows, its keys (Enter adds when the word already is
-    // the highlighted entry).
+    // the highlighted entry). The Week board's keys while it has them.
     Row {
       id: keyHints
       objectName: "keyHints"
-      visible: root.keyHintsShown
+      visible: root.keyHintsShown || root.weekHintsShown
       spacing: FoamyStyle.gapLarge
       readonly property bool closing: root.closeAfterAdd === "close"
       readonly property string enterText: closing ? FoamyI18n.t("add and close") : FoamyI18n.t("add, keep typing")
-      readonly property var hints: root.suggestOpen ? (root.suggestTyped ? [
+      readonly property var hints: root.weekHintsShown ? [
+        {
+          key: "t",
+          text: FoamyI18n.t("tomorrow")
+        },
+        {
+          keys: ["Ctrl", "←", "→"],
+          text: FoamyI18n.t("move a day")
+        },
+        {
+          key: "Space",
+          text: FoamyI18n.t("complete")
+        },
+        {
+          key: "↵",
+          text: FoamyI18n.t("details")
+        }
+      ] : root.suggestOpen ? (root.suggestTyped ? [
           {
             key: "↵",
             text: enterText
@@ -2253,16 +2281,17 @@ PanelKeyCatcher {
           required property int index
           objectName: "keyHint" + index
           readonly property string label: modelData.text
+          // Its keys: one, one and a second that does the same (`also`),
+          // or a chord's (`keys`).
+          readonly property var caps: modelData.keys || [modelData.key].concat(modelData.also ? [modelData.also] : [])
           spacing: FoamyStyle.gapSmall
-          KeyCap {
-            anchors.verticalCenter: parent.verticalCenter
-            text: hint.modelData.key
-          }
-          // A second key that does the same.
-          KeyCap {
-            visible: text !== ""
-            anchors.verticalCenter: parent.verticalCenter
-            text: hint.modelData.also || ""
+          Repeater {
+            model: hint.caps
+            // The tallest part: the hint's text centres on it.
+            KeyCap {
+              required property string modelData
+              text: modelData
+            }
           }
           PlainText {
             anchors.verticalCenter: parent.verticalCenter

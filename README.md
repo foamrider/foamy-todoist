@@ -65,13 +65,19 @@ is last). Nothing has the cursor when the panel opens.
   section.
 - **Week** (Wide): four columns, **Overdue**, **Today**, **Tomorrow** and
   **Later** (the seven days after tomorrow, each day under a small
-  heading). A card shows the task, its time and its project. ↑/↓ move in a
-  column, ←/→ across (← from the first column goes to the rail), Space
-  completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move it a
-  day earlier or later (never before today; recurring tasks stay, as with
-  `t`). A moved card goes to its new column at once; the move is sent as
-  a move in a list is (see "Moving"), and moving it back to its day
-  cancels it. Enter, `e` or a click opens the details beside the board,
+  heading). A card has a list row's parts: the priority ring, the task,
+  and a line with the date (overdue: in red with the warning mark), the
+  time, the repeat mark and the project (which is shortened first). ↑/↓
+  move in a column, ←/→ across (← from the first column goes to the rail),
+  Space completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move
+  it a day earlier or later (never before today; recurring tasks stay, as
+  with `t`). The card under the cursor (the pointer's or the keys') shows
+  two small buttons that do the same for that card, ‹ a day earlier and
+  › a day later; their tooltips name the keys while the keys act on that
+  card. While the board has the keys, the footer names them (`t`, Ctrl+←
+  →, Space, Enter). A moved card goes to its new column at once; the move
+  is sent as a move in a list is (see "Moving"), and moving it back to its
+  day cancels it. Enter, `e` or a click opens the details beside the board,
   which keeps its four columns, narrower (titles on up to three lines); Esc
   or the pane's Close closes them. Small shows Today instead, and so does
   **Open on: Last view**.
@@ -369,7 +375,7 @@ accent tint and a bar at its start.
 | ← → | the tabs | pick a view (Enter or Space shows it) |
 | ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |
 | ↑ ↓ ← → | the Week view | move in a column, across columns |
-| Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
+| Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later (also the card's ‹ and › buttons) |
 | Enter, Space | a value in the editor | change it (a menu, or the date field) |
 | Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
 | Tab, Shift+Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts); with neither, the next or previous panel |

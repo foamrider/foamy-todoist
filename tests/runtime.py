@@ -1232,6 +1232,15 @@ ShellRoot {
     var card = shell.find(view.week, "card-t6");
     ev.mouseMove(card, card.width / 2, card.height / 2, -1, Qt.NoButton, Qt.NoModifier);
     if (!check(view.cursorRow() && view.cursorRow().id === "t6" && !view.cursor.byKeys && view.paneTask === "t4", "the pointer on t6: the cursor there, the pane on t4 (" + JSON.stringify([view.cursorRow() && view.cursorRow().id, view.cursor.byKeys, view.paneTask]) + ")")) return;
+    // The pointer's card shows its move actions; they act on it, not on
+    // the pane's task, and their tooltip names no keys (the keys act on t4).
+    var later6 = shell.find(card, "moveLater");
+    var earlier6 = shell.find(card, "moveEarlier");
+    var text6 = shell.find(card, "cardText");
+    if (!check(shell.find(card, "moveActions").visible && !shell.find(shell.find(view.week, "card-t4"), "moveActions").visible && later6.tip === "A day later" && earlier6.tip === "A day earlier", "the pointer's card shows its actions, no keys in their tooltips (" + JSON.stringify([later6.tip, earlier6.tip]) + ")")) return;
+    ev.mouseClick(later6, later6.width / 2, later6.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+    if (!check(store.moves.t6 === Model.addDays(shell.today, 1) && !Model.has(store.moves, "t4"), "a day later moved the card it is on (" + JSON.stringify(store.moves) + ")")) return;
+    store.undo("t6");
     ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
     if (!check(store.struck.t4 === true && !Model.has(store.struck, "t6"), "Week: Space completed the pane's card (" + JSON.stringify(store.struck) + ")")) return;
     ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
@@ -1242,7 +1251,32 @@ ShellRoot {
       if (!check(read && !store.pending, "t4's description read, nothing pending")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!view.weekPaneOpen, "Esc closed the week's pane")) return;
-      done();
+      // The keys on t4: its actions' tooltips name them. The card keeps
+      // its height and its text's place while they show.
+      var card4 = shell.find(view.week, "card-t4");
+      var place4 = function() { return [card4.height, shell.find(card4, "cardText").mapToItem(card4, 0, 0).x, shell.find(card4, "cardTime").mapToItem(card4, 0, 0).x]; };
+      view.weekPlace(1, 2);
+      shell.afterFrame(view, function() {
+        var without = place4();
+        view.weekPlace(1, 1);
+        view.cursor.byKeys = true;
+        shell.afterFrame(view, function() {
+          if (!check(shell.find(card4, "moveActions").visible && shell.find(card4, "moveLater").tip === "A day later (Ctrl+→)" && shell.find(card4, "moveEarlier").tip === "A day earlier (Ctrl+←)", "the keys' card: its actions name Ctrl+←/→ (" + shell.find(card4, "moveLater").tip + ")")) return;
+          if (!check(JSON.stringify(place4()) === JSON.stringify(without), "the actions change neither the card's height nor its text's place (" + JSON.stringify([without, place4()]) + ")")) return;
+          // A repeating task: the actions refuse it as Ctrl+→ does, with the same reason.
+          view.weekPlace(1, 0);
+          ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
+          var byKeys = store.error;
+          store.error = "";
+          shell.afterFrame(view, function() {
+            var later3 = shell.find(shell.find(view.week, "card-t3"), "moveLater");
+            ev.mouseClick(later3, later3.width / 2, later3.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+            if (!check(byKeys !== "" && store.error === byKeys && !Model.has(store.moves, "t3"), "a repeating card's action refuses as Ctrl+→ does (" + JSON.stringify([byKeys, store.error]) + ")")) return;
+            store.error = "";
+            done();
+          });
+        });
+      });
     });
   }
   // The Week view: `a` adds for the day of the column the cursor is in
@@ -3541,6 +3575,29 @@ ShellRoot {
       if (!check(weekCount.text !== "" && weekRatio >= 4.5, "a column's count reads (" + weekRatio.toFixed(2) + ":1)")) return;
       ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
       if (!check(!store.struck.t2, "and undoes")) return;
+      // A card is built from the row's parts: the row's ring and title
+      // size; the time in the mono face, the project after the row's
+      // hash, the repeat mark; overdue, only the date in red, with the
+      // warning mark.
+      var cardPart = function(id, name) { return shell.find(shell.find(big2.week, "card-" + id), name); };
+      var shownPart = function(id, name) { var item = cardPart(id, name); return !!item && item.visible; };
+      var standUp = ["cardTime", "cardHash", "cardProject", "cardRepeat"].map(function(name) { return shownPart("t3", name); });
+      if (!check(standUp.every(Boolean) && cardPart("t3", "cardTime").text === "09:30" && cardPart("t3", "cardTime").font.family === Kit.FoamyStyle.monoFamily && cardPart("t3", "cardProject").text === "Work" && Qt.colorEqual(cardPart("t3", "cardHash").color, Kit.FoamyPalette.mutedText) && cardPart("t3", "cardText").font.pixelSize === Kit.FoamyStyle.font.body && cardPart("t3", "weekRingMark").width === 16, "a card's parts as a row's: mono time, hash and project, repeat mark, the title's size, the ring (" + JSON.stringify(standUp) + ")")) return;
+      var red = Kit.FoamyPalette.onSurface(Kit.FoamyPalette.error);
+      if (!check(shownPart("t1", "cardLateMark") && Qt.colorEqual(cardPart("t1", "cardDate").color, red) && !Qt.colorEqual(cardPart("t1", "cardProject").color, red) && !shownPart("t3", "cardLateMark") && !Qt.colorEqual(cardPart("t3", "cardTime").color, red), "overdue: only the date red, with the warning mark (" + JSON.stringify([String(cardPart("t1", "cardDate").color), String(cardPart("t1", "cardProject").color)]) + ")")) return;
+      // An unconfirmed completion: as the list's row, not dimmed: the
+      // title in the secondary tone, a plain ring, the refresh mark.
+      store.unconfirmed = { t5: true };
+      var unconfirmedRing = cardPart("t5", "weekRingMark");
+      if (!check(shownPart("t5", "cardChecking") && shell.sameColor(cardPart("t5", "cardText").color, Kit.FoamyPalette.secondaryText) && unconfirmedRing.border.width === 1 && unconfirmedRing.color.a === 0 && shell.find(big2.week, "card-t5").children.every(function(child) { return child.opacity === 1; }) && shell.find(shell.find(big2.week, "card-t5"), "cardText").opacity === 1, "an unconfirmed card reads as the row: plain ring, secondary title, refresh mark (" + JSON.stringify([shownPart("t5", "cardChecking"), String(cardPart("t5", "cardText").color), unconfirmedRing.border.width, unconfirmedRing.color.a, shell.find(big2.week, "card-t5").children.map(function(child) { return child.opacity; })]) + ")")) return;
+      store.unconfirmed = {};
+      // While the board has the keys, the footer names them.
+      var weekHints = shell.find(big2, "keyHints");
+      var weekHintTexts = shell.visibleTexts(weekHints);
+      if (!check(weekHints.visible && JSON.stringify(weekHintTexts) === JSON.stringify(["t", "tomorrow", "Ctrl", "←", "→", "move a day", "Space", "complete", "↵", "details"]), "the Week footer names its keys (" + JSON.stringify(weekHintTexts) + ")")) return;
+      big2.goTo(big2.railStop);
+      if (!check(!weekHints.visible, "the keys on the rail: no Week hints")) return;
+      big2.goTo(big2.firstRowStop);
       // Ctrl+→: a day later with the due op; the cursor follows the task.
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t2: { due: Fixtures.due(shell.today) } }), { results: { t2: "ok" } })));
       shell.callsBefore = shell.calls("apply").length;
@@ -3549,6 +3606,12 @@ ShellRoot {
       break;
     case 87:
       var big3 = one.popup.bodyItem;
+      // The hints fit beside the footer's status, Wide.
+      var fitHints = shell.find(big3, "keyHints");
+      var footerStatus = shell.find(big3, "foamyFooterStatus");
+      var hintsEnd = fitHints.mapToItem(big3, fitHints.width, 0).x;
+      var statusStart = footerStatus.mapToItem(big3, 0, 0).x + footerStatus.width - footerStatus.contentWidth;
+      if (!check(fitHints.visible && footerStatus.visible && !footerStatus.truncated && hintsEnd + Kit.FoamyStyle.gap <= statusStart, "the Week hints fit beside the status (" + JSON.stringify([hintsEnd, statusStart, footerStatus.text]) + ")")) return;
       var sent5 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent5) === JSON.stringify({ commands: [{ op: "due", id: "t2", date: shell.today }] }), "Ctrl+→ moved t2 to today (" + JSON.stringify(sent5) + ")")) return;
       if (!check(big3.weekColumn === 1 && big3.cursorRow().id === "t2", "the cursor followed it to Today")) return;
