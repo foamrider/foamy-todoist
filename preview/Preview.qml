@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-completed", "wide-long-heading", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-long-heading", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -78,8 +78,13 @@ Item {
     store.fixtureDescriptions = Fixtures.descriptions
     // The fixtures assign one task to someone else: show it, as an example.
     store.othersTasks = "show"
-    if (previewState === "unconfirmed")
+    if (previewState === "unconfirmed" || previewState === "wide-task-unconfirmed")
       store.unconfirmed = {
+        "t4": true
+      }
+    // Its completion sent, the reply not in yet.
+    if (previewState === "wide-task-sent")
+      store.sending = {
         "t4": true
       }
     view.editingSettings = previewState.indexOf("settings") >= 0
@@ -145,8 +150,9 @@ Item {
     // a refused save under the date, the keys on the empty Deadline section
     // (its fill as on hover, and the keys' ring; the renderer can't hover).
     // A completed task, its Undo time running: the page (Small) and the
-    // pane (Wide) show it completed, with Undo.
-    if (previewState === "editor-completed" || previewState === "wide-task-completed")
+    // pane (Wide) show it completed, with Undo; sent, without; unconfirmed,
+    // a plain ring and "Checking with Todoist…".
+    if (previewState === "editor-completed" || previewState === "wide-task-completed" || previewState === "wide-task-sent" || previewState === "wide-task-unconfirmed")
       Qt.callLater(function () {
         view.openTask("t4", false)
       })

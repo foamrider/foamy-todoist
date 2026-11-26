@@ -67,9 +67,11 @@ function priorityRole(priority) {
 
 // The completion ring by priority, so the priority reads by more than its
 // hue: p1 a thicker, filled ring, p4 a thin, empty one ({border px, fill
-// alpha at rest}; hover adds RING_HOVER, the completed look is RING_DONE).
+// alpha at rest}; hover adds RING_HOVER). Completed, the ring is filled
+// with its colour (RING_DONE): that colour reads 4.5:1 on the background,
+// so the background's colour, the check's ink, reads as well on the fill.
 var RING_HOVER = 0.16
-var RING_DONE = 0.9
+var RING_DONE = 1
 function ringLook(priority) {
   return priority === 4 ? { border: 2, fill: 0.4 } : priority === 1 ? { border: 1, fill: 0 } : { border: 1.5, fill: 0.12 }
 }

@@ -12,11 +12,11 @@ The bar shows the Todoist mark and, in the bar's urgent colour, the number
 of tasks left today (overdue plus due today), like Foamy Zendesk's count.
 Nothing left today, or **Show in the bar: Icon only**, leaves just the mark;
 signed out, the mark stands alone. The tooltip says how many are left and how
-many of them are overdue. When a task you added with the panel closed
-was refused, or Todoist gave no answer, a dot in the bar's urgent colour
-sits on the mark's corner
-(the button keeps its width) and the tooltip says so, until the panel opens
-on any monitor and shows the text with why.
+many of them are overdue. When a task you added was refused, or Todoist
+gave no answer, and the panel didn't show why (it was closed, or on
+Settings or a task's page), a dot in the bar's urgent colour sits on the
+mark's corner (the button keeps its width) and the tooltip says so, until
+the panel shows the add field with the text and why on any monitor.
 
 ## The panel
 
@@ -94,8 +94,9 @@ full. A due time shows on the right: today, a time that has passed is red
 and the next one ahead is bright. The ring and the time stand on the
 task's first line. A heading's count stands beside its word (after a date
 range, at the row's end); a heading too long for its row ends with "…" and
-shows whole on hover. **Move to today** on Today's Overdue heading names
-its key (T) on hover.
+shows whole on hover, wrapped to the row's width. **Move to today** on
+Today's Overdue heading names its key (T) on hover while the key would act
+(the cursor on one of its tasks).
 
 In Small the band's line leaves the view's name to the tabs: Today says the
 date first ("Thu 26 Nov · 6 left · 2 overdue"), the Inbox and Upcoming
@@ -162,7 +163,9 @@ from an empty field goes to the next panel), and when the panel closes, also
 after Enter closed it before Todoist answered, the draft is kept for this
 session and comes back, with the caret at its end and the error if the add
 failed, the next time the panel opens. Adding the task or clearing it with
-Esc ends the draft; text typed after the sent text stays the draft. A suggestion that would make the text longer than 500
+Esc ends the draft; text typed after the sent text stays the draft (in
+every panel, on every monitor), while text typed afresh in its place stays
+whole. A suggestion that would make the text longer than 500
 characters isn't put in (the line under the band says so). A paste the
 field can't take (over 16 KiB, not plain text, or no answer from the
 clipboard within two seconds) changes nothing, and the line says why. At
@@ -303,8 +306,12 @@ anywhere in it, or Enter on it (one Tab stop each), changes it.
   an icon in the page's band, or in Wide in the pane's header. While a
   completion can be undone the ring shows it completed, the title is
   struck through, and **Undo** is in the page's band, or in Wide in the
-  pane's header after "Completed"; the ring undoes too. In Small the ring
-  completes and goes back to the list, where the row has its Undo.
+  pane's header after "Completed"; the ring undoes too (Undo with the keys
+  gives them to the ring). Once the completion is sent it still shows
+  completed, without Undo; if Todoist didn't answer, the ring is plain and
+  the pane's header says "Checking with Todoist…" until the next refresh.
+  Then the ring does nothing. In Small the ring completes and goes back to
+  the list, where the row has its Undo.
   Completing the task (here, or with its row's ring or Space) saves what
   you typed first. A task completed or deleted elsewhere meanwhile: the
   page says it is no longer in Todoist.
