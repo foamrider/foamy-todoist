@@ -3,7 +3,8 @@
 //!
 //! Every record from Todoist (or from the cache, which holds the same
 //! shape) goes through a normalizer that keeps only the fields the panel
-//! uses, checks their types and caps their lengths. A record that doesn't
+//! uses (and, for the cache only, a fixed-zone due date's `timezone`),
+//! checks their types and caps their lengths. A record that doesn't
 //! fit is dropped (an older copy with its id too, so nothing stale stays).
 //! Closed or deleted tasks, archived or deleted projects and sections, and
 //! deleted labels leave the state; at most [`MAX_TASKS`], [`MAX_PROJECTS`],
@@ -29,6 +30,8 @@ const MAX_NAME: usize = 200;
 const MAX_LABEL: usize = 100;
 const MAX_LABELS: usize = 50;
 const MAX_DUE_STRING: usize = 200;
+/// The longest IANA zone name is 32 bytes ("America/Argentina/ComodRivadavia").
+const MAX_ZONE: usize = 64;
 /// 2: labels; 3: collaborators and shared projects; 4: tasks' assignees
 /// (`responsible_uid`); 5: tasks' deadlines. An older cache keeps only its
 /// user, so the next sync is a full one that brings them.
@@ -108,6 +111,20 @@ pub fn valid_due_date(text: &str) -> bool {
             .is_some_and(|time| valid_time(time.strip_suffix('Z').unwrap_or(time)))
 }
 
+/// An IANA-style time zone name ("Asia/Tokyo", "UTC", "Etc/GMT+9"): 1–64
+/// ASCII letters, digits, `_`, `-`, `+` and `/`, starting with a letter,
+/// each `/` between two non-empty parts.
+pub fn valid_zone(text: &str) -> bool {
+    text.len() <= MAX_ZONE
+        && text.starts_with(|c: char| c.is_ascii_alphabetic())
+        && text.split('/').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'+'))
+        })
+}
+
 /// `text` cut to `max` characters, the last one "…" when cut.
 pub fn cap(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -157,6 +174,11 @@ pub enum Change {
     Skip,
 }
 
+/// A task's due date. A fixed-zone date (`…Z`) also keeps its `timezone`
+/// for the cache, so a move can send it back (Todoist gives a `…Z` date
+/// sent without one the user's zone); the panel never gets it, see
+/// [`panel_task`]. A zone that isn't a [`valid_zone`] is no zone, never a
+/// reason to drop the task.
 fn due(record: &Value) -> Result<Value, ()> {
     match record.get("due") {
         None | Some(Value::Null) => Ok(Value::Null),
@@ -164,13 +186,28 @@ fn due(record: &Value) -> Result<Value, ()> {
             let date = string(due, "date")
                 .filter(|date| valid_due_date(date))
                 .ok_or(())?;
-            Ok(json!({
+            let mut out = json!({
                 "date": date,
                 "is_recurring": flag(due, "is_recurring"),
                 "string": cap(string(due, "string").unwrap_or(""), MAX_DUE_STRING),
-            }))
+            });
+            if let Some(zone) = string(due, "timezone").filter(|zone| valid_zone(zone))
+                && date.ends_with('Z')
+            {
+                out["timezone"] = json!(zone);
+            }
+            Ok(out)
         }
     }
+}
+
+/// A kept task as the panel gets it: without the cache-only `due.timezone`.
+fn panel_task(task: &Value) -> Value {
+    let mut task = task.clone();
+    if let Some(due) = task.get_mut("due").and_then(Value::as_object_mut) {
+        due.remove("timezone");
+    }
+    task
 }
 
 /// A deadline: Todoist's `{"date":"YYYY-MM-DD","lang":…}` (no time, never
@@ -467,6 +504,8 @@ impl State {
 
     pub fn to_cache(&self) -> Vec<u8> {
         let mut value = self.snapshot();
+        // The tasks as kept, with their zones (an older helper ignores them).
+        value["tasks"] = json!(self.listed_tasks().collect::<Vec<_>>());
         value["version"] = json!(CACHE_VERSION);
         value["memberships"] = json!(self.memberships.values().collect::<Vec<_>>());
         value["sync_token"] = json!(self.sync_token);
@@ -566,6 +605,14 @@ impl State {
         Ok(())
     }
 
+    /// The fixed time zone of a task's `…Z` due date, when one is known.
+    pub fn due_zone(&self, id: &str) -> Option<&str> {
+        self.tasks
+            .get(id)
+            .and_then(|task| task.get("due"))
+            .and_then(|due| string(due, "timezone"))
+    }
+
     /// The tasks a snapshot lists: those of projects it has (not archived,
     /// left, or cut by the bound).
     fn listed_tasks(&self) -> impl Iterator<Item = &Value> {
@@ -595,7 +642,7 @@ impl State {
     /// What the panel gets. Tasks of projects it doesn't have (archived,
     /// left, or cut by the bound) are left out with them.
     pub fn snapshot(&self) -> Value {
-        let tasks: Vec<&Value> = self.listed_tasks().collect();
+        let tasks: Vec<Value> = self.listed_tasks().map(panel_task).collect();
         let mut out = Map::new();
         out.insert("user".into(), self.user.clone().unwrap_or(Value::Null));
         out.insert(
@@ -742,6 +789,78 @@ mod tests {
             normalize_task(&kept),
             Change::Keep("T1".into(), kept.clone())
         );
+    }
+
+    #[test]
+    fn a_fixed_zone_is_cached_but_never_shown() {
+        let mut fixed = task("T1", "x");
+        fixed["due"] = json!({"date": "2026-11-16T03:00:00Z", "timezone": "Asia/Tokyo",
+                              "is_recurring": false, "string": "16 Nov 12:00"});
+        let mut state = State::empty();
+        state
+            .merge(
+                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": [fixed]}),
+                "x",
+            )
+            .unwrap();
+        assert_eq!(state.due_zone("T1"), Some("Asia/Tokyo"));
+        assert_eq!(
+            state.snapshot()["tasks"][0]["due"],
+            json!({"date": "2026-11-16T03:00:00Z", "is_recurring": false, "string": "16 Nov 12:00"}),
+            "the panel never gets the zone"
+        );
+        let cache = state.to_cache();
+        let back = State::from_cache(&cache).unwrap();
+        assert_eq!(
+            back.due_zone("T1"),
+            Some("Asia/Tokyo"),
+            "the cache keeps it"
+        );
+        assert_eq!(back.snapshot(), state.snapshot());
+        // A cache from before zones (the same version, no field) loads, and
+        // the task has no zone.
+        let mut old: Value = serde_json::from_slice(&cache).unwrap();
+        old["tasks"][0]["due"]
+            .as_object_mut()
+            .unwrap()
+            .remove("timezone");
+        let back = State::from_cache(old.to_string().as_bytes()).unwrap();
+        assert_eq!(back.due_zone("T1"), None);
+        assert_eq!(back.snapshot(), state.snapshot());
+        // A zone that isn't one is no zone (the task stays), from Todoist
+        // and from a cache; a floating or full-day date has none.
+        for (date, zone) in [
+            ("2026-11-16T03:00:00Z", json!("../../etc/passwd")),
+            ("2026-11-16T03:00:00Z", json!("Asia/Tokyo ")),
+            ("2026-11-16T03:00:00Z", json!("/Asia")),
+            ("2026-11-16T03:00:00Z", json!("Asia//Tokyo")),
+            (
+                "2026-11-16T03:00:00Z",
+                json!(format!("A{}", "b".repeat(64))),
+            ),
+            ("2026-11-16T03:00:00Z", json!(9)),
+            ("2026-11-16T03:00:00Z", json!(null)),
+            ("2026-11-16T12:00:00", json!("Asia/Tokyo")),
+            ("2026-11-16", json!("Asia/Tokyo")),
+        ] {
+            let mut odd = task("T1", "x");
+            odd["due"] = json!({"date": date, "timezone": zone});
+            let Change::Keep(_, kept) = normalize_task(&odd) else {
+                panic!("dropped: {zone}")
+            };
+            assert_eq!(kept["due"].get("timezone"), None, "{date} {zone}");
+            old["tasks"][0]["due"] = odd["due"].clone();
+            let back = State::from_cache(old.to_string().as_bytes()).unwrap();
+            assert_eq!(back.due_zone("T1"), None, "cached {date} {zone}");
+        }
+        for zone in [
+            "UTC",
+            "America/Argentina/ComodRivadavia",
+            "Etc/GMT+9",
+            "America/Port-au-Prince",
+        ] {
+            assert!(valid_zone(zone), "{zone}");
+        }
     }
 
     #[test]

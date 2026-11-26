@@ -420,7 +420,7 @@ impl Context {
         let mut commands = Vec::new();
         let mut planned = Vec::with_capacity(changes.len());
         for change in &changes {
-            let parts = change.commands();
+            let parts = change.commands(&state);
             let ids = uuids(parts.len())?;
             for ((kind, args), uuid) in parts.into_iter().zip(&ids) {
                 commands.push(json!({"type": kind, "uuid": uuid, "args": args}));
@@ -648,11 +648,20 @@ impl Edit {
     }
 
     /// The Sync commands (type, args) this change needs: one or two.
-    fn commands(&self) -> Vec<(&'static str, Value)> {
+    /// `state` is the cache, for a fixed-zone task's zone.
+    fn commands(&self, state: &State) -> Vec<(&'static str, Value)> {
         match self {
             Edit::Close(id) => vec![("item_close", json!({"id": id}))],
             Edit::Due(id, Some(date)) => {
-                vec![("item_update", json!({"id": id, "due": {"date": date}}))]
+                let mut due = json!({"date": date});
+                // Todoist gives a `…Z` date sent without a zone the user's
+                // zone: a task fixed to another zone keeps its own.
+                if date.ends_with('Z')
+                    && let Some(zone) = state.due_zone(id)
+                {
+                    due["timezone"] = json!(zone);
+                }
+                vec![("item_update", json!({"id": id, "due": due}))]
             }
             Edit::Due(id, None) => vec![("item_update", json!({"id": id, "due": null}))],
             Edit::Update(update) => {
@@ -956,6 +965,48 @@ mod tests {
     }
 
     #[test]
+    fn a_fixed_zone_move_sends_the_tasks_zone() {
+        let task = |id: &str, due: Value| json!({"id": id, "content": "x", "project_id": "P1", "due": due});
+        let mut state = State::empty();
+        state
+            .merge(
+                &json!({"sync_token": "A", "projects": [{"id": "P1", "name": "Inbox"}], "items": [
+                    task("TOKYO", json!({"date": "2026-11-16T03:00:00Z", "timezone": "Asia/Tokyo"})),
+                    task("FLOAT", json!({"date": "2026-11-16T12:00:00", "timezone": null})),
+                    task("BAD", json!({"date": "2026-11-16T03:00:00Z", "timezone": "../../etc"})),
+                    task("NONE", json!({"date": "2026-11-16T03:00:00Z"}))
+                ]}),
+                "x",
+            )
+            .unwrap();
+        let due = |id: &str, date: &str| {
+            let edit = Edit::Due(id.into(), Some(date.into()));
+            let commands = edit.commands(&state);
+            assert_eq!(commands.len(), 1);
+            assert_eq!(commands[0].0, "item_update");
+            commands[0].1["due"].clone()
+        };
+        assert_eq!(
+            due("TOKYO", "2026-11-17T03:00:00Z"),
+            json!({"date": "2026-11-17T03:00:00Z", "timezone": "Asia/Tokyo"})
+        );
+        // A date that isn't UTC never gets a zone, even for a fixed-zone task.
+        assert_eq!(
+            due("TOKYO", "2026-11-17T12:00:00"),
+            json!({"date": "2026-11-17T12:00:00"})
+        );
+        assert_eq!(due("TOKYO", "2026-11-17"), json!({"date": "2026-11-17"}));
+        // No zone known: what was always sent.
+        for id in ["FLOAT", "BAD", "NONE", "UNCACHED"] {
+            assert_eq!(
+                due(id, "2026-11-17T03:00:00Z"),
+                json!({"date": "2026-11-17T03:00:00Z"}),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
     fn changes_are_validated() {
         let ok = parse_changes(&map(json!({"commands": [
             {"op": "close", "id": "T1"}, {"op": "due", "id": "T2", "date": "2026-11-17"},
@@ -976,14 +1027,14 @@ mod tests {
         );
         // A move keeps the time it is given; no date removes the date.
         assert_eq!(
-            ok[2].commands(),
+            ok[2].commands(&State::empty()),
             [(
                 "item_update",
                 json!({"id": "T3", "due": {"date": "2026-11-17T14:00:00"}})
             )]
         );
         assert_eq!(
-            ok[4].commands(),
+            ok[4].commands(&State::empty()),
             [("item_update", json!({"id": "T5", "due": null}))]
         );
         let hundred: Vec<Value> = (0..100)
@@ -1224,29 +1275,29 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(
-            edit("T1", json!({"content": "x", "project_id": "P2"})).commands(),
+            edit("T1", json!({"content": "x", "project_id": "P2"})).commands(&State::empty()),
             [
                 ("item_update", json!({"id": "T1", "content": "x"})),
                 ("item_move", json!({"id": "T1", "project_id": "P2"}))
             ]
         );
         assert_eq!(
-            edit("T1", json!({"section_id": "S1"})).commands(),
+            edit("T1", json!({"section_id": "S1"})).commands(&State::empty()),
             [("item_move", json!({"id": "T1", "section_id": "S1"}))]
         );
         assert_eq!(
-            edit("T1", json!({"priority": 2})).commands(),
+            edit("T1", json!({"priority": 2})).commands(&State::empty()),
             [("item_update", json!({"id": "T1", "priority": 2}))]
         );
         // Out of the section to the project's root.
         assert_eq!(
-            edit("T2", json!({"project_id": "P2", "section_id": ""})).commands(),
+            edit("T2", json!({"project_id": "P2", "section_id": ""})).commands(&State::empty()),
             [("item_move", json!({"id": "T2", "project_id": "P2"}))]
         );
         // A requested place is sent even when the cache says the task is
         // there already: the cache may be stale.
         assert_eq!(
-            edit("T2", json!({"project_id": "P2", "section_id": "S1"})).commands(),
+            edit("T2", json!({"project_id": "P2", "section_id": "S1"})).commands(&State::empty()),
             [("item_move", json!({"id": "T2", "section_id": "S1"}))]
         );
     }

@@ -58,7 +58,8 @@
 //!   20 000 tasks, 2 000 projects, 5 000 sections, 2 000 labels, 2 000
 //!   collaborators and 20 000 memberships (`truncated` when one was cut).
 //!   `due.date` is Todoist's: `YYYY-MM-DD`, a floating `YYYY-MM-DDTHH:MM:SS`
-//!   or a UTC `…Z`. `deadline` is the date of Todoist's `deadline` object
+//!   or a UTC `…Z` (its fixed `timezone` is kept in the cache only, for
+//!   `apply`). `deadline` is the date of Todoist's `deadline` object
 //!   (no time, never recurring); a task whose `due` or `deadline` isn't
 //!   one of these shapes is left out. Descriptions are not kept.
 //! - `sync` merges an incremental Sync (items, projects, sections, labels,
@@ -70,7 +71,9 @@
 //!   `close` is `item_close` (a recurring task moves to its next date),
 //!   `due` sets the date with `item_update` (`"date"`: `YYYY-MM-DD`, a
 //!   floating `YYYY-MM-DDTHH:MM:SS` or a UTC `…Z`, as `due.date` is read;
-//!   null removes the date), and `update` edits a
+//!   null removes the date; a `…Z` date goes with the task's fixed
+//!   `timezone` when the cache has one, since Todoist gives a `…Z` date
+//!   without one the user's zone), and `update` edits a
 //!   task: `{"op":"update","id",` then at least one of `"content"` (1–500
 //!   characters after trimming, no control characters), `"description"`
 //!   (0–16 383 characters; line breaks and tabs allowed; "" clears it),

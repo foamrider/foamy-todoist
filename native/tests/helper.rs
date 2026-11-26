@@ -574,6 +574,79 @@ fn apply_sends_one_request_and_reports_each_change() {
     assert_eq!(reply["code"], "INVALID_ARGUMENT");
 }
 
+#[test]
+fn a_moved_fixed_zone_task_keeps_its_zone() {
+    let home = Home::signed_in("zone");
+    let mut sync = full_sync();
+    let timed = |id: &str, due: Value| {
+        let mut item = task(id, id);
+        item["due"] = due;
+        item
+    };
+    sync["items"] = json!([
+        timed(
+            "T1",
+            json!({"date": "2026-11-16T03:00:00Z", "timezone": "Asia/Tokyo", "is_recurring": false, "string": "16 Nov 12:00"})
+        ),
+        timed(
+            "T2",
+            json!({"date": "2026-11-16T03:00:00Z", "timezone": null, "is_recurring": false, "string": "16 Nov 04:00"})
+        ),
+        timed(
+            "T3",
+            json!({"date": "2026-11-16T12:00:00", "timezone": null, "is_recurring": false, "string": "16 Nov 12:00"})
+        ),
+        timed(
+            "T4",
+            json!({"date": "2026-11-16T03:00:00Z", "timezone": "Asia/Tokyo", "is_recurring": false, "string": "16 Nov 12:00"})
+        )
+    ]);
+    let server = Server::start(vec![ok(sync)], TOKEN);
+    let (reply, _) = home.run("sync", "", &server.base);
+    assert_eq!(ids(&reply), ["T1", "T2", "T3", "T4"]);
+    assert!(
+        reply["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|task| task["due"].get("timezone").is_none()),
+        "the panel never gets the zone: {reply}"
+    );
+    // A cache whose zone isn't one: that task has no zone.
+    let mut cache: Value =
+        serde_json::from_str(&fs::read_to_string(home.cache()).unwrap()).unwrap();
+    let cached = cache["tasks"].as_array_mut().unwrap();
+    assert_eq!(
+        cached[0]["due"]["timezone"], "Asia/Tokyo",
+        "the cache keeps it"
+    );
+    cached[3]["due"]["timezone"] = json!("Asia/Tokyo\nX");
+    fs::write(home.cache(), cache.to_string()).unwrap();
+    let (base, thread) = apply_server(|_| json!("ok"), json!([]));
+    let input = json!({"commands": [
+        {"op": "due", "id": "T1", "date": "2026-11-17T03:00:00Z"},
+        {"op": "due", "id": "T2", "date": "2026-11-17T03:00:00Z"},
+        {"op": "due", "id": "T3", "date": "2026-11-17T12:00:00"},
+        {"op": "due", "id": "T4", "date": "2026-11-17T03:00:00Z"}
+    ]});
+    let (reply, _) = home.run("apply", &input.to_string(), &base);
+    let request = thread.join().unwrap();
+    assert_eq!(reply["ok"], true, "{reply}");
+    let args: Vec<Value> = decoded_commands(&request)
+        .into_iter()
+        .map(|command| command["args"].clone())
+        .collect();
+    assert_eq!(
+        args,
+        [
+            json!({"id": "T1", "due": {"date": "2026-11-17T03:00:00Z", "timezone": "Asia/Tokyo"}}),
+            json!({"id": "T2", "due": {"date": "2026-11-17T03:00:00Z"}}),
+            json!({"id": "T3", "due": {"date": "2026-11-17T12:00:00"}}),
+            json!({"id": "T4", "due": {"date": "2026-11-17T03:00:00Z"}}),
+        ]
+    );
+}
+
 /// A server for `add`: Quick Add answers `created`, then the Sync request
 /// is answered `ok` for every command. Returns what it saw.
 fn add_server(created: Value, sync: Value) -> (String, JoinHandle<Vec<Seen>>) {
