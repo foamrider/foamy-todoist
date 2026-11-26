@@ -108,7 +108,7 @@ its time's place: **Tomorrow** (`t`) and a calendar (`d`) with **Today**,
 **Tomorrow**, **Next week** (the first day of your locale's next week) and
 **No date**. Today's **Overdue** heading has **Move to today** for all its
 tasks. A moved task keeps its time (a 14:00 task moved to tomorrow is due
-tomorrow at 14:00). Like a completion, the row stays where it is, dimmed,
+tomorrow at 14:00) and, when its time has a fixed time zone, that zone. Like a completion, the row stays where it is, dimmed,
 with its new day in the accent colour and **Undo**; the move is sent with
 the completions four seconds after the last change (at once when the panel
 closes), and a refusal brings the task back with the reason on the line

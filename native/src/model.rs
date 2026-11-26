@@ -33,9 +33,10 @@ const MAX_DUE_STRING: usize = 200;
 /// The longest IANA zone name is 32 bytes ("America/Argentina/ComodRivadavia").
 const MAX_ZONE: usize = 64;
 /// 2: labels; 3: collaborators and shared projects; 4: tasks' assignees
-/// (`responsible_uid`); 5: tasks' deadlines. An older cache keeps only its
-/// user, so the next sync is a full one that brings them.
-const CACHE_VERSION: u64 = 5;
+/// (`responsible_uid`); 5: tasks' deadlines; 6: a fixed-zone due date's
+/// `timezone`. An older cache keeps only its user, so the next sync is a
+/// full one that brings them.
+const CACHE_VERSION: u64 = 6;
 
 /// A Todoist id: 1–64 ASCII letters, digits, `_` or `-`.
 pub fn valid_id(text: &str) -> bool {
@@ -469,9 +470,9 @@ impl State {
         let value: Value = serde_json::from_slice(data).ok()?;
         match value.get("version").and_then(Value::as_u64) {
             Some(CACHE_VERSION) => {}
-            // Written before labels, collaborators, assignees or deadlines:
-            // only the user is kept; a full sync follows.
-            Some(1..=4) => {
+            // Written before labels, collaborators, assignees, deadlines or
+            // time zones: only the user is kept; a full sync follows.
+            Some(1..=5) => {
                 let mut state = State::empty();
                 state.user = value.get("user").and_then(normalize_user);
                 return Some(state);
@@ -817,8 +818,8 @@ mod tests {
             "the cache keeps it"
         );
         assert_eq!(back.snapshot(), state.snapshot());
-        // A cache from before zones (the same version, no field) loads, and
-        // the task has no zone.
+        // A task cached without the field (a date Todoist gave no zone)
+        // loads, and has no zone.
         let mut old: Value = serde_json::from_slice(&cache).unwrap();
         old["tasks"][0]["due"]
             .as_object_mut()
@@ -1006,9 +1007,9 @@ mod tests {
         for bad in [
             &b"{"[..],
             b"[]",
-            br#"{"version":6,"sync_token":"A"}"#,
+            br#"{"version":7,"sync_token":"A"}"#,
             br#"{"version":0,"sync_token":"A"}"#,
-            br#"{"version":5,"sync_token":5}"#,
+            br#"{"version":6,"sync_token":5}"#,
         ] {
             assert!(
                 State::from_cache(bad).is_none(),
@@ -1180,8 +1181,10 @@ mod tests {
 
     #[test]
     fn an_older_cache_keeps_only_the_user_and_syncs_in_full() {
-        // 1-4: written before labels, collaborators, assignees and deadlines.
-        for version in 1..=4 {
+        // 1-5: written before labels, collaborators, assignees, deadlines
+        // and time zones (a task cached without its zone would lose it at
+        // its next move, and an incremental sync never sends it again).
+        for version in 1..=5 {
             let old = json!({"version": version, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
                 "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
                 "labels": [], "collaborators": [], "memberships": []});
