@@ -4211,12 +4211,14 @@ ShellRoot {
       var dueLine = shell.find(shell.find(failedView.editor, "section-due"), "fieldErrorText");
       if (!check(dueLine.visible && dueLine.text === store.error && !shell.find(shell.find(failedView.editor, "section-due"), "fieldRetry").visible, "the editor's Date says why the move failed (" + dueLine.text + ")")) return;
       failedView.clearSelection();
+      // No helper for this CPU: says so, no retry loop; an add waiting
+      // behind the sync ends as failed. The held sync is the one that
+      // finds no helper: its exit status is in place before it is let go
+      // (a helper let go first could answer before the status lands).
+      shell.put("exit-sync", "127");
       shell.release("sync");
       store.error = "";
       one.close();
-      // No helper for this CPU: says so, no retry loop; an add waiting
-      // behind the sync ends as failed.
-      shell.put("exit-sync", "127");
       shell.settled = [];
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
