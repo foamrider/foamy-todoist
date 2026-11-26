@@ -869,6 +869,23 @@ ShellRoot {
         one.open();
         wait.waitFor(function() { return one.opened && view.active; }, 10000, function(ok2) {
           if (!check(ok2, "the first popup again")) return;
+          // A reason nobody has seen (its draft set aside by a search) is
+          // not dropped by the search's typing, by Esc on the query or by
+          // a view change; and the mark never outlives its reason.
+          view.startSearch();
+          store.addDraft = "Kept";
+          store.addError = reason;
+          store.addUnseen = true;
+          ev.keyClickChar("q", Qt.NoModifier, -1);
+          if (!check(view.searching && store.addError === reason && store.addUnseen, "typing in search keeps an unseen reason (" + JSON.stringify([store.addError, store.addUnseen]) + ")")) return;
+          ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+          if (!check(view.searching && view.field.text === "" && store.addError === reason && store.addUnseen, "Esc on the query keeps it too (" + JSON.stringify([store.addError, store.addUnseen]) + ")")) return;
+          view.setView("inbox");
+          if (!check(store.addError === reason, "a view change keeps an unseen reason (" + JSON.stringify(store.addError) + ")")) return;
+          store.addError = "";
+          if (!check(!store.addUnseen, "no reason left: no mark")) return;
+          store.addDraft = "";
+          view.setView("today");
           view.openAdd();
           done();
         });
@@ -1426,6 +1443,30 @@ ShellRoot {
         ev.mouseClick(later6, later6.width / 2, later6.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
         if (!check(store.moves.t6 === Model.addDays(shell.today, 1) && Object.keys(store.moves).length === 1, "a day later moved the card it is on (" + JSON.stringify([store.moves, store.error]) + ")")) return;
         store.undo("t6");
+        shell.afterFrame(view, function() {
+        // A card due today has no day earlier: only "A day later" shows.
+        var point = function(id) { var c = shell.find(view.week, "card-" + id); ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier); ev.mouseMove(c, c.width / 2, c.height / 2, -1, Qt.NoButton, Qt.NoModifier); return c; };
+        var today6 = point("t6");
+        if (!check(shell.find(today6, "moveActions").visible && !shell.find(today6, "moveEarlier").visible && shell.find(today6, "moveLater").visible && shell.find(today6, "moveLater").tip.indexOf("A day later") === 0, "a card due today: no A day earlier (" + JSON.stringify([shell.find(today6, "moveEarlier").visible, shell.find(today6, "moveLater").visible, shell.find(today6, "moveLater").tip]) + ")")) return;
+        // An overdue card: one action, named for what it does.
+        var card2 = point("t2");
+        if (!check(shell.find(card2, "moveActions").visible && !shell.find(card2, "moveEarlier").visible && shell.find(card2, "moveLater").tip.indexOf("Move to today") === 0, "an overdue card: only Move to today (" + JSON.stringify([shell.find(card2, "moveEarlier").visible, shell.find(card2, "moveLater").tip]) + ")")) return;
+        // A card due tomorrow: both.
+        var tomorrowId = view.weekColumns[2].entries[view.weekColumns[2].cards[0]].id;
+        var cardT = point(tomorrowId);
+        if (!check(shell.find(cardT, "moveEarlier").visible && shell.find(cardT, "moveLater").visible && shell.find(cardT, "moveEarlier").tip.indexOf("A day earlier") === 0, "a card due tomorrow: both actions (" + shell.find(cardT, "moveEarlier").tip + ")")) return;
+        // An overdue card with a long date and a time: the actions would
+        // cover the time, so they don't show; the date and time show whole.
+        store.snapshot = shell.snapshotWith({ t2: { due: Fixtures.due("2025-11-17T09:30:00") } });
+        shell.afterFrame(view, function() {
+        var long2 = point("t2");
+        var time2 = shell.find(long2, "cardTime");
+        var text2 = shell.find(long2, "cardText");
+        if (!check(view.cursorRow() && view.cursorRow().id === "t2" && time2.visible && time2.text === "09:30" && !shell.find(long2, "moveActions").visible && time2.mapToItem(text2, 0, 0).x + time2.width <= text2.width + 0.5, "a long date with a time: no move actions over it, the time whole (" + JSON.stringify([shell.find(long2, "cardDate").text, time2.text, shell.find(long2, "moveActions").visible]) + ")")) return;
+        store.snapshot = shell.snapshot();
+        // The pointer off the board, so it points at no card from here on.
+        ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+        shell.afterFrame(view, function() {
         // The keys on t4: its actions' tooltips name them. The card keeps
         // its height and its text's place while they show.
         var card4 = shell.find(view.week, "card-t4");
@@ -1452,7 +1493,10 @@ ShellRoot {
             });
           });
         });
-          });
+            });
+        });
+        });
+      });
     });
   }
   // The Week view: `a` adds for the day of the column the cursor is in
@@ -4220,7 +4264,17 @@ ShellRoot {
           var unchanged = function() { return store.signedIn && shell.calls("token-clear").length === clears && !store.tokenBusy; };
           var click = function(name) { var item = shell.find(page, name); ev.mouseClick(item, item.width / 2, item.height / 2, Qt.LeftButton, Qt.NoModifier, -1); };
           // Each stage after a frame: a row that just showed is laid out then.
+          var spot = null;
           var stages = [function() {
+            spot = signOut.mapToItem(page, signOut.width / 2, signOut.height / 2);
+            click("signOutButton");
+          }, function() {
+            // A double-click: its second click lands where the first did,
+            // on Cancel, never on the Sign out that signs out.
+            if (!check(asking() && unchanged(), "a click on Sign out asks")) return false;
+            ev.mouseClick(page, spot.x, spot.y, Qt.LeftButton, Qt.NoModifier, -1);
+            if (!check(unchanged() && !asking() && shownOn("signedInRow"), "a second click on the same spot cancels, it does not sign out (" + JSON.stringify([store.signedIn, store.tokenBusy, asking()]) + ")")) return false;
+          }, function() {
             click("signOutButton");
           }, function() {
             if (!check(asking() && unchanged() && shell.find(page, "signOutAsk").text === "Sign out of Ada Lovelace?" && !shownOn("signOutUnsent"), "a click on Sign out only asks (" + JSON.stringify([asking(), unchanged()]) + ")")) return false;
@@ -4245,15 +4299,15 @@ ShellRoot {
             settingsView.settingsRequested();
           }, function() {
             if (!check(!asking() && shownOn("signedInRow") && unchanged(), "leaving the page put the row back")) return false;
-            // The keys: Enter asks (the keys on Cancel), Tab to the
-            // question's Sign out, Enter signs out.
+            // The keys: Enter asks (the keys on Cancel), Shift+Tab to the
+            // question's Sign out before it, Enter signs out.
             signOut.forceActiveFocus(Qt.TabFocusReason);
             ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
             if (!check(asking() && unchanged() && shell.find(page, "cancelSignOut").activeFocus, "Enter on Sign out only asks, the keys on Cancel")) return false;
           }, function() {
-            ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+            ev.keyClick(Qt.Key_Backtab, Qt.ShiftModifier, -1);
             var confirm = shell.find(page, "confirmSignOut");
-            if (!check(confirm.activeFocus && confirm.kind === "destructive" && signOut.kind === "secondary", "Tab: the destructive Sign out")) return false;
+            if (!check(confirm.activeFocus && confirm.kind === "destructive" && signOut.kind === "secondary", "Shift+Tab: the destructive Sign out")) return false;
             ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
             check(store.tokenBusy && !asking() && signOut.activeFocus, "the second Sign out signs out; the row is back, with the keys");
           }];

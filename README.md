@@ -73,9 +73,12 @@ is last). Nothing has the cursor when the panel opens.
   Space completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move
   it a day earlier or later (never before today; recurring tasks stay, as
   with `t`). The card under the cursor (the pointer's or the keys') shows
-  two small buttons that do the same for that card, ‹ a day earlier and
-  › a day later; their tooltips name the keys while the keys act on that
-  card. While the board has the keys, the footer names them (`t`, Ctrl+←
+  small buttons that do the same for that card: ‹ a day earlier (only on a
+  card due after today) and › a day later (**Move to today** on an overdue
+  card); their tooltips name the keys while the keys act on that card. They
+  don't show beside the open details pane, nor on a card whose date and
+  time leave them no room (the pane's Date menu and the keys move it
+  then). While the board has the keys, the footer names them (`t`, Ctrl+←
   →, Space, Enter). A moved card goes to its new column at once; the move
   is sent as a move in a list is (see "Moving"), and moving it back to its
   day cancels it. Enter, `e` or a click opens the details beside the board,
@@ -436,8 +439,9 @@ The page has five sections: **Panel**, **Open command**, **Bar**,
   beside the field's label goes there); paste it in the field and press
   **Save token** beside it. The token is checked with Todoist before it is
   stored. Signed in, the page shows who, and **Sign out**, which asks
-  first: "Sign out of Ada Lovelace?" with **Cancel** and **Sign out**
-  (Cancel, Esc, leaving the page or closing the panel keep you signed in).
+  first: "Sign out of Ada Lovelace?" with **Sign out** and, where the first
+  button stood, **Cancel** (so a double-click doesn't sign you out; Cancel,
+  Esc, leaving the page or closing the panel keep you signed in).
   While completions, moves, adds or changes haven't been sent to Todoist
   yet, the question says they will be lost. When the stored token can't
   be used (for example the keyring holds a value that isn't a token), the

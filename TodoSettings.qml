@@ -477,13 +477,6 @@ FoamySettingsPage {
         }
       }
       FoamyButton {
-        id: cancelSignOut
-        objectName: "cancelSignOut"
-        focusable: true
-        text: FoamyI18n.t("Cancel")
-        onClicked: page.keepSignedIn()
-      }
-      FoamyButton {
         id: confirmSignOut
         objectName: "confirmSignOut"
         focusable: true
@@ -491,6 +484,17 @@ FoamySettingsPage {
         kind: "destructive"
         busy: page.store.tokenBusy
         onClicked: page.signOutConfirmed()
+      }
+      // Last, and at least as wide as the row's Sign out: it stands where
+      // that button stood, so the second click of a double-click cancels
+      // (it must never be the one that signs out).
+      FoamyButton {
+        id: cancelSignOut
+        objectName: "cancelSignOut"
+        focusable: true
+        Layout.preferredWidth: Math.max(implicitWidth, signOutButton.implicitWidth)
+        text: FoamyI18n.t("Cancel")
+        onClicked: page.keepSignedIn()
       }
     }
     // A sign-out the keyring refused, while still signed in.

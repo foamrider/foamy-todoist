@@ -515,6 +515,9 @@ QtObject {
   // view reports that: TodoView.addErrorShown), or the reason goes with
   // the draft (TodoView.closed).
   property bool addUnseen: false
+  // No mark without its reason: whatever ends the reason ends the mark.
+  onAddErrorChanged: if (addError === "")
+    addUnseen = false
   // `kept`: sentKept as the reply came (what stays: afterAdd).
   signal fieldAdded(string text, bool kept)
   function addFromField(text, dueDate, projectId) {

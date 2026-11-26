@@ -40,6 +40,8 @@ Item {
   // names Ctrl+←/→ only on that card.
   property string keysTaskId: ""
   property bool narrow: false
+  // Today ("YYYY-MM-DD"): what a card's move actions can do depends on it.
+  property string today: ""
   readonly property real columnGap: narrow ? FoamyStyle.gapSmall : FoamyStyle.gap
   signal hovered(int column, int card)
   signal clicked(int column, int card)
@@ -232,7 +234,7 @@ Item {
           // The move actions: on the cursor's card, while it can move. Not on
           // the narrow cards beside the pane: there they would cover the
           // date (the pane's Date menu and Ctrl+←/→ move the card then).
-          readonly property bool movable: hasCursor && !!entry && !struck && !unconfirmed && !week.narrow
+          readonly property bool movable: hasCursor && !!entry && !struck && !unconfirmed && !week.narrow && (!detail.visible || detail.actionsFit)
           MouseArea {
             id: ringArea
             objectName: "weekRing"
@@ -301,9 +303,15 @@ Item {
               // What the project may take: the rest of the line after the
               // parts that show whole and the move actions' place when they
               // show.
-              readonly property real room: Math.max(0, width - [checkingMark, dateBox, timeLabel, repeatMark].reduce(function (sum, part) {
+              // The parts that always show whole (the date and the time
+              // above all), with the gap after each.
+              readonly property real fixedWidth: [checkingMark, dateBox, timeLabel, repeatMark].reduce(function (sum, part) {
                 return sum + (part.visible ? part.width + spacing : 0)
-              }, 0) - (moveActions.visible ? moveActions.claim + spacing : 0))
+              }, 0)
+              // The move actions fit after them (else they would cover the
+              // time: a long date, or one with its year).
+              readonly property bool actionsFit: fixedWidth + moveActions.claim <= width
+              readonly property real room: Math.max(0, width - fixedWidth - (moveActions.visible ? moveActions.claim + spacing : 0))
               // Its completion was sent, the outcome unknown until the next sync.
               FoamyIcon {
                 id: checkingMark
@@ -416,6 +424,8 @@ Item {
               spacing: FoamyStyle.gapTiny
               MoveAction {
                 objectName: "moveEarlier"
+                // Only where a day earlier exists: not before today.
+                visible: !!cardSurface.entry && cardSurface.entry.dueDay > week.today
                 delta: -1
                 entry: cardSurface.entry
                 iconName: "chevron-left"
@@ -429,7 +439,8 @@ Item {
                 delta: 1
                 entry: cardSurface.entry
                 iconName: "chevron-right"
-                label: FoamyI18n.t("A day later")
+                // An overdue card goes to today, as Ctrl+→ takes it.
+                label: !!cardSurface.entry && cardSurface.entry.dueDay < week.today ? FoamyI18n.t("Move to today") : FoamyI18n.t("A day later")
                 keys: "Ctrl+" + (LayoutMirroring.enabled ? "←" : "→")
                 onHovered: week.hovered(columnItem.index, entryItem.card)
               }

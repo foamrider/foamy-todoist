@@ -193,7 +193,9 @@ PanelKeyCatcher {
     upcomingDay = ""
     weekAddColumn = ""
     weekPaneOpen = false
-    store.addError = ""
+    // Not a reason nobody has seen yet: it stays with its draft.
+    if (!store.addUnseen)
+      store.addError = ""
     store.lastView = next
     store.lastProject = projectId
     taskList.positionViewAtBeginning()
@@ -1184,11 +1186,15 @@ PanelKeyCatcher {
       // Text: cleared. Empty: the field closes (search ends too).
       if (addField.text !== "") {
         addField.text = ""
-        store.sentKept = false
         query = ""
-        store.addError = ""
-        if (!searching)
+        // A search's query cleared: the add's draft, set aside, is as it
+        // was (still typed after the sent text, its unseen reason kept).
+        if (!searching) {
+          store.sentKept = false
+          store.addError = ""
           store.addDraft = ""
+        } else if (!store.addUnseen)
+          store.addError = ""
       } else if (searching)
         leaveSearch()
       else
@@ -1456,7 +1462,11 @@ PanelKeyCatcher {
       rightPadding: LayoutMirroring.enabled ? startPadding : endPadding
       Accessible.name: fieldBox.placeholder
       onTextEdited: {
-        root.store.addError = ""
+        // Typing ends the add's reason, but not a search's typing while
+        // nobody has seen it yet (the failed draft is set aside: it comes
+        // back with its reason when the search ends).
+        if (!(root.searching && root.store.addUnseen))
+          root.store.addError = ""
         if (root.store.sentKept && !root.searching && !text.startsWith(root.store.pendingAddText))
           root.store.sentKept = false
         if (root.searching)
@@ -1886,6 +1896,7 @@ PanelKeyCatcher {
         anchors.bottomMargin: FoamyStyle.gap
         width: parent.width
         narrow: root.paneShown
+        today: root.store.today
         columns: root.weekColumns
         hasCursor: root.on(root.firstRowStop)
         byKeys: viewCursor.byKeys
