@@ -616,7 +616,9 @@ fn reply(state: &State) -> Value {
 #[derive(Debug, PartialEq)]
 pub enum Edit {
     Close(String),
-    Due(String, String),
+    /// The new due date in Todoist's shape (see `model::valid_due_date`),
+    /// or `None` for no date.
+    Due(String, Option<String>),
     Update(Update),
 }
 
@@ -649,9 +651,10 @@ impl Edit {
     fn commands(&self) -> Vec<(&'static str, Value)> {
         match self {
             Edit::Close(id) => vec![("item_close", json!({"id": id}))],
-            Edit::Due(id, date) => {
+            Edit::Due(id, Some(date)) => {
                 vec![("item_update", json!({"id": id, "due": {"date": date}}))]
             }
+            Edit::Due(id, None) => vec![("item_update", json!({"id": id, "due": null}))],
             Edit::Update(update) => {
                 let mut out = Vec::new();
                 if !update.fields.is_empty() {
@@ -673,7 +676,8 @@ impl Edit {
 }
 
 /// `{"commands":[…]}`: 1–100 changes, at most one per task. `close`
-/// `{"op","id"}`, `due` `{"op","id","date":"YYYY-MM-DD"}`, `update` (see
+/// `{"op","id"}`, `due` `{"op","id","date"}` (`YYYY-MM-DD`, a floating
+/// `YYYY-MM-DDTHH:MM:SS`, a UTC `…Z`, or null for no date), `update` (see
 /// [`parse_update`]).
 pub fn parse_changes(request: &Map<String, Value>) -> Result<Vec<Edit>, Failure> {
     let list = request
@@ -694,14 +698,16 @@ pub fn parse_changes(request: &Map<String, Value>) -> Result<Vec<Edit>, Failure>
         }
         edits.push(match entry.get("op").and_then(Value::as_str) {
             Some("close") => Edit::Close(id),
-            Some("due") => {
-                let date = entry
-                    .get("date")
-                    .and_then(Value::as_str)
-                    .filter(|date| model::valid_date(date))
-                    .ok_or_else(|| invalid("Enter a date as YYYY-MM-DD."))?;
-                Edit::Due(id, date.to_string())
-            }
+            Some("due") => match entry.get("date") {
+                Some(Value::Null) => Edit::Due(id, None),
+                date => {
+                    let date = date
+                        .and_then(Value::as_str)
+                        .filter(|date| model::valid_due_date(date))
+                        .ok_or_else(|| invalid("Enter a date as YYYY-MM-DD."))?;
+                    Edit::Due(id, Some(date.to_string()))
+                }
+            },
             Some("update") => Edit::Update(parse_update(id, entry)?),
             _ => return Err(invalid("Unknown change.")),
         });
@@ -952,15 +958,33 @@ mod tests {
     #[test]
     fn changes_are_validated() {
         let ok = parse_changes(&map(json!({"commands": [
-            {"op": "close", "id": "T1"}, {"op": "due", "id": "T2", "date": "2026-11-17"}
+            {"op": "close", "id": "T1"}, {"op": "due", "id": "T2", "date": "2026-11-17"},
+            {"op": "due", "id": "T3", "date": "2026-11-17T14:00:00"},
+            {"op": "due", "id": "T4", "date": "2026-11-17T13:00:00Z"},
+            {"op": "due", "id": "T5", "date": null}
         ]})))
         .unwrap();
         assert_eq!(
             ok,
             [
                 Edit::Close("T1".into()),
-                Edit::Due("T2".into(), "2026-11-17".into())
+                Edit::Due("T2".into(), Some("2026-11-17".into())),
+                Edit::Due("T3".into(), Some("2026-11-17T14:00:00".into())),
+                Edit::Due("T4".into(), Some("2026-11-17T13:00:00Z".into())),
+                Edit::Due("T5".into(), None)
             ]
+        );
+        // A move keeps the time it is given; no date removes the date.
+        assert_eq!(
+            ok[2].commands(),
+            [(
+                "item_update",
+                json!({"id": "T3", "due": {"date": "2026-11-17T14:00:00"}})
+            )]
+        );
+        assert_eq!(
+            ok[4].commands(),
+            [("item_update", json!({"id": "T5", "due": null}))]
         );
         let hundred: Vec<Value> = (0..100)
             .map(|i| json!({"op": "close", "id": format!("T{i}")}))
@@ -987,6 +1011,14 @@ mod tests {
             ),
             (
                 json!({"commands": [{"op": "due", "id": "T1", "date": "2026-02-30"}]}),
+                "Enter a date as YYYY-MM-DD.",
+            ),
+            (
+                json!({"commands": [{"op": "due", "id": "T1", "date": "2026-11-17T25:00:00"}]}),
+                "Enter a date as YYYY-MM-DD.",
+            ),
+            (
+                json!({"commands": [{"op": "due", "id": "T1"}]}),
                 "Enter a date as YYYY-MM-DD.",
             ),
             (
