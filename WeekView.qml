@@ -7,7 +7,9 @@ import "Model.js" as Model
 // The Week view (Wide only): four columns, Overdue, Today, Tomorrow and
 // Later (the seven days after tomorrow, each day under a small heading),
 // from Model.weekColumns. A card: the priority ring (complete), the task,
-// and a line with the time and the project.
+// and a line with the time and the project. `narrow`: the details pane
+// stands beside the board, so the four columns stay but tighten (smaller
+// gaps, a title on up to three lines, short day headings).
 //
 // The cursor is TodoView's (one stop for the whole grid); this view only
 // draws it: `cursorColumn`, `cursorCard` (the card's index among the
@@ -20,10 +22,14 @@ Item {
   id: week
   property var columns: []
   property bool hasCursor: false
+  // The keys moved the cursor (its accent border).
+  property bool byKeys: false
   property int cursorColumn: 0
   property int cursorCard: 0
   // The task the details pane shows (its card is marked).
   property string selectedId: ""
+  property bool narrow: false
+  readonly property real columnGap: narrow ? FoamyStyle.gapSmall : FoamyStyle.gap
   signal hovered(int column, int card)
   signal clicked(int column, int card)
   signal completeRequested(string id)
@@ -59,9 +65,9 @@ Item {
 
   Row {
     anchors.fill: parent
-    anchors.leftMargin: FoamyStyle.gap
-    anchors.rightMargin: FoamyStyle.gap
-    spacing: FoamyStyle.gap
+    anchors.leftMargin: week.columnGap
+    anchors.rightMargin: week.columnGap
+    spacing: week.columnGap
     Repeater {
       id: columnRepeater
       model: week.columns
@@ -69,7 +75,8 @@ Item {
     }
   }
   function roleColor(role) {
-    return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
+    // Marks on the surface: readable in a light theme too.
+    return role === "error" ? FoamyPalette.onSurface(FoamyPalette.error) : role === "warning" ? FoamyPalette.onSurface(FoamyPalette.warning) : role === "accent" ? FoamyPalette.onSurface(FoamyPalette.accent) : FoamyPalette.mutedText
   }
 
   // One column: its title and count, then its cards (Later: under day headings).
@@ -84,7 +91,7 @@ Item {
     // view shows).
     readonly property real naturalHeight: head.height + entriesList.contentHeight + FoamyStyle.gap * 2
     objectName: "weekColumn-" + modelData.key
-    width: (parent.width - FoamyStyle.gap * (week.columns.length - 1)) / Math.max(1, week.columns.length)
+    width: (parent.width - week.columnGap * (week.columns.length - 1)) / Math.max(1, week.columns.length)
     height: parent.height
     function reveal(card) {
       if (card >= 0 && card < count)
@@ -169,7 +176,7 @@ Item {
           anchors.bottomMargin: FoamyStyle.gapTiny
           x: FoamyStyle.rowPadding
           width: parent.width - x * 2
-          text: entryItem.isDay ? Model.capitalized(week.formatDate(Model.dayDate(entryItem.modelData.dayKey), "dddd")) + " " + week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("d MMMM")) : ""
+          text: !entryItem.isDay ? "" : week.narrow ? week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("ddd d MMM")) : Model.capitalized(week.formatDate(Model.dayDate(entryItem.modelData.dayKey), "dddd")) + " " + week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("d MMMM"))
           wrapMode: Text.NoWrap
           elide: Text.ElideRight
           font.pixelSize: FoamyStyle.font.caption
@@ -182,6 +189,7 @@ Item {
           width: parent.width
           height: cardText.implicitHeight + cardMeta.implicitHeight + FoamyStyle.gap * 2 + 2
           hasCursor: week.hasCursor && week.cursorColumn === columnItem.index && week.cursorCard === entryItem.card
+          byKeys: week.byKeys
           current: !entryItem.isDay && week.selectedId === entryItem.modelData.id
           opacity: !entryItem.isDay && entryItem.modelData.unconfirmed ? FoamyStyle.disabledOpacity : 1
           onHovered: week.hovered(columnItem.index, entryItem.card)
@@ -230,7 +238,7 @@ Item {
             anchors.rightMargin: FoamyStyle.gap
             y: FoamyStyle.gap
             text: entryItem.isDay ? "" : entryItem.modelData.text
-            maximumLineCount: 2
+            maximumLineCount: week.narrow ? 3 : 2
             elide: Text.ElideRight
             font.pixelSize: FoamyStyle.font.bodySmall
             font.strikeout: cardSurface.struck

@@ -53,7 +53,8 @@ test('days: adding across a month end and the daylight-saving change', () => {
     ['2026-11-16', 'today'],
     ['2026-11-15', 'yesterday'],
     ['2026-11-17', 'tomorrow'],
-    ['2026-11-11', 'weekday'],
+    ['2026-11-11', 'date'],
+    ['2026-11-12', 'date'],
     ['2026-11-22', 'weekday'],
     ['2026-11-09', 'date'],
     ['2026-11-23', 'date'],
@@ -75,7 +76,7 @@ test('today: overdue first (oldest first), then today: timed by time, the rest b
   assert.equal(rows[0].urgent, true);
   const t1 = rows[1];
   assert.equal(t1.overdue, true);
-  assert.equal(t1.dateKind, 'weekday');
+  assert.equal(t1.dateKind, 'date', 'a past weekday reads as its date');
   assert.equal(t1.priorityRole, 'error');
   assert.equal(t1.text, 'Send the quarterly report to Finance');
   assert.equal(rows[2].dateKind, 'yesterday');
@@ -342,7 +343,19 @@ test('search: text, project name and labels, every word, case-insensitive, group
   assert.deepEqual(search('   '), []);
   const rows = Model.rows(m, 'search', TODAY, { query: 'ask' });
   assert.equal(rows[1].depth, 0, 'flat');
-  assert.equal(rows[1].showProject, true);
+  assert.equal(rows[1].showProject, false, 'the heading names the project');
+});
+
+test('search marks the query in a title: every occurrence of each word, case-insensitive, labels not', () => {
+  const runs = (title, query) => Model.matchRuns(title, query).map((run) => (run.bold ? `[${run.text}]` : run.text)).join('');
+  assert.equal(runs('Ask about the opening hours', 'the'), 'Ask about [the] opening hours');
+  assert.equal(runs('The other theme', 'THE'), '[The] o[the]r [the]me');
+  assert.equal(runs('Pick up the parcel', 'parcel up'), 'Pick [up] the [parcel]');
+  assert.equal(runs('Overlapping', 'lapp app'), 'Over[lapp]ing');
+  assert.equal(runs('Call the dentist @home', '@home'), 'Call the dentist @home');
+  assert.equal(runs('Plain', ''), 'Plain');
+  assert.deepEqual(Model.matchRuns('', 'x'), []);
+  assert.deepEqual(Model.matchRuns('İstanbul trip', 'trip'), [{ text: 'İstanbul trip', bold: false }], 'a title whose lowercase changes length: plain');
 });
 
 test('markdown: links show their text, other markers are dropped, words stay intact', () => {
@@ -667,21 +680,39 @@ const partsOf = (view, options) => {
   return out;
 };
 
+test('a deadline on the row: its day, late when due today or past; alone it still makes a detail line', () => {
+  const m = model(
+    snapshotWith([
+      task('ahead', 'Ahead', 'p', { deadline: '2026-11-20' }),
+      task('due', 'Due', 'p', { deadline: TODAY }),
+      task('past', 'Past', 'p', { deadline: '2026-11-10' }),
+      task('none', 'None', 'p'),
+    ]),
+  );
+  const rows = Object.fromEntries(Model.rows(m, 'project', TODAY, { projectId: 'p' }).filter((r) => r.kind === 'task').map((r) => [r.id, r]));
+  assert.deepEqual(['ahead', 'due', 'past', 'none'].map((id) => [rows[id].deadline, rows[id].deadlineLate, rows[id].detail]), [
+    ['2026-11-20', false, true],
+    [TODAY, true, true],
+    ['2026-11-10', true, true],
+    ['', false, false],
+  ]);
+});
+
 test('detail parts: Today shows the project, labels, the assignee (not you) and recurring', () => {
   const today = partsOf('today');
   assert.deepEqual(today.mine, ['project:Gjøremål', 'labels:hjem', 'assignee:Bo', 'recurring']);
-  assert.deepEqual(today.late, ['date:weekday', 'project:Gjøremål'], 'overdue: the date; assigned to you: no name');
+  assert.deepEqual(today.late, ['date:date', 'project:Gjøremål'], 'overdue: the date; assigned to you: no name');
   assert.deepEqual(today.stranger, ['project:Gjøremål'], 'an unknown person: nothing');
   assert.deepEqual(today.in1, undefined);
 });
 
-test('detail parts: no project in its own view or in the Inbox; Upcoming leaves the date to its groups', () => {
+test('detail parts: no project in its own view, in the Inbox or in search; Upcoming leaves the date to its groups', () => {
   assert.deepEqual(partsOf('project', { projectId: 'g' }).mine, ['date:today', 'labels:hjem', 'assignee:Bo', 'recurring']);
   assert.deepEqual(partsOf('inbox').in1, ['date:date']);
   const upcoming = partsOf('upcoming', { weekStart: 1 });
   assert.deepEqual(upcoming.next, ['project:Gjøremål']);
   assert.deepEqual(upcoming.in1, ['project:Inbox']);
-  assert.deepEqual(partsOf('search', { query: 'ting' }).mine, ['date:today', 'project:Gjøremål', 'labels:hjem', 'assignee:Bo', 'recurring']);
+  assert.deepEqual(partsOf('search', { query: 'ting' }).mine, ['date:today', 'labels:hjem', 'assignee:Bo', 'recurring'], 'search heads each project');
 });
 
 test('detail dates: relative words, the weekday within a week, else "man. 23. nov." (the year when not this one)', () => {
@@ -859,7 +890,7 @@ test('the Week view: overdue, today, tomorrow and seven days after, by day', () 
   assert.equal(now.projectName, 'Project');
   assert.equal(now.struck, true);
   assert.equal(cols[0].entries[0].overdue, true);
-  assert.equal(cols[0].entries[0].dateKind, 'weekday');
+  assert.equal(cols[0].entries[0].dateKind, 'date');
   // The indices, computed once: each card's place among the tasks, each card's entry.
   assert.deepEqual(cols[3].entries.map((e) => e.card), [-1, 0, 1, -1, 2]);
   assert.deepEqual(cols[3].cards, [1, 2, 4]);
@@ -909,6 +940,40 @@ test('search: a word that starts with @ matches labels only (a name that starts 
   assert.deepEqual(Model.searchWords(' @Code  a\\ b '), [{ label: 'code' }, { text: 'a b' }]);
 });
 
+test('a move keeps the time: all-day stays all-day, floating stays floating, a fixed zone stays UTC; "" is no date', () => {
+  const m = model(
+    snapshotWith([
+      task('day', 'All day', 'p', { due: due('2026-11-16') }),
+      task('float', 'Floating', 'p', { due: due('2026-11-16T14:00:00') }),
+      task('fixed', 'Fixed', 'p', { due: due('2026-11-16T13:30:00Z') }),
+    ]),
+  );
+  assert.equal(Model.movedDate(m.byId.day, '2026-11-17'), '2026-11-17');
+  assert.equal(Model.movedDate(m.byId.float, '2026-11-17'), '2026-11-17T14:00:00');
+  // The same local time on the new day, back in UTC (the test's own zone).
+  const fixed = m.byId.fixed.due;
+  const local = new Date(2026, 10, 17, Math.floor(fixed.minutes / 60), fixed.minutes % 60);
+  assert.equal(Model.movedDate(m.byId.fixed, '2026-11-17'), local.toISOString().slice(0, 19) + 'Z');
+  assert.equal(Model.movedDate(m.byId.float, ''), null);
+  assert.deepEqual(Model.movedDue(m.byId.float, '2026-11-17'), { day: '2026-11-17', time: '14:00', minutes: 840, recurring: false });
+  assert.equal(Model.movedDue(m.byId.float, ''), null);
+});
+
+test('a pending move: the row stays in its group and shows its new day; the Week card moves', () => {
+  const m = model();
+  const moves = { t4: '2026-11-17' };
+  const rows = Model.rows(m, 'today', TODAY, { moves });
+  const row = rows.find((r) => r.id === 't4');
+  assert.equal(row.moved, true);
+  assert.deepEqual([row.dueDay, row.dueTime, row.dateKind, row.detail], ['2026-11-17', '14:00', 'tomorrow', true]);
+  assert.equal(Model.rows(m, 'today', TODAY, {}).findIndex((r) => r.id === 't4'), rows.indexOf(row), 'in place');
+  const columns = Model.weekColumns(m, TODAY, { moves });
+  const ids = (key) => columns.find((c) => c.key === key).entries.filter((e) => e.kind === 'task').map((e) => e.id);
+  assert.equal(ids('today').includes('t4'), false);
+  assert.equal(ids('tomorrow').includes('t4'), true);
+  assert.equal(Model.shiftedDay(m.byId.t4, 1, TODAY, '2026-11-17'), '2026-11-18', 'from where the card stands');
+});
+
 // ---- the overview ----
 
 const NOW_TODAY = (nowMinutes, extra) => Object.assign({ nowMinutes }, extra || {});
@@ -938,6 +1003,22 @@ test('overview, Today: the figures, the next timed task, the timeline and the ta
   assert.equal(struck.blocks[0].struck, true);
   // Sent completions leave it; someone else's task too, when hidden.
   assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(0, { hidden: { t4: true } })).left, 3);
+});
+
+test('overview, Today: tomorrow\'s count and first task (by time, untimed last), not counted as today', () => {
+  const m = model(
+    snapshotWith([
+      task('late', 'Untimed', 'p', { due: due('2026-11-17') }),
+      task('ten', 'At ten', 'p', { due: due('2026-11-17T10:00:00') }),
+      task('nine', 'At nine', 'p', { due: due('2026-11-17T09:00:00') }),
+      task('after', 'Day after', 'p', { due: due('2026-11-18') }),
+    ]),
+  );
+  const o = Model.overview(m, 'today', TODAY, NOW_TODAY(12 * 60));
+  assert.deepEqual([o.left, o.overdue], [0, 0]);
+  assert.deepEqual(o.tomorrow, { count: 3, first: { id: 'nine', text: 'At nine', time: '09:00' } });
+  const none = Model.overview(model(snapshotWith([])), 'today', TODAY, NOW_TODAY(12 * 60));
+  assert.deepEqual(none.tomorrow, { count: 0, first: null });
 });
 
 test('overview, Today: the range stretches to tasks outside 08–18; overlapping blocks share lanes', () => {

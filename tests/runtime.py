@@ -765,7 +765,7 @@ ShellRoot {
     var areaBox = box(area);
     if (!rail.visible || Math.abs(railBox.right - card.right) > 0.5) off.push("rail " + JSON.stringify(railBox) + " not at the right edge of " + card.right);
     if (Math.abs(areaBox.right - (railBox.left - border)) > 0.5) off.push("list " + JSON.stringify(areaBox) + " not beside the rail");
-    var paneSpace = view.paneOpen && !view.weekShown ? view.paneWidth + border : 0;
+    var paneSpace = view.paneOpen ? view.paneWidth + border : 0;
     if (Math.abs(areaBox.width - (card.right - railBox.width - border - paneSpace)) > 0.5) off.push("list width " + areaBox.width + " in " + card.right);
     if (!inside(areaBox, card)) off.push("list " + JSON.stringify(areaBox) + " outside the card");
     var labels = shell.findAll(rail, "railLabel");
@@ -796,7 +796,23 @@ ShellRoot {
     }
     if (view.paneShown || view.overviewShown) {
       var pane = box(view.paneShown ? view.editor : shell.find(view, "overview"));
-      if (!inside(pane, card) || pane.left > 0.5 || (!view.weekShown && Math.abs(pane.right + border - areaBox.left) > 0.5)) off.push("pane " + JSON.stringify(pane) + " not on the far left");
+      if (!inside(pane, card) || pane.left > 0.5 || Math.abs(pane.right + border - areaBox.left) > 0.5) off.push("pane " + JSON.stringify(pane) + " not on the far left");
+    }
+    // The pane's header and property rows mirror: each icon to the right
+    // of its words, the header's buttons at the left.
+    if (view.paneShown) {
+      var mirroredRow = function(name) {
+        var section = shell.find(view.editor, name);
+        var words = shell.find(section, "valueText");
+        var icon = words ? words.parent.children.find(function(item) { return item !== words && item.name !== undefined; }) : null;
+        if (!words || !icon || box(words).right > box(icon).left + 0.5) off.push(name + " not mirrored " + JSON.stringify([words ? box(words) : null, icon ? box(icon) : null]));
+      };
+      mirroredRow("section-place");
+      mirroredRow("section-priority");
+      var header = shell.find(view.editor, "paneHeader");
+      var place = box(shell.find(header, "paneHeaderPlace"));
+      var close = box(shell.find(header, "paneClose"));
+      if (close.right > place.left + 0.5) off.push("pane header not mirrored " + JSON.stringify([place, close]));
     }
     return off.join("; ");
   }
@@ -846,21 +862,21 @@ ShellRoot {
       for (var c of suffix) ev.keyClickChar(c, Qt.NoModifier, -1);
       return text;
     };
-    // No strip above the title: it starts at the list's top margin, level
-    // with the list's first row.
+    // The pane's header at its top, the title a gap under it.
     var headTop = shell.find(editor, "editorHead").mapToItem(view, 0, 0).y;
-    var listTop = view.list.mapToItem(view, 0, 0).y;
+    var paneHeader = shell.find(editor, "paneHeader");
+    var headerTop = paneHeader.mapToItem(view, 0, 0).y;
     var paneTop = editor.mapToItem(view, 0, 0).y;
-    if (!check(Math.abs(headTop - listTop) <= 1 && Math.abs(headTop - paneTop - Kit.FoamyStyle.gap) <= 1, "the pane's title at the list's top (" + JSON.stringify([headTop, listTop, paneTop]) + ")")) return;
+    if (!check(paneHeader.visible && Math.abs(headerTop - paneTop) <= 1 && Math.abs(headTop - paneTop - paneHeader.height - Kit.FoamyStyle.gap) <= 1, "the pane's header at its top, the title under it (" + JSON.stringify([headTop, headerTop, paneTop, paneHeader.height]) + ")")) return;
     var footerStatus = shell.find(view, "foamyFooterStatus");
     var updatedText = footerStatus.text;
     if (!check(updatedText.indexOf("Updated") === 0 && !editor.savedShown, "the footer says how fresh the list is (" + updatedText + ")")) return;
     var from = shell.calls("apply").length;
     var first = typed(" here");
     var stop = view.cursor.index;
-    // The pane's top margin: nothing there takes a click.
+    // The pane header's empty space: nothing there takes a click.
     ev.mouseClick(editor, editor.width / 2, 4, Qt.LeftButton, Qt.NoModifier, -1);
-    if (!check(!editor.contentField.inputActiveFocus && !view.blocked && view.paneTask === id && view.cursor.index === stop && view.taskInBand, "a click in the pane's empty space took the keys, kept the selection")) return;
+    if (!check(!editor.contentField.inputActiveFocus && !view.blocked && view.paneTask === id && view.cursor.index === stop && editor.task !== null, "a click in the pane's empty space took the keys, kept the selection")) return;
     if (!check(editor.saving && footerStatus.text === "Saving…" && !view.footer.statusError, "the footer says Saving… while it runs (" + footerStatus.text + ")")) return;
     // An add draft left open (the field without the keys): the save's
     // status takes the key hints' place, and they come back after it.
@@ -880,7 +896,7 @@ ShellRoot {
       if (!check(below < list.height - 12, "the list has room below its rows (" + JSON.stringify([list.contentHeight, list.height]) + ")")) return;
       ev.mouseClick(list, list.width / 2, below + 8, Qt.LeftButton, Qt.NoModifier, -1);
       var actions = function() { return JSON.stringify(view.band.shownTrailing.map(function(item) { return item.objectName; })); };
-      if (!check(view.paneTask === "" && view.cursor.index === -1 && shell.highlighted(view).length === 0 && editor.taskId === "" && !editor.visible && view.overviewShown && shell.find(view, "overview").visible && one.cardWidth === 880 && !view.blocked && !view.taskInBand, "a click below the rows cleared the selection, the pane shows the overview (" + JSON.stringify([view.paneTask, view.cursor.index, one.cardWidth]) + ")")) return;
+      if (!check(view.paneTask === "" && view.cursor.index === -1 && shell.highlighted(view).length === 0 && editor.taskId === "" && !editor.visible && view.overviewShown && shell.find(view, "overview").visible && one.cardWidth === 880 && !view.blocked, "a click below the rows cleared the selection, the pane shows the overview (" + JSON.stringify([view.paneTask, view.cursor.index, one.cardWidth]) + ")")) return;
       // The band lays its buttons out again on the next turn of the event loop.
       wait.waitFor(function() { return actions() === JSON.stringify(["addAction", "searchAction"]) && shell.calls("apply").length === from + 2 && !store.busy; }, 15000, function(ok2) {
         if (!check(ok2 && store.model.byId[id].content === second && shell.popupPlacement(one, 880) === "", "no task in the pane: the band has Search again, the card 880 still; the pane's draft was saved first (" + actions() + ", " + JSON.stringify(shell.updatesSince(from)) + ", " + shell.popupPlacement(one, 880) + ")")) return;
@@ -906,7 +922,7 @@ ShellRoot {
         if (!check(one.opened && view.paneTask === "" && view.cursor.index === -1 && !editor.visible && view.overviewShown && one.cardWidth === 880, "Esc in the list cleared the selection, the overview is back, the popup stays (" + JSON.stringify([one.opened, view.paneTask, one.cardWidth]) + ")")) return;
         // A row still selects.
         view.goTo(view.firstRowStop);
-        if (!check(view.paneTask !== "" && view.taskInBand, "the keys select a row again")) return;
+        if (!check(view.paneTask !== "" && view.editor.task !== null, "the keys select a row again")) return;
         done();
       });
     });
@@ -932,6 +948,25 @@ ShellRoot {
     };
     // Each stage runs after a frame: the overview's layout is placed then.
     var stages = [function() {
+      // Nothing left or overdue today.
+      var clear = shell.snapshot();
+      clear.tasks = clear.tasks.filter(function(task) { return !task.due || task.due.date.slice(0, 10) > shell.today; });
+      store.snapshot = clear;
+      return true;
+    }, function() {
+      // Tomorrow in the figures' place, no zero; the list's line in the
+      // middle of its column.
+      var clearTexts = shell.visibleTexts(pane);
+      var tomorrowCount = pane.summary.tomorrow.count;
+      var stateBox = shell.find(view, "stateBox");
+      var listArea = shell.find(view, "listArea");
+      if (!check(view.rows.length === 0 && tomorrowCount > 0 && !shown("overviewFigures") && shown("overviewTomorrow") && clearTexts.indexOf("Tomorrow · " + tomorrowCount + " tasks") >= 0 && clearTexts.indexOf(pane.summary.tomorrow.first.text) >= 0 && clearTexts.indexOf("0") < 0 && Math.abs(stateBox.y + stateBox.height / 2 - listArea.height / 2) <= 1, "nothing left today: tomorrow, no zero, the line centred (" + JSON.stringify([clearTexts, stateBox.y, stateBox.height, listArea.height]) + ")")) return false;
+      // Tomorrow's first task opens in the pane.
+      var first = pane.summary.tomorrow.first.id;
+      click(part("tomorrowTask"));
+      if (!check(view.paneTask === first && view.editor.visible, "tomorrow's task in the pane (" + view.paneTask + ")")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      view.clearSelection();
       store.snapshot = shell.snapshot();
       return true;
     }, function() {
@@ -1098,7 +1133,7 @@ ShellRoot {
       view.field.text = "zzzz";
       view.query = "zzzz";
       var noneTexts = shell.visibleTexts(pane);
-      if (!check(JSON.stringify(noneTexts) === JSON.stringify(["When", "0 tasks"]), "no results: When and the zero (" + JSON.stringify(noneTexts) + ")")) return false;
+      if (!check(JSON.stringify(noneTexts) === JSON.stringify([]) && !shown("overviewWhen"), "no results: When is left out, no zero (" + JSON.stringify(noneTexts) + ")")) return false;
       view.leaveSearch();
       store.snapshot = shell.snapshot();
       view.setView("today");
@@ -1311,7 +1346,9 @@ ShellRoot {
     case 116: return [function() { return one.prefs.value("barCount") === "today"; }, 10000, "the bar count back on"];
     case 117: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && shell.builtRows(v).some(function(r) { return r.entry.id === "t3"; }); }, 10000, "the popup with marked-up task text"];
     case 118: return [function() { var v = one.popup.bodyItem; return v && v.editor.visible && v.editor.taskId === "t3" && store.description.state === "ready" && store.description.id === "t3"; }, 10000, "the marked-up task on its page"];
-    case 119: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
+    case 119: return [function() { var v = one.popup.bodyItem; return one.size === "wide" && one.opened && v && v.active && v.size === "wide" && v.rows.length > 0; }, 40000, "Wide again, for the moves' edges"];
+    case 120: return [function() { return !Model.has(store.movesSent, "t1") && shell.calls("sync").length > shell.callsBefore; }, 15000, "the failed move settled, a sync after it"];
+    case 121: return [function() { return store.account === "unavailable"; }, 15000, "the helper unavailable"];
     }
     return null;
   }
@@ -1363,6 +1400,7 @@ ShellRoot {
       var open = shell.find(view, "stateButton");
       if (!check(open.visible && open.text === "Open settings", "signed out: Open settings")) return;
       if (!check(!view.field.visible && !view.footer.visible, "no field or footer while signed out")) return;
+      if (!check(!view.band.menuButton.visible, "signed out: no ⋯ menu (nothing to open in Todoist)")) return;
       one.close();
       shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
       shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
@@ -1393,7 +1431,21 @@ ShellRoot {
       var plus = shell.find(view.band, "addAction");
       // The icon-only + is named for a screen reader by its tooltip.
       if (!check(plus.Accessible.name === "Add a task", "+ is named Add a task (" + plus.Accessible.name + ")")) return;
-      if (!check(view.band.meta === "Today · 6 left · 2 overdue", "the band's meta (" + view.band.meta + ")")) return;
+      // Small: the tab names the view; the line starts with the date.
+      if (!check(view.band.meta === "Wed 18 Nov · 6 left · 2 overdue", "the band's meta (" + view.band.meta + ")")) return;
+      // Rows: the ring and the time on the title's line; an overdue date
+      // with its warning mark and as a date (not a weekday); the deadline on
+      // the line; the hash in the muted tone; today's times by tone.
+      var rowById = function(id) { return shell.builtRows(view).find(function(r) { return r.entry.id === id; }); };
+      var lateRow = rowById("t1");
+      var ringOf = function(r) { var m = shell.find(r, "ringMark"); return m.mapToItem(r, 0, m.height / 2).y; };
+      var titleOf = function(r) { var t = shell.find(r, "taskText"); return t.mapToItem(r, 0, t.height / 2).y; };
+      if (!check(shell.find(lateRow, "taskDetail").visible && Math.abs(ringOf(lateRow) - titleOf(lateRow)) <= 1, "a two-line row: the ring on the title's line (" + JSON.stringify([ringOf(lateRow), titleOf(lateRow)]) + ")")) return;
+      if (!check(shell.find(lateRow, "taskLateMark").visible && shell.find(lateRow, "taskDate").text === "Mon 16 Nov" && shell.find(lateRow, "taskDeadlineText").text === "Saturday", "overdue: the mark and the date; the deadline's day (" + JSON.stringify([shell.find(lateRow, "taskDate").text, shell.find(lateRow, "taskDeadlineText").text]) + ")")) return;
+      var timed = rowById("t4");
+      var timeTone = timed.entry.dueMinutes <= view.nowMinutes ? "late" : view.nextTimedId === "t4" ? "next" : "later";
+      var timeLabel = shell.find(timed, "taskTime");
+      if (!check(timed.timeTone === timeTone && Math.abs(timeLabel.mapToItem(timed, 0, timeLabel.height / 2).y - titleOf(timed)) <= 1, "14:00: its tone (" + timed.timeTone + ") and on the title's line")) return;
       // One number, as in foamy-zendesk: left today, in the bar's urgent colour.
       var count = one.barContent.countLabel;
       if (!check(count.visible && count.text === "6" && Qt.colorEqual(count.color, bar.urgent) && count.font.family === button.fontFamily, "the bar: 6 in the urgent colour (" + count.text + ", " + count.color + ", " + count.font.family + ")")) return;
@@ -1485,12 +1537,18 @@ ShellRoot {
       if (!check(JSON.stringify(input) === JSON.stringify({ commands: [{ op: "close", id: "t1" }] }), "the apply call closes t1 (" + sent + ")")) return;
       if (!check(!view.rows.some(function(row) { return row.id === "t1"; }) && store.counts.today === 5, "t1 left the list and the count")) return;
       if (!check(view.cursor.index === view.firstRowStop && shell.highlighted(view)[0].entry.id === "t2", "the cursor moved to the next row")) return;
-      // t: a recurring task stays; another one moves to tomorrow.
+      // t: a recurring task stays, and the error line says why; another
+      // one moves to tomorrow: it stays in place, shows Tomorrow and Undo,
+      // and goes when the undo window ends.
       view.cursor.index = view.firstRowStop + 1;
       if (!check(shell.highlighted(view)[0].entry.recurring, "the second row is recurring")) return;
       view.cursor.emitTextKey(view, "t");
+      if (!check(Object.keys(store.moves).length === 0 && store.error === "A repeating task can't be moved here: open it to change its date.", "t on a repeating task: not moved, the line says why (" + store.error + ")")) return;
+      store.error = "";
       view.cursor.index = view.firstRowStop;
       view.cursor.emitTextKey(view, "t");
+      var movedRow = shell.highlighted(view)[0];
+      if (!check(movedRow.entry.id === "t2" && movedRow.moved && store.moves.t2 === Model.addDays(shell.today, 1) && shell.find(movedRow, "taskDate").text === "Tomorrow" && shell.find(movedRow, "undo").visible && shell.calls("apply").length === 1, "t: the row stays, says Tomorrow, with Undo; nothing sent yet")) return;
       break;
     case 10:
       var moves = shell.calls("apply");
@@ -1507,11 +1565,13 @@ ShellRoot {
     case 12:
       // Upcoming, Wednesday 18 November: days to the end of the week, then
       // next week, later in November, December, January 2027.
-      if (!check(view.band.meta === "Upcoming · 3 tasks in the next 7 days", "the band's meta (" + view.band.meta + ")")) return;
+      if (!check(view.band.meta === "3 tasks in the next 7 days", "the band's meta (" + view.band.meta + ")")) return;
       var heads = view.rows.filter(function(row) { return row.kind === "header"; });
       var built = function(key) { return view.list.contentItem.children.find(function(item) { return item.hasOwnProperty("entry") && item.visible && item.entry && item.entry.key === key; }); };
       var text = function(item, name) { var found = shell.find(item, name); return found && found.visible ? found.text : ""; };
-      var shown = function(head) { var item = built(head.key); return item ? [text(item, "headerTitle"), text(item, "headerSub"), text(item, "headerCount"), shell.find(item, "headerDivider").visible] : null; };
+      // The count stands beside its word, or after a date range at the end.
+      var shown = function(head) { var item = built(head.key); return item ? [text(item, "headerTitle"), text(item, "headerSub"), text(item, "headerCount") + text(item, "headerCountInline"), shell.find(item, "headerDivider").visible] : null; };
+      var countBeside = function(head) { var item = built(head.key); return !!item && !shell.find(item, "headerCount").visible && shell.find(item, "headerCountInline").visible && shell.find(item, "headerCountInline").mapToItem(item, 0, 0).x < item.width / 2; };
       var sunday = view.weekStart === 0;
       var expected = [
         ["Tomorrow", "Thursday 19 November", "", false],
@@ -1525,6 +1585,7 @@ ShellRoot {
         view.list.positionViewAtIndex(view.rows.indexOf(heads[k]), ListView.Contain);
         view.list.forceLayout();
         if (!check(JSON.stringify(shown(heads[k])) === JSON.stringify(expected[k]), "heading " + k + " (" + JSON.stringify(shown(heads[k])) + ")")) return;
+        if (expected[k][2] !== "" && !check(countBeside(heads[k]) === (expected[k][1] === ""), "heading " + k + ": the count beside its word unless a date range follows")) return;
       }
       // Trailing: weekday next week; weekday and date later; the time in mono.
       var trailOf = function(id) {
@@ -1542,9 +1603,13 @@ ShellRoot {
       if (!check(view.addDay === "2026-11-21", "the add row keeps that day")) return;
       view.cursor.index = stopOf("t13");
       if (!check(view.addDay === "2026-11-19", "a next-week task: add for tomorrow (" + view.addDay + ")")) return;
+      // The add field takes the cursor and keeps the day (it used to reset to tomorrow).
       view.cursor.index = stopOf("t12");
-      view.cursor.index = -1;
-      if (!check(view.addDay === "2026-11-19", "no cursor: tomorrow (" + view.addDay + ")")) return;
+      view.openAdd();
+      if (!check(view.adding && view.cursor.index === -1 && view.addDay === "2026-11-21" && view.field.placeholderText === "Add a task for Saturday 21 November…", "the add field keeps Saturday (" + view.field.placeholderText + ")")) return;
+      view.closeField();
+      view.clearSelection();
+      if (!check(view.addDay === "2026-11-19", "the selection cleared: tomorrow (" + view.addDay + ")")) return;
       view.list.positionViewAtBeginning();
       view.openAdd();
       break;
@@ -1576,15 +1641,113 @@ ShellRoot {
       // Search: "/" from the list opens the slot as a search field.
       view.cursor.index = view.firstRowStop;
       view.focusList();
+      var viewRows = JSON.stringify(view.rows.map(function(row) { return row.key; }));
+      var listBefore = view.listHeight;
       view.cursor.emitTextKey(view, "/");
+      // Nothing typed yet: the view stays, its tab selected, the card as tall.
+      if (!check(view.searching && !view.searchActive && JSON.stringify(view.rows.map(function(row) { return row.key; })) === viewRows && shell.find(view, "viewSwitch").value === view.view && view.listHeight === listBefore, "search opened: the view's rows and tab stay")) return;
       for (var c of "parcel") ev.keyClickChar(c, Qt.NoModifier, -1);
       if (!check(view.searching && view.fieldOpen && view.query === "parcel", "typing searches in the slot (" + view.query + ")")) return;
       var found = view.rows.map(function(row) { return row.kind === "task" ? row.id : row.title; });
       if (!check(JSON.stringify(found) === JSON.stringify(["Inbox", "t9"]), "search finds the parcel, grouped by project (" + JSON.stringify(found) + ")")) return;
+      // The results: no tab selected, their count, the match bold in the
+      // title, and a card never shorter than when search started.
+      var parcelRow = shell.builtRows(view).find(function(r) { return r.entry.id === "t9"; });
+      var parcelRuns = shell.find(parcelRow, "taskTextRuns");
+      var boldRuns = parcelRuns.children.filter(function(run) { return run.text !== undefined && run.font.weight === Font.DemiBold; }).map(function(run) { return run.text; });
+      var searchCount = shell.find(view, "searchCount");
+      if (!check(shell.find(view, "viewSwitch").value === "" && searchCount.visible && searchCount.text === "1 task" && parcelRuns.visible && !shell.find(parcelRow, "taskText").visible && JSON.stringify(boldRuns) === JSON.stringify(["parcel"]) && view.listHeight === listBefore, "results: the count, the match bold, the card as tall (" + JSON.stringify([searchCount.text, boldRuns, view.listHeight, listBefore]) + ")")) return;
+      // No match: why, and the query as a new task.
+      for (var z of "zz") ev.keyClickChar(z, Qt.NoModifier, -1);
+      var stateText = shell.find(view, "stateText");
+      var addQuery = shell.find(view, "stateButton");
+      if (!check(view.rows.length === 0 && stateText.text === "No open task matches “parcelzz”" && addQuery.visible && addQuery.text === "Add as a task" && view.listHeight === listBefore, "no match: why, Add as a task (" + JSON.stringify([stateText.text, addQuery.text]) + ")")) return;
+      // The column places the new button at its next polish: now, for the click.
+      shell.find(view, "stateBox").forceLayout();
+      ev.mouseClick(addQuery, addQuery.width / 2, addQuery.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(!view.searching && view.adding && view.fieldFocused && view.field.text === "parcelzz" && view.field.cursorPosition === 8, "Add as a task: the query in the add field (" + JSON.stringify(view.field.text) + ")")) return;
+      view.field.text = "";
+      view.closeField();
+      // The field's × leaves search.
+      view.startSearch();
+      for (var c2 of "parcel") ev.keyClickChar(c2, Qt.NoModifier, -1);
+      var searchClose = shell.find(view, "searchClose");
+      ev.mouseClick(searchClose, searchClose.width / 2, searchClose.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(!view.searching && !view.fieldOpen && view.query === "" && JSON.stringify(view.rows.map(function(row) { return row.key; })) === viewRows, "the field's × left search, the view's rows back")) return;
+      view.cursor.index = view.firstRowStop;
+      view.focusList();
+      view.cursor.emitTextKey(view, "/");
+      for (var c3 of "parcel") ev.keyClickChar(c3, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(view.searching && view.field.text === "", "Esc with text clears it")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!view.searching && !view.fieldOpen && view.cursor.index === view.searchStop && one.opened, "Esc when empty leaves search, the cursor on Search")) return;
+      // A long list: Small grows past the old 13 rows, up to the popup's
+      // cap (70% of the screen); the rows fade out at an edge where the
+      // list continues.
+      var longList = shell.snapshot();
+      for (var li = 0; li < 40; li++)
+        longList.tasks.push(Fixtures.task("l" + li, "Long " + li, "home", { due: Fixtures.due(shell.today), child_order: 200 + li }));
+      store.snapshot = longList;
+      var smallList = view.list;
+      var fadeTop = shell.find(view, "listFadeTop");
+      var fadeBottom = shell.find(view, "listFadeBottom");
+      if (!check(view.listHeight > Kit.FoamyStyle.rowHeight * 13 && one.popup.contentHeight <= Math.round(one.popup.screenH * 0.7) && fadeBottom.visible && !fadeTop.visible, "a long list: taller than 13 rows, under the cap, a fade at the bottom (" + JSON.stringify([view.listHeight, one.popup.contentHeight, one.popup.screenH]) + ")")) return;
+      // Twice: the first pass builds the last rows, which corrects the
+      // list's estimated height.
+      smallList.positionViewAtEnd();
+      smallList.forceLayout();
+      smallList.positionViewAtEnd();
+      if (!check(fadeTop.visible && !fadeBottom.visible, "scrolled to the end: the fade at the top only (" + JSON.stringify([smallList.contentY, smallList.contentHeight, smallList.height, smallList.originY, smallList.atYEnd]) + ")")) return;
+      smallList.positionViewAtBeginning();
+      store.snapshot = shell.snapshot();
+      // Moving without typing. The cursor row shows Tomorrow and the menu
+      // of days in its time's place (not on a repeating task).
+      view.setView("today");
+      // A new rows array rebuilds the delegates: lay them out, then look.
+      var rowOf = function(id) { view.list.forceLayout(); return shell.builtRows(view).find(function(r) { return r.entry.id === id; }); };
+      view.goTo(view.stopOf("t4"));
+      var t4Row = rowOf("t4");
+      var tomorrowAction = shell.find(t4Row, "tomorrowAction");
+      if (!check(shell.find(t4Row, "rowActions").visible && tomorrowAction.visible && !shell.find(t4Row, "taskTime").visible, "the cursor row: Tomorrow and the date menu in the time's place")) return;
+      view.goTo(view.stopOf("t3"));
+      if (!check(!shell.find(rowOf("t3"), "rowActions").visible, "a repeating task has no actions")) return;
+      view.goTo(view.stopOf("t4"));
+      ev.mouseClick(tomorrowAction, tomorrowAction.width / 2, tomorrowAction.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      t4Row = rowOf("t4");
+      if (!check(store.moves.t4 === Model.addDays(shell.today, 1) && shell.find(t4Row, "taskDate").text === "Tomorrow 14:00" && shell.find(t4Row, "undo").visible && !shell.find(t4Row, "rowActions").visible, "Tomorrow: the row says Tomorrow 14:00, with Undo (" + JSON.stringify([store.moves, shell.find(t4Row, "taskDate").text, shell.find(t4Row, "undo").visible, shell.find(t4Row, "rowActions").visible, t4Row.entry.id]) + ")")) return;
+      var t4Undo = shell.find(t4Row, "undo");
+      ev.mouseClick(t4Undo, t4Undo.width / 2, t4Undo.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      t4Row = rowOf("t4");
+      if (!check(Object.keys(store.moves).length === 0 && !store.pending && shell.find(t4Row, "rowActions").visible && !shell.find(t4Row, "undo").visible, "Undo: the move is gone, nothing waits, the actions are back")) return;
+      // The menu of days (a click on the row's calendar): in the card, its
+      // picks move the task; d opens it from the keys.
+      view.goTo(view.stopOf("t4"));
+      var dateAction = shell.find(t4Row, "dateAction");
+      ev.mouseClick(dateAction, dateAction.width / 2, dateAction.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      var dayMenu = view.dateMenuItem;
+      if (!check(dayMenu.opened && dayMenu.overlayItem.parent === one.popup.cardItem && JSON.stringify(dayMenu.entries.filter(function(e) { return !e.separator; }).map(function(e) { return e.text; })) === JSON.stringify(["Today", "Tomorrow", "Next week", "No date"]) && view.blocked, "the date menu: in the card, Today, Tomorrow, Next week, No date")) return;
+      dayMenu.activate(dayMenu.entries.findIndex(function(e) { return e.text === "No date"; }));
+      t4Row = rowOf("t4");
+      if (!check(!dayMenu.opened && store.moves.t4 === "" && shell.find(t4Row, "taskDate").text === "No date", "No date: the row says so, undoable")) return;
+      store.undo("t4");
+      view.focusList();
+      view.cursor.emitTextKey(view, "d");
+      if (!check(dayMenu.opened && dayMenu.currentIndex === 0, "d opens the menu from the keys")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      // Overdue's Move to today: its tasks, each with Undo.
+      var moveAll = shell.find(view, "moveAllToToday");
+      if (!check(moveAll.visible, "Today's Overdue heading offers Move to today")) return;
+      ev.mouseClick(moveAll, moveAll.width / 2, moveAll.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(store.moves.t1 === shell.today && store.moves.t2 === shell.today && Object.keys(store.moves).length === 2, "Move to today: both overdue tasks (" + JSON.stringify(store.moves) + ")")) return;
+      store.move("t4", Model.addDays(shell.today, 1));
+      // The undo window ends: one apply call, the time kept.
+      shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshot(), { results: { t1: "ok", t2: "ok", t4: "ok" } })));
+      store.flushCompletions();
+      var moveJob = [store.current].concat(store.queue).find(function(job) { return !!job && job.command === "apply"; });
+      var moveInput = moveJob ? JSON.parse(moveJob.input) : null;
+      var t4Raw = shell.snapshot().tasks.find(function(t) { return t.id === "t4"; }).due.date;
+      if (!check(moveInput && JSON.stringify(moveInput.commands) === JSON.stringify([{ op: "due", id: "t1", date: shell.today }, { op: "due", id: "t2", date: shell.today }, { op: "due", id: "t4", date: Model.addDays(shell.today, 1) + t4Raw.slice(10) }]) && t4Raw.length > 10, "the moves go in one call; t4 keeps its time (" + (moveJob ? moveJob.input : "none") + ")")) return;
       // IPC add: the popup opens with the field open and focused.
       one.close();
       shell.afterClose(function() {
@@ -1675,6 +1838,7 @@ ShellRoot {
       // A move to tomorrow refused while rate limited says why too.
       store.error = "";
       store.moveToTomorrow("t6");
+      store.flushCompletions();
       store.next();
       if (!check(store.queue.length === 0 && store.error.indexOf("Todoist is limiting requests.") === 0, "a refused move to tomorrow says why (" + store.error + ")")) return;
       store.error = "";
@@ -1688,6 +1852,7 @@ ShellRoot {
       store.sync();
       store.moveToTomorrow("t6");
       store.moveToTomorrow("t6");
+      store.flushCompletions();
       view.field.text = "Queued";
       view.submit(true);
       for (var i = 0; i < 25; i++) store.add("Task " + i, "", "");
@@ -1705,6 +1870,12 @@ ShellRoot {
       // The token form keeps a refused token for fixing; nothing keeps it in memory.
       view.settingsRequested();
       var page = view.settingsPage;
+      // Signed out, in the order of the steps: where the token is, then the
+      // field (it says what goes in it) with Save token beside it.
+      var openTodoist = shell.find(page, "openTodoistSettings");
+      var saveToken = shell.find(page, "saveTokenButton");
+      var tokenTop = page.tokenField.mapToItem(page, 0, 0).y;
+      if (!check(openTodoist.visible && openTodoist.mapToItem(page, 0, 0).y < tokenTop && Math.abs(saveToken.mapToItem(page, 0, 0).y + saveToken.height / 2 - (tokenTop + page.tokenField.height / 2)) <= 1 && page.tokenField.placeholderText === "Paste your API token" && shell.find(page, "accountSection").description !== "", "signed out: Open Todoist settings, then the field with Save token beside it")) return;
       // Typed like a user: a masked field ignores an assigned text. Later,
       // so the settings page has already taken focus (its own callLater),
       // as it has by the time a user clicks the field.
@@ -2216,10 +2387,11 @@ ShellRoot {
       if (!check(shell.valueText(editor, "dueRow") === "Today 14:00" && !editor.dueField.visible, "the date in the panel's words, the field closed (" + shell.valueText(editor, "dueRow") + ")")) return;
       if (!check(editor.dueField.text === "today 14:00", "the Date field holds Todoist's words for it (" + JSON.stringify(editor.dueField.text) + ")")) return;
       if (!check(shell.valueText(editor, "editPriority") === "P3", "P3 is the task's priority (the API's 2)")) return;
-      // It reads like the task: the title, the captions and their values,
-      // no help text and no form buttons (the description is a field).
+      // It reads like the task: the title, each value with its caption at
+      // the row's end, an empty row saying what a click adds, no help text
+      // and no form buttons (the description is a field).
       var shown = shell.visibleTexts(editor);
-      var expected = ["Work › Review", "Review pull request #482", "Project", "Work › Review", "Date", "Today 14:00", "Deadline", "Priority", "P3", "Labels", "@code"];
+      var expected = ["Work › Review", "Review pull request #482", "Project", "Work › Review", "Date", "Today 14:00", "Add deadline", "Priority", "P3", "Labels", "@code"];
       if (!check(JSON.stringify(shown) === JSON.stringify(expected), "the page shows the task, no help text (" + JSON.stringify(shown) + ")")) return;
       // At rest the title reads as the list shows it, in the field's place
       // and font; the field holds Todoist's raw text under it.
@@ -2270,20 +2442,19 @@ ShellRoot {
       var sent1 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent1) === JSON.stringify({ commands: [{ op: "update", id: "t4", content: "Review the **PR**" }] }), "only the text was sent (" + JSON.stringify(sent1) + ")")) return;
       if (!check(editor1.contentField.text === "Review the **PR**" && store.model.byId.t4.content === "Review the **PR**" && shell.find(editor1, "editTitleText").text === "Review the PR" && editor1.errorOf("content") === "" && !editor1.saving, "saved: the field shows Todoist's value")) return;
-      // No deadline: the caption alone, with +; + opens a one-line field.
-      // A deadline that isn't a day: said at once, nothing sent, the field
-      // stays open; Esc drops it and closes the field.
+      // No deadline: the row says "Add deadline" (no caption); a click
+      // opens a one-line field. A deadline that isn't a day: said at once,
+      // nothing sent, the field stays open; Esc drops it and closes the field.
       var deadlineSection = shell.find(editor1, "section-deadline");
-      var deadlinePlus = shell.find(deadlineSection, "sectionAdd");
+      var deadlineEmpty = shell.find(deadlineSection, "sectionEmpty");
       var deadlineBox = shell.find(deadlineSection, "sectionBox");
-      if (!check(deadlinePlus.visible && deadlineBox.Accessible.name === "Add deadline" && shell.valueText(editor1, "deadlineRow") === "" && !editor1.deadlineField.visible, "no deadline: the caption and +")) return;
-      // The section is one click target, as in Todoist: the pointer over
-      // its caption lights all of it, a click there does what + does.
-      var deadlineCaption = shell.find(deadlineSection, "sectionCaption");
-      ev.mouseMove(deadlineCaption, 4, deadlineCaption.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      if (!check(deadlineEmpty.visible && deadlineEmpty.text === "Add deadline" && !shell.find(deadlineSection, "sectionCaption").visible && deadlineBox.Accessible.name === "Add deadline" && shell.valueText(editor1, "deadlineRow") === "" && !editor1.deadlineField.visible, "no deadline: the row says Add deadline")) return;
+      // The row is one click target, as in Todoist: the pointer over its
+      // words lights all of it, a click there opens the field.
+      ev.mouseMove(deadlineEmpty, 4, deadlineEmpty.height / 2, -1, Qt.NoButton, Qt.NoModifier);
       if (!check(deadlineBox.lit && !shell.sectionBox(editor1, "section-due").lit, "hover lights the whole section, alone")) return;
-      ev.mouseClick(deadlineCaption, 4, deadlineCaption.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-      if (!check(editor1.deadlineField.visible && editor1.deadlineField.inputActiveFocus && !deadlinePlus.visible && !deadlineBox.lit, "a click on the caption opened the deadline field with the caret")) return;
+      ev.mouseClick(deadlineEmpty, 4, deadlineEmpty.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(editor1.deadlineField.visible && editor1.deadlineField.inputActiveFocus && !deadlineEmpty.visible && !deadlineBox.lit, "a click on the row opened the deadline field with the caret")) return;
       for (var d1 of "2026-02-30") ev.keyClickChar(d1, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       var deadlineError = shell.find(deadlineSection, "fieldErrorText");
@@ -2293,8 +2464,24 @@ ShellRoot {
       // A save Todoist refuses: the error under the date, with Retry, the text kept.
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith({ t4: { content: "Review the **PR**" } }), { results: { t4: { code: "HTTP", error: "Todoist answered HTTP %1.\u001f500" } } })));
       var dueRow1 = shell.find(editor1, "dueRow");
+      // Date: a click opens the days (as the list's menu) and Type a date….
       ev.mouseClick(dueRow1, dueRow1.width / 2, dueRow1.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-      if (!check(editor1.dueField.visible && editor1.dueField.inputActiveFocus && editor1.dueField.text === "today 14:00" && !dueRow1.visible, "the date row opened its field with Todoist's words")) return;
+      var dueTexts = editor1.menu.entries.filter(function(e) { return !e.separator; }).map(function(e) { return e.text; });
+      if (!check(editor1.menu.opened && JSON.stringify(dueTexts) === JSON.stringify(["Today", "Tomorrow", "Next week", "No date", "Type a date…"]), "the date row opens the days and Type a date… (" + JSON.stringify(dueTexts) + ")")) return;
+      // Tomorrow: the row says so at once (the time kept); undone here.
+      editor1.menu.activate(1);
+      if (!check(!editor1.menu.opened && store.moves.t4 === Model.addDays(shell.today, 1) && shell.valueText(editor1, "dueRow") === "Tomorrow 14:00", "Tomorrow from the editor: the row says Tomorrow 14:00 (" + shell.valueText(editor1, "dueRow") + ")")) return;
+      store.undo("t4");
+      // From the keys a menu starts on the current choice: Enter twice
+      // keeps P3 (it used to set P1).
+      shell.sectionBox(editor1, "section-priority").forceActiveFocus();
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      var priorityAt = editor1.menu.currentIndex;
+      if (!check(editor1.menu.opened && priorityAt >= 0 && editor1.menu.entries[priorityAt].text === "P3", "Enter on Priority: the menu starts on P3 (" + priorityAt + ")")) return;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      ev.mouseClick(dueRow1, dueRow1.width / 2, dueRow1.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      editor1.menu.activate(editor1.menu.entries.findIndex(function(e) { return e.text === "Type a date…"; }));
+      if (!check(editor1.dueField.visible && editor1.dueField.inputActiveFocus && editor1.dueField.text === "today 14:00" && !dueRow1.visible, "Type a date… opened the field with Todoist's words")) return;
       editor1.dueField.selectAll();
       for (var n1 of "next monday") ev.keyClickChar(n1, Qt.NoModifier, -1);
       // Leaving the field saves it.
@@ -2549,6 +2736,12 @@ ShellRoot {
         // only once the selection rests, so nothing is queued yet.
         if (!check(![store.current].concat(store.queue).some(function(job) { return !!job && job.command === "task"; }), "the pane waits for the selection to rest before it reads the description")) return;
         if (!check(big.cursorRow() && big.paneTask === big.cursorRow().id && big.editor.taskId === "t1" && !big.editor.descriptionField.enabled && big.editor.descriptionField.placeholderText === "Loading…", "↓: the pane shows the row, the description loading (" + big.paneTask + ")")) return;
+        // The keys' cursor has the accent border; the selected row its bar.
+        var keyRow = shell.highlighted(big)[0];
+        var keySurface = shell.find(keyRow, "taskSurface");
+        if (!check(big.cursor.byKeys && keySurface.byKeys && keySurface.borderTop > 0 && shell.find(keySurface, "foamyCurrentBar").visible, "↓: the keys' border and the selected row's bar")) return;
+        big.cursor.hover(big.cursor.index);
+        if (!check(!big.cursor.byKeys && !keySurface.byKeys, "hover: the pointer's cursor, no keys' border")) return;
         // The card stays 880: the list keeps its width and place, the
         // task's details in the overview's place beside it.
         if (!check(one.cardWidth === 880 && one.popup.contentWidth === 880 && big.editor.visible && !big.overviewShown && Math.abs(area0.width - shell.listBox[0]) < 1 && Math.abs(big.editor.x - (area0.x + area0.width + Kit.FoamyStyle.borderWidth)) < 1, "↓: the card stays 880, the list as it was (" + JSON.stringify([one.popup.contentWidth, area0.width, shell.listBox, big.editor.x]) + ")")) return;
@@ -2563,24 +2756,25 @@ ShellRoot {
       if (!check(shell.readAt - shell.keyAt >= 250, "the read waited for the selection to rest (" + (shell.readAt - shell.keyAt) + " ms)")) return;
       var area1 = shell.find(big1, "listArea");
       if (!check(shell.popupPlacement(one, 880) === "" && Math.abs(area1.width - shell.listBox[0]) < 1 && Math.abs(area1.mapToItem(big1, 0, 0).x - shell.listBox[1]) < 1, "a task in the pane: 880 under the button, the list where it was in the card (" + shell.popupPlacement(one, 880) + ")")) return;
-      // Open in Todoist is in the band, in Search's place, and Search leads the ⋯ menu.
+      // The band stays as it is (+, Search, ⋯); the pane has its own header:
+      // the task's place, Open in Todoist and Close.
       var taskActions = big1.band.shownTrailing.map(function(item) { return item.objectName; });
-      var openTask = shell.find(big1.band, "openTaskAction");
-      if (!check(big1.taskInBand && JSON.stringify(taskActions) === JSON.stringify(["addAction", "openTaskAction"]) && openTask.iconName === "external-link" && openTask.tooltipText === "Open in Todoist" && openTask.Accessible.name === "Open in Todoist" && big1.band.menuButton.visible, "the band: +, Open, ⋯ (" + JSON.stringify(taskActions) + ")")) return;
+      if (!check(JSON.stringify(taskActions) === JSON.stringify(["addAction", "searchAction"]) && big1.band.menuButton.visible, "the band: +, Search, ⋯ (" + JSON.stringify(taskActions) + ")")) return;
       big1.band.openMenu(false);
       var menuTexts = big1.band.menu.entries.filter(function(entry) { return !entry.separator; }).map(function(entry) { return entry.text; });
-      if (!check(JSON.stringify(menuTexts) === JSON.stringify(["Search", "Open in Todoist", "Settings"]), "Search leads the ⋯ menu (" + JSON.stringify(menuTexts) + ")")) return;
-      big1.band.menu.activate(0);
-      if (!check(big1.searching && big1.fieldFocused && !big1.band.menuOpen, "the menu's Search searches")) return;
-      big1.leaveSearch();
-      big1.cursor.emitTextKey(big1, "/");
-      if (!check(big1.searching && big1.fieldFocused, "/ still searches with a task in the pane")) return;
-      big1.leaveSearch();
-      // The cursor stop and Enter: Open opens the pane's task.
-      shell.openedBefore = shell.opened().length;
+      if (!check(JSON.stringify(menuTexts) === JSON.stringify(["Open in Todoist", "Settings"]), "the ⋯ menu as without a task (" + JSON.stringify(menuTexts) + ")")) return;
+      big1.band.closeMenu();
       big1.goTo(big1.searchStop);
-      if (!check(openTask.hasCursor, "Open is the band's second stop")) return;
       big1.activate(false);
+      if (!check(big1.searching && big1.fieldFocused, "the band's second stop searches with a task in the pane")) return;
+      big1.leaveSearch();
+      var paneHeader = shell.find(big1.editor, "paneHeader");
+      var paneOpen = shell.find(paneHeader, "paneOpen");
+      var paneClose = shell.find(paneHeader, "paneClose");
+      if (!check(paneHeader.visible && shell.find(paneHeader, "paneHeaderPlace").text === big1.editor.placeLabel && paneOpen.visible && paneOpen.tooltipText === "Open in Todoist" && paneOpen.Accessible.name === "Open in Todoist" && paneClose.visible && paneClose.tooltipText === "Close", "the pane's header: the place, Open and Close")) return;
+      // The header's Open opens the pane's task.
+      shell.openedBefore = shell.opened().length;
+      ev.mouseClick(paneOpen, paneOpen.width / 2, paneOpen.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       big1.cursor.index = big1.firstRowStop;
       if (!check(big1.editor.descriptionField.text === "One" && big1.editor.contentField.text === store.model.byId.t1.content, "the pane: the task and its description")) return;
       // Hover lights a row; the pane stays. ↓ moves both.
@@ -2601,7 +2795,7 @@ ShellRoot {
     case 84:
       var big2 = one.popup.bodyItem;
       var launchedTask = shell.opened().slice(shell.openedBefore);
-      if (!check(launchedTask.length === 1 && launchedTask[0].indexOf(Model.webUrl("task", "t1")) >= 0, "the band's Open opened the pane's task once (" + JSON.stringify(launchedTask) + ")")) return;
+      if (!check(launchedTask.length === 1 && launchedTask[0].indexOf(Model.webUrl("task", "t1")) >= 0, "the pane's Open opened the pane's task once (" + JSON.stringify(launchedTask) + ")")) return;
       if (!check(big2.blocked, "the pane has the keys")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big2.blocked && !big2.editor.activeFocus && one.opened, "Esc gave the keys back to the list")) return;
@@ -2637,6 +2831,7 @@ ShellRoot {
       var caretY = descriptionField.editorItem.mapToItem(paneScroll, caret.x, caret.y).y;
       if (!check(descriptionField.inputActiveFocus && descriptionField.contentY > 0 && inPane(descriptionField) && caretY >= 0 && caretY + caret.height <= paneScroll.height && paneScroll.contentY === paneY, "Shift+Tab back: the scrolled description and its caret in view, the pane not moved (" + JSON.stringify([descriptionField.contentY, descriptionField.mapToItem(paneScroll, 0, 0).y, caretY, paneScroll.contentY, paneY, paneScroll.height]) + ")")) return;
       big2.editor.focusFirst();
+      if (!check(big2.editor.contentField.cursorPosition === big2.editor.contentField.length && big2.editor.contentField.length > 0, "the first field: the caret after the title (" + big2.editor.contentField.cursorPosition + ")")) return;
       if (!check(big2.editor.contentField.inputActiveFocus && inPane(big2.editor.contentField) && paneScroll.contentY === 0, "the first field: the caret and the pane at the top (" + paneScroll.contentY + ")")) return;
       // Typed in the pane, then a click on another task (no Enter): the
       // text is saved for its own task first, and the keys go to the list.
@@ -2744,10 +2939,15 @@ ShellRoot {
       break;
     case 88:
       var big4 = one.popup.bodyItem;
-      // The pane over the Week view is the card's tallest part: the card
-      // grows to show it whole instead of cutting it to the week's height.
-      var tallest = Math.max(big4.railHeight, big4.listChrome + big4.listHeight);
-      if (!check(big4.editor.implicitHeight > tallest + 1 && big4.editor.implicitHeight <= big4.maxListHeight, "the pane is the tallest part, under the cap (" + JSON.stringify([big4.editor.implicitHeight, big4.railHeight, big4.listChrome + big4.listHeight, big4.maxListHeight]) + ")")) return;
+      // The pane over the Week view: the card is tall enough to show it
+      // whole instead of cutting it to the week's height.
+      if (!check(big4.bodyHeight >= big4.editor.implicitHeight - 1 && big4.editor.implicitHeight <= big4.maxListHeight, "the card holds the pane, under the cap (" + JSON.stringify([big4.editor.implicitHeight, big4.bodyHeight, big4.maxListHeight]) + ")")) return;
+      // The pane stands beside the board: the four columns narrow, none is
+      // under the pane.
+      var boardEnd = big4.week.mapToItem(big4, big4.week.width, 0).x;
+      var paneStart = big4.editor.mapToItem(big4, 0, 0).x;
+      var lastColumn = shell.find(big4.week, "weekColumn-later");
+      if (!check(big4.week.narrow && boardEnd <= paneStart + 1 && lastColumn.visible && lastColumn.mapToItem(big4, lastColumn.width, 0).x <= paneStart + 1, "the board beside the pane, its four columns whole (" + JSON.stringify([boardEnd, paneStart]) + ")")) return;
       var weekPaneScroll = shell.find(big4.editor, "editorScroll");
       if (!check(weekPaneScroll.contentHeight <= weekPaneScroll.height + 1, "the pane over the week shows whole (" + JSON.stringify([weekPaneScroll.contentHeight, weekPaneScroll.height]) + ")")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
@@ -2760,6 +2960,13 @@ ShellRoot {
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(big4.weekPaneOpen && big4.editor.visible && !big4.blocked, "Enter opened the pane over the week again")) return;
+      // The pane's Close: as Esc, the pane closes and the selection stays.
+      var weekClose = shell.find(big4.editor, "paneClose");
+      ev.mouseClick(weekClose, weekClose.width / 2, weekClose.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(!big4.weekPaneOpen && !big4.editor.visible && big4.cursor.index === big4.firstRowStop && !big4.blocked && one.opened, "the pane's Close closed it, the cursor kept")) return;
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(big4.weekPaneOpen && big4.editor.visible && !big4.blocked, "Enter opened the pane over the week once more")) return;
       ev.mouseClick(big4.editor, big4.editor.width / 2, 4, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big4.weekPaneOpen && big4.cursor.index === big4.firstRowStop, "a click in the pane over the week keeps it")) return;
       var todayList = shell.find(big4.week, "weekColumn-today").list;
@@ -2774,6 +2981,12 @@ ShellRoot {
       ev.mouseClick(overdueHead, overdueHead.width / 2, 6, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(!big4.weekPaneOpen && big4.cursor.index === -1, "a click on a column's heading closed it too")) return;
       if (!check(!big4.overviewShown && one.cardWidth === 880, "the Week view: 880 with nothing selected, no overview")) return;
+      // Wide keeps its height while open: a view that needs less (Inbox)
+      // leaves the card as tall as it has been, and never under 12 rows.
+      var heldBody = big4.bodyHeight;
+      big4.setView("inbox");
+      if (!check(big4.fittedBodyHeight < heldBody - 1 && big4.bodyHeight === heldBody && heldBody >= Kit.FoamyStyle.rowHeight * 12, "a shorter view keeps the card's height (" + JSON.stringify([big4.fittedBodyHeight, big4.bodyHeight, heldBody]) + ")")) return;
+      big4.setView("week");
       // Overdue with thousands of tasks: only the cards in view are built,
       // and the keys scroll to the cursor's card.
       var many = shell.snapshot();
@@ -2801,6 +3014,8 @@ ShellRoot {
       if (!check(!one.opened, "Esc: the popup closes")) return;
       break;
     case 89:
+      // Closing lets the held height go.
+      if (!check(one.popup.bodyItem.heldBodyHeight === 0, "the closed popup holds no height (" + one.popup.bodyItem.heldBodyHeight + ")")) return;
       // The closed popup keeps its view, but builds no list behind it.
       var hidden = one.popup.bodyItem;
       if (!check(hidden && hidden.weekShown && hidden.weekColumns.length === 0 && hidden.rows.length === 0, "a closed popup builds no Week columns or rows (" + (hidden ? JSON.stringify([hidden.weekColumns.length, hidden.rows.length]) : "no view") + ")")) return;
@@ -2813,9 +3028,10 @@ ShellRoot {
     case 90:
       var big6 = one.popup.bodyItem;
       if (!check(big6.view === "today" && big6.rows.length > 0, "open again (on Today): the rows are back (" + big6.rows.length + ")")) return;
-      var noOpen = shell.find(big6.band, "openTaskAction");
-      var noTexts = shell.visibleTexts(big6.editor);
-      if (!check(big6.editor.ring.Accessible.name === "Fullfør" && noOpen.tooltipText === "Åpne i Todoist" && JSON.stringify(noTexts.filter(function(text) { return ["Prosjekt", "Dato", "Frist", "Prioritet", "Etiketter"].indexOf(text) >= 0; })) === JSON.stringify(["Prosjekt", "Dato", "Frist", "Prioritet", "Etiketter"]), "Norwegian: the ring, Open and the captions (" + JSON.stringify(noTexts) + ")")) return;
+      var noOpen = shell.find(big6.editor, "paneOpen");
+      var noClose = shell.find(big6.editor, "paneClose");
+      var noTexts = ["section-place", "section-due", "section-deadline", "section-priority", "section-labels"].map(function(name) { return shell.find(shell.find(big6.editor, name), "sectionCaption").text; });
+      if (!check(big6.editor.ring.Accessible.name === "Fullfør" && noOpen.tooltipText === "Åpne i Todoist" && noClose.tooltipText === "Lukk" && JSON.stringify(noTexts) === JSON.stringify(["Prosjekt", "Dato", "Frist", "Prioritet", "Etiketter"]), "Norwegian: the ring, Open, Close and the captions (" + JSON.stringify(noTexts) + ")")) return;
       // Typed in the pane, then a click outside the popup: it closes, and
       // the text is saved for its task.
       shell.paneFrom = big6.paneTask;
@@ -3087,6 +3303,68 @@ ShellRoot {
       if (!check(pageMarkup.length >= 6 && pageRich.length === 0, "Todoist text is plain text on the task's page (" + pageMarkup.length + " found; " + JSON.stringify(pageMarkup.map(function(item) { return [item.objectName, item.textFormat, item.text]; })) + ")")) return;
       view.closeTask();
       store.snapshot = shell.snapshot();
+      one.prefs.save("panelWidth", "wide");
+      one.open();
+      break;
+    case 119:
+      // The edges of a move. Saves fail here, so nothing changes Todoist's
+      // side of the fixture.
+      var wv = one.popup.bodyItem;
+      var tomorrowDay = Model.addDays(shell.today, 1);
+      shell.put("reply-apply.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
+      wv.setView("today");
+      wv.selectTask("t4");
+      // A refused typed date, then Tomorrow from the Date menu: the pick
+      // wins (the draft gave way), and the undo window waits while a menu
+      // is open.
+      wv.editor.setError("due", "Todoist answered HTTP 500.");
+      wv.editor.openDateMenu(false);
+      if (!check(wv.editor.menu.opened && store.holdingUndo, "a menu open: the undo window waits")) return;
+      wv.editor.menu.activate(1);
+      if (!check(store.moves.t4 === tomorrowDay && wv.editor.errorOf("due") === "" && wv.editor.dueLabel === "Tomorrow 14:00" && !store.holdingUndo && store.undoWindow.running, "the pick replaced the refused draft; the window runs again (" + wv.editor.dueLabel + ")")) return;
+      store.undo("t4");
+      // A moved Week card: Space completes it (it has no Undo to show).
+      wv.setView("week");
+      store.move("t2", tomorrowDay);
+      wv.completeTask("t2");
+      if (!check(store.struck.t2 && !Model.has(store.moves, "t2"), "Space on a moved Week card completes it")) return;
+      store.undo("t2");
+      wv.setView("today");
+      wv.selectTask("t4");
+      store.move("t4", tomorrowDay);
+      store.move("t6", tomorrowDay);
+      // A date typed for t4, and the pane changes task while the field
+      // still has the keys: t4's save cancels t4's move only (it used to
+      // cancel the newly shown task's).
+      wv.editor.openField("due");
+      for (var fd of " friday") ev.keyClickChar(fd, Qt.NoModifier, -1);
+      wv.paneTask = "t6";
+      if (!check(wv.paneTask === "t6" && !Model.has(store.moves, "t4") && store.moves.t6 === tomorrowDay, "a typed date cancels its own task's move, not the next one's (" + JSON.stringify(store.moves) + ")")) return;
+      // Space on a moved row undoes the move, as Undo does.
+      wv.completeTask("t6");
+      if (!check(!Model.has(store.moves, "t6") && !Model.has(store.struck, "t6") && !store.pending, "Space on a moved row: the move undone, not completed")) return;
+      // A task that leaves the snapshot in its undo window: nothing is sent
+      // for it, and nothing stays waiting for a reply.
+      store.move("t6", tomorrowDay);
+      store.snapshot = shell.snapshot(["t6"]);
+      store.flushCompletions();
+      if (!check(!Model.has(store.movesSent, "t6") && !Model.has(store.moves, "t6"), "a move for a task that left: dropped (" + JSON.stringify(store.movesSent) + ")")) return;
+      store.snapshot = shell.snapshot();
+      // A move whose call fails as a whole: the row is back where it was,
+      // the line says why, and a sync follows.
+      store.error = "";
+      shell.callsBefore = shell.calls("sync").length;
+      // The sync after it is held, so the line still says why.
+      shell.hold("sync");
+      store.move("t1", shell.today);
+      store.flushCompletions();
+      if (!check(store.movesSent.t1 === shell.today, "a sent move shows until its reply")) return;
+      break;
+    case 120:
+      var t1Row = one.popup.bodyItem.rows.find(function(r) { return r.id === "t1"; });
+      if (!check(t1Row && !t1Row.moved && store.model.byId.t1.due.day !== shell.today && store.error === "Can't reach Todoist. Check your connection." && store.moveErrors.t1 === store.error, "a failed move: the row back, the reason on the line and for its editor, a sync (" + store.error + ")")) return;
+      shell.release("sync");
+      store.error = "";
       one.close();
       // No helper for this CPU: says so, no retry loop; an add waiting
       // behind the sync ends as failed.
@@ -3095,7 +3373,7 @@ ShellRoot {
       store.sync();
       shell.lateAdd = store.add("Waiting", "", "");
       break;
-    case 119:
+    case 121:
       if (!check(store.accountError === "This plugin's helper isn't available for this CPU.", "unavailable: the message (" + store.accountError + ")")) return;
       var before = shell.calls().length;
       store.sync();

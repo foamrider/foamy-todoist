@@ -3,6 +3,14 @@
     "one": "%1 senere",
     "other": "%1 senere"
   },
+  "%1 left": {
+    "one": "%1 igjen",
+    "other": "%1 igjen"
+  },
+  "%1 tasks in the next 7 days": {
+    "one": "%1 oppgave de neste 7 dagene",
+    "other": "%1 oppgaver de neste 7 dagene"
+  },
   "%1 left today": {
     "one": "%1 igjen i dag",
     "other": "%1 igjen i dag"
@@ -52,6 +60,7 @@
   "A description can have at most 16383 characters.": "En beskrivelse kan ha høyst 16383 tegn.",
   "A description can't have control characters other than line breaks and tabs.": "En beskrivelse kan ikke ha andre kontrolltegn enn linjeskift og tabulatorer.",
   "A label is given twice.": "En etikett står to ganger.",
+  "A repeating task can't be moved here: open it to change its date.": "En gjentakende oppgave kan ikke flyttes her: åpne den for å endre datoen.",
   "A task can have at most 500 characters.": "En oppgave kan ha høyst 500 tegn.",
   "A task can't have line breaks or other control characters.": "En oppgave kan ikke ha linjeskift eller andre kontrolltegn.",
   "Account": "Konto",
@@ -61,6 +70,7 @@
   "Add a task to %1…": "Legg til en oppgave i %1…",
   "Add a task to the Inbox…": "Legg til en oppgave i innboksen…",
   "add and close": "legg til og lukk",
+  "Add as a task": "Legg til som oppgave",
   "Add date": "Legg til dato",
   "Add deadline": "Legg til frist",
   "Add label": "Legg til etikett",
@@ -82,6 +92,8 @@
   "cancel": "avbryt",
   "Clipboard paste timed out. Copy the text again.": "Innliming fra utklippstavlen tok for lang tid. Kopier teksten på nytt.",
   "Clipboard text is too large or contains invalid characters.": "Teksten på utklippstavlen er for stor eller inneholder ugyldige tegn.",
+  "Close": "Lukk",
+  "Close search": "Lukk søket",
   "Close the panel": "Lukk panelet",
   "Complete": "Fullfør",
   "Copy": "Kopier",
@@ -132,15 +144,18 @@
   "Loading…": "Laster…",
   "More information": "Mer informasjon",
   "More options": "Flere valg",
+  "Move to today": "Flytt til i dag",
   "Moving a task out of its section needs the project's id.": "Prosjektets ID trengs for å flytte en oppgave ut av seksjonen.",
   "My projects": "Mine prosjekter",
   "Next": "Neste",
   "Next 7 days": "Neste 7 dager",
   "Next deadline": "Neste frist",
   "Next week": "Neste uke",
+  "No date": "Ingen dato",
   "No keyring is available to store the Todoist token (%1).": "Ingen nøkkelring er tilgjengelig for å lagre Todoist-tokenet (%1).",
   "No keyring is available to store the Todoist token.": "Ingen nøkkelring er tilgjengelig for å lagre Todoist-tokenet.",
   "No matching tasks": "Ingen oppgaver passer",
+  "No open task matches “%1”": "Ingen åpen oppgave passer til «%1»",
   "No tasks": "Ingen oppgaver",
   "Not signed in to Todoist.": "Ikke logget inn i Todoist.",
   "Nothing left for today": "Ingenting igjen i dag",
@@ -155,6 +170,7 @@
   "overdue": "forfalt",
   "Panel": "Panel",
   "Paste": "Lim inn",
+  "Paste your API token": "Lim inn API-tokenet ditt",
   "Pick a priority from 1 to 4.": "Velg en prioritet fra 1 til 4.",
   "Priority": "Prioritet",
   "Project": "Prosjekt",
@@ -227,9 +243,14 @@
   "Todoist: %1, %2": "Todoist: %1, %2",
   "Todoist: not signed in": "Todoist: ikke logget inn",
   "Tomorrow": "I morgen",
+  "Tomorrow · %1 tasks": {
+    "one": "I morgen · %1 oppgave",
+    "other": "I morgen · %1 oppgaver"
+  },
   "Too long to edit here. Open it in Todoist.": "For lang til å redigeres her. Åpne den i Todoist.",
   "Too many changes are waiting. Try again in a moment.": "For mange endringer venter. Prøv igjen om et øyeblikk.",
   "Type a date": "Skriv en dato",
+  "Type a date…": "Skriv en dato…",
   "Undo": "Angre",
   "Unknown change.": "Ukjent endring.",
   "Upcoming": "Kommende",

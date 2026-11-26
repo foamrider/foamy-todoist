@@ -133,7 +133,9 @@ function dayKind(key, today) {
     return "yesterday"
   if (days === 1)
     return "tomorrow"
-  return Math.abs(days) < 7 ? "weekday" : "date"
+  // Only the coming days by weekday: last Friday reads as its date, so it
+  // never looks like next Friday.
+  return days > 0 && days < 7 ? "weekday" : "date"
 }
 
 // ---- text -------------------------------------------------------------------
@@ -214,6 +216,9 @@ function index(snapshot) {
       // cut the labels (then they can't be edited here).
       content: raw.content,
       dueString: raw.due && typeof raw.due.string === "string" ? raw.due.string : "",
+      // Todoist's own due date ("YYYY-MM-DD", with "THH:MM:SS", or "…Z"),
+      // which a move keeps the shape and time of.
+      dueDate: raw.due && typeof raw.due.date === "string" ? raw.due.date : "",
       deadline: validDate(raw.deadline) ? raw.deadline : "",
       labelsTruncated: raw.labels_truncated === true
     }
@@ -657,14 +662,23 @@ function counts(model, today, options) {
 
 // One list row. `kind`: "header" (a section or day title, not a cursor
 // stop), "fold" (Upcoming's folded Overdue row, a stop) or "task".
-function taskRow(model, entry, today, view, struck, unconfirmed) {
+// `options`: struck and unconfirmed ({id: true}), moves ({id: day}, a
+// move waiting for its undo window or its reply: the row stays where it
+// is and shows its new day, "" for no date).
+function taskRow(model, entry, today, view, options) {
   var task = entry.task
   var project = model.projects[task.projectId]
-  var due = task.due
-  var showDate = !!due && (view === "inbox" || view === "project" || view === "search" || due.day < today)
-  // The project everywhere but its own view; in the Inbox only for a task
-  // from elsewhere (which the Inbox view doesn't list).
-  var showProject = !!project && view !== "project" && (view !== "inbox" || task.projectId !== model.inboxId)
+  var struck = options && options.struck
+  var unconfirmed = options && options.unconfirmed
+  var moves = options && options.moves
+  var moved = has(moves, task.id)
+  // A moved row shows its new date wherever it stands.
+  var due = moved ? movedDue(task, moves[task.id]) : task.due
+  var showDate = !!due && (moved || view === "inbox" || view === "project" || view === "search" || due.day < today)
+  // The project everywhere but its own view and search (which heads each
+  // project's results with its name); in the Inbox only for a task from
+  // elsewhere (which the Inbox view doesn't list).
+  var showProject = !!project && view !== "project" && view !== "search" && (view !== "inbox" || task.projectId !== model.inboxId)
   // Assigned to someone else: their first name (an unknown id: nothing).
   var userId = model.user && model.user.id
   var person = task.responsible && task.responsible !== userId && has(model.people, task.responsible) ? model.people[task.responsible] : null
@@ -680,11 +694,17 @@ function taskRow(model, entry, today, view, struck, unconfirmed) {
     dueTime: due ? due.time : "",
     dateKind: showDate ? dayKind(due.day, today) : "",
     overdue: !!due && due.day < today,
+    moved: moved,
+    // The deadline on the line (a day, "" for none) and whether it is due
+    // or past; the minute of a time today, for its tone.
+    deadline: task.deadline,
+    deadlineLate: task.deadline !== "" && task.deadline <= today,
+    dueMinutes: due ? due.minutes : -1,
     recurring: !!due && due.recurring,
     showProject: showProject,
     assignee: person ? person.name.split(/\s+/)[0] : "",
     // A second line (date, project, labels, recurring) under the text.
-    detail: showDate || showProject || task.labels.length > 0 || !!person || (!!due && due.recurring),
+    detail: showDate || moved || task.deadline !== "" || showProject || task.labels.length > 0 || !!person || (!!due && due.recurring),
     projectName: project ? project.name : "",
     projectRole: project ? colorRole(project.color) : "muted",
     labels: task.labels,
@@ -737,13 +757,12 @@ function projectRows(model, projectId, today, view, options) {
   var tasks = visibleTasks(model, options, function (task) {
     return task.projectId === projectId
   })
-  var struck = options && options.struck
   var rows = []
   projectGroups(model, projectId, tasks).forEach(function (group) {
     if (group.section)
       rows.push(header("section:" + group.section.id, group.section.name, group.entries.length))
     group.entries.forEach(function (entry) {
-      rows.push(taskRow(model, entry, today, view, struck, options && options.unconfirmed))
+      rows.push(taskRow(model, entry, today, view, options))
     })
   })
   return rows
@@ -758,10 +777,9 @@ function rows(model, view, today, options) {
   // to others when asked; a project view and search show every task.
   if (view === "today" || view === "upcoming" || view === "inbox")
     options = Object.assign({}, options, { personalView: true })
-  var struck = options && options.struck
   var flat = function (list) {
     return list.map(function (task) {
-      return taskRow(model, { task: task, depth: 0 }, today, view, struck, options && options.unconfirmed)
+      return taskRow(model, { task: task, depth: 0 }, today, view, options)
     })
   }
   if (view === "inbox")
@@ -777,7 +795,7 @@ function rows(model, view, today, options) {
     }).sort(byDay)
     var out = []
     if (overdue.length)
-      out = out.concat([header("overdue", "overdue", overdue.length, { urgent: true })], flat(overdue))
+      out = out.concat([header("overdue", "overdue", overdue.length, { urgent: true, moveAll: true })], flat(overdue))
     if (due.length && overdue.length)
       out.push(header("today", "today", due.length))
     return out.concat(flat(due))
@@ -886,12 +904,22 @@ function upcomingRows(model, today, options, flat) {
 function weekColumns(model, today, options) {
   options = Object.assign({}, options, { personalView: true })
   var card = function (task) {
-    return taskRow(model, { task: task, depth: 0 }, today, "week", options.struck, options.unconfirmed)
+    return taskRow(model, { task: task, depth: 0 }, today, "week", options)
+  }
+  // A card stands on the day a pending move gives it (Ctrl+←/→).
+  var moves = options.moves
+  var dayOf = function (task) {
+    var due = has(moves, task.id) ? movedDue(task, moves[task.id]) : task.due
+    return due ? due.day : ""
   }
   var dueOn = function (test) {
     return visibleTasks(model, options, function (task) {
-      return !!task.due && test(task.due.day)
+      var day = dayOf(task)
+      return day !== "" && test(day)
     })
+  }
+  var byMovedDay = function (a, b) {
+    return compare(dayOf(a), dayOf(b)) || byDay(a, b)
   }
   var tomorrow = addDays(today, 1)
   var last = addDays(today, 8)
@@ -899,11 +927,9 @@ function weekColumns(model, today, options) {
   var heading = ""
   dueOn(function (day) {
     return day > tomorrow && day <= last
-  }).sort(function (a, b) {
-    return compare(a.due.day, b.due.day) || byDay(a, b)
-  }).forEach(function (task) {
-    if (task.due.day !== heading) {
-      heading = task.due.day
+  }).sort(byMovedDay).forEach(function (task) {
+    if (dayOf(task) !== heading) {
+      heading = dayOf(task)
       later.push({ kind: "day", key: "day:" + heading, dayKey: heading })
     }
     later.push(card(task))
@@ -911,7 +937,7 @@ function weekColumns(model, today, options) {
   return [
     weekColumn("overdue", dueOn(function (day) {
       return day < today
-    }).sort(byOverdue).map(card)),
+    }).sort(byMovedDay).map(card)),
     weekColumn("today", dueOn(function (day) {
       return day === today
     }).sort(byDay).map(card)),
@@ -939,13 +965,40 @@ function weekColumn(key, entries) {
 // Ctrl+←/→ in the Week view: the task's day moved by `delta` days, never
 // before today (an overdue task lands on today); "" when it can't move: no
 // date, recurring (as `t`), or nothing would change.
-function shiftedDay(task, delta, today) {
+// `from`: the day it stands on now (a pending move's), else its due day.
+function shiftedDay(task, delta, today, from) {
   if (!task || !task.due || task.due.recurring)
     return ""
-  var day = addDays(task.due.day, delta)
+  var start = from || task.due.day
+  var day = addDays(start, delta)
   if (day < today)
     day = today
-  return day === task.due.day ? "" : day
+  return day === start ? "" : day
+}
+
+// A task's due as a move to `day` leaves it ({day, time, minutes,
+// recurring}, as dueOf): the time stays; "" is no date (null).
+function movedDue(task, day) {
+  if (day === "")
+    return null
+  var due = task.due
+  return due ? { day: day, time: due.time, minutes: due.minutes, recurring: due.recurring } : { day: day, time: "", minutes: -1, recurring: false }
+}
+
+// The date `apply`'s `due` sends for a move to `day` (null: no date), in
+// Todoist's shape: all-day stays all-day; a time stays the same local
+// time, floating or (a fixed zone, "…Z") as UTC.
+function movedDate(task, day) {
+  if (day === "")
+    return null
+  var raw = task && task.dueDate || ""
+  if (raw.length <= 10)
+    return day
+  if (!raw.endsWith("Z"))
+    return day + raw.slice(10)
+  var local = dayDate(day)
+  local.setHours(task.due.minutes >= 0 ? Math.floor(task.due.minutes / 60) : 0, task.due.minutes >= 0 ? task.due.minutes % 60 : 0, 0, 0)
+  return local.toISOString().slice(0, 19) + "Z"
 }
 
 // ---- the overview (Wide's pane while no task is selected) -------------------------
@@ -973,12 +1026,18 @@ var MAX_LANES = 3
 function todayOverview(model, today, options) {
   options = Object.assign({}, options, { personalView: true })
   var now = Number(options.nowMinutes) || 0
-  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: TIMELINE_START, end: TIMELINE_END, nowMinutes: now, now: false, blocks: [] }
+  // `tomorrow`: how many tasks are due tomorrow and the first of them
+  // ({id, text, time}), for a day with nothing left.
+  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: TIMELINE_START, end: TIMELINE_END, nowMinutes: now, now: false, blocks: [], tomorrow: { count: 0, first: null } }
   var timed = []
+  var tomorrow = addDays(today, 1)
+  var tomorrows = []
   visibleTasks(model, options, function (task) {
-    return !!task.due && task.due.day <= today
+    return !!task.due && task.due.day <= tomorrow
   }).forEach(function (task) {
-    if (task.due.day < today)
+    if (task.due.day === tomorrow)
+      tomorrows.push(task)
+    else if (task.due.day < today)
       out.overdue++
     else {
       out.left++
@@ -988,6 +1047,10 @@ function todayOverview(model, today, options) {
         timed.push(task)
     }
   })
+  tomorrows.sort(byDay)
+  out.tomorrow.count = tomorrows.length
+  if (tomorrows.length)
+    out.tomorrow.first = { id: tomorrows[0].id, text: tomorrows[0].text, time: tomorrows[0].due.time }
   timed.sort(byDay)
   var struck = options.struck
   timed.forEach(function (task) {
@@ -1358,6 +1421,42 @@ function searchMatches(model, query, options) {
   })
 }
 
+// A title cut into runs [{text, bold}]: bold where a text word of the
+// query matches it (every occurrence, overlaps merged). Labels (`@name`)
+// match labels, not the title.
+function matchRuns(title, query) {
+  var text = String(title || "")
+  var lower = text.toLowerCase()
+  // A few characters change length when lowered ("İ"): then the offsets
+  // wouldn't match the title, so nothing is marked.
+  if (lower.length !== text.length)
+    return text ? [{ text: text, bold: false }] : []
+  var marks = []
+  searchWords(query).forEach(function (word) {
+    if (!word.text)
+      return
+    for (var at = lower.indexOf(word.text); at >= 0; at = lower.indexOf(word.text, at + word.text.length))
+      marks.push([at, at + word.text.length])
+  })
+  marks.sort(function (a, b) {
+    return a[0] - b[0]
+  })
+  var out = []
+  var done = 0
+  marks.forEach(function (mark) {
+    var start = Math.max(mark[0], done)
+    if (mark[1] <= start)
+      return
+    if (start > done)
+      out.push({ text: text.slice(done, start), bold: false })
+    out.push({ text: text.slice(start, mark[1]), bold: true })
+    done = mark[1]
+  })
+  if (done < text.length)
+    out.push({ text: text.slice(done), bold: false })
+  return out
+}
+
 // Search: the matches, flat, grouped by project (Inbox first, then the
 // rail's order).
 function searchRows(model, query, today, options) {
@@ -1371,7 +1470,6 @@ function searchRows(model, query, today, options) {
   var order = (model.inboxId ? [model.inboxId] : []).concat(projectTree(model).map(function (entry) {
     return entry.project.id
   }))
-  var struck = options && options.struck
   var out = []
   order.forEach(function (id) {
     var list = byProject[id]
@@ -1380,7 +1478,7 @@ function searchRows(model, query, today, options) {
     out.push(header("project:" + id, model.projects[id].name, list.length, { projectRole: colorRole(model.projects[id].color) }))
     projectGroups(model, id, list).forEach(function (group) {
       group.entries.forEach(function (entry) {
-        out.push(taskRow(model, { task: entry.task, depth: 0 }, today, "search", struck, options && options.unconfirmed))
+        out.push(taskRow(model, { task: entry.task, depth: 0 }, today, "search", options))
       })
     })
   })
@@ -1475,5 +1573,5 @@ if (typeof module !== "undefined")
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
     MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
-    weekEndOf, searchWords, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
+    weekEndOf, searchWords, matchRuns, movedDue, movedDate, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
   }

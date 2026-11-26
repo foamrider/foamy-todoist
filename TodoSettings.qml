@@ -60,7 +60,7 @@ FoamySettingsPage {
     width: Math.min(parent.width, page.columnWidth)
     x: (parent.width - width) / 2
     title: FoamyI18n.t("Account")
-    info: page.store.signedIn ? "" : FoamyI18n.t("Find your API token in Todoist under Settings → Integrations → Developer.")
+    description: page.store.signedIn ? "" : FoamyI18n.t("Find your API token in Todoist under Settings → Integrations → Developer.")
     // Signed in: who, and Sign out.
     RowLayout {
       objectName: "signedInRow"
@@ -94,37 +94,52 @@ FoamySettingsPage {
         onClicked: page.store.signOut()
       }
     }
-    // Signed out: the token field and Save token.
+    // Signed out, in the order of the steps: where the token is (Open
+    // Todoist settings beside its label), then the field and Save token.
     Column {
       objectName: "signedOutForm"
       visible: !page.store.signedIn
       width: parent.width
       spacing: FoamyStyle.gap
-      PlainText {
+      RowLayout {
         width: parent.width
-        text: FoamyI18n.t("API token")
-        color: FoamyPalette.secondaryText
-        font.pixelSize: FoamyStyle.font.bodySmall
-      }
-      SafeTextField {
-        id: tokenInput
-        objectName: "tokenField"
-        width: parent.width
-        height: FoamyStyle.controlHeight
-        // Dots only; the value is secretText (never drawn, copied or kept in undo).
-        masked: true
-        maximumLength: 256
-        translate: FoamyI18n.t
-        Accessible.name: FoamyI18n.t("API token")
-        onAccepted: page.saveToken()
-        // A refused paste (pasteError, a catalog key) is the newest news:
-        // it ends the last token error, so the line says why.
-        onPasteErrorChanged: if (pasteError !== "")
-          page.store.tokenError = ""
+        spacing: FoamyStyle.gap
+        PlainText {
+          Layout.fillWidth: true
+          text: FoamyI18n.t("API token")
+          wrapMode: Text.NoWrap
+          elide: Text.ElideRight
+          color: FoamyPalette.secondaryText
+          font.pixelSize: FoamyStyle.font.bodySmall
+        }
+        FoamyButton {
+          objectName: "openTodoistSettings"
+          focusable: true
+          text: FoamyI18n.t("Open Todoist settings")
+          iconName: "external-link"
+          onClicked: page.store.openUrl(page.settingsUrl)
+        }
       }
       RowLayout {
         width: parent.width
         spacing: FoamyStyle.gap
+        SafeTextField {
+          id: tokenInput
+          objectName: "tokenField"
+          Layout.fillWidth: true
+          Layout.preferredHeight: FoamyStyle.controlHeight
+          // Dots only; the value is secretText (never drawn, copied or kept in undo).
+          masked: true
+          maximumLength: 256
+          placeholderText: FoamyI18n.t("Paste your API token")
+          translate: FoamyI18n.t
+          Accessible.name: FoamyI18n.t("API token")
+          onAccepted: page.saveToken()
+          // A refused paste (pasteError, a catalog key) is the newest news:
+          // it ends the last token error, so the line says why.
+          onPasteErrorChanged: if (pasteError !== "")
+            page.store.tokenError = ""
+        }
         FoamyButton {
           objectName: "saveTokenButton"
           focusable: true
@@ -134,30 +149,21 @@ FoamySettingsPage {
           actionEnabled: tokenInput.secretText.trim() !== "" && page.store.account !== "unavailable"
           onClicked: page.saveToken()
         }
-        FoamyButton {
-          objectName: "openTodoistSettings"
-          focusable: true
-          text: FoamyI18n.t("Open Todoist settings")
-          iconName: "external-link"
-          onClicked: page.store.openUrl(page.settingsUrl)
-        }
-        Item {
-          Layout.fillWidth: true
-        }
-        // The account check failed (a stored value that isn't a token, a
-        // locked or missing keyring, the lock or the cache folder): Sign
-        // out removes the cache, then the item. A cache that can't be
-        // removed refuses it and keeps both; a locked or missing keyring
-        // removes only the cache and refuses it with its own message.
-        FoamyButton {
-          objectName: "errorSignOutButton"
-          visible: page.store.account === "error"
-          focusable: true
-          text: FoamyI18n.t("Sign out")
-          kind: "destructive"
-          busy: page.store.tokenBusy
-          onClicked: page.store.signOut()
-        }
+      }
+      // The account check failed (a stored value that isn't a token, a
+      // locked or missing keyring, the lock or the cache folder): Sign
+      // out removes the cache, then the item. A cache that can't be
+      // removed refuses it and keeps both; a locked or missing keyring
+      // removes only the cache and refuses it with its own message.
+      FoamyButton {
+        objectName: "errorSignOutButton"
+        visible: page.store.account === "error"
+        anchors.right: parent.right
+        focusable: true
+        text: FoamyI18n.t("Sign out")
+        kind: "destructive"
+        busy: page.store.tokenBusy
+        onClicked: page.store.signOut()
       }
     }
     // Why the token failed, why the token field refused a paste, or why

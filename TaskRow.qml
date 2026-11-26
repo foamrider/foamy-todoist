@@ -1,22 +1,44 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import "kit"
 
 // One row of the list (Model.rows): a task, a section or day header, or
 // Upcoming's folded Overdue row. A task row: the priority ring (complete),
 // the content, a detail line (date, project, labels, recurring) and the
-// due time on the trailing end, or Undo while the completion can be undone.
+// due time on the trailing end, or Undo while its completion or its move
+// to another day can be undone. A moved row stays where it is, dimmed,
+// its new date in the accent colour.
 Item {
   id: row
   required property var entry
   property bool hasCursor: false
+  // The keys moved the cursor here: its accent border (FoamyCursor.byKeys).
+  property bool byKeys: false
+  // Search: the title cut into runs, the query's matches bold (Model.matchRuns).
+  // Runs sit in a Row, which lays them out in the layout's direction: only
+  // for a left-to-right title in a left-to-right panel (else plain).
+  property var titleRuns: []
+  readonly property bool matched: isTask && titleRuns.length > 1 && !LayoutMirroring.enabled && !/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(entry.text)
   // The task the Wide details pane shows.
   property bool selected: false
   property bool interactive: true
   readonly property string kind: entry ? entry.kind : ""
   readonly property bool isTask: kind === "task"
   readonly property bool struck: isTask && entry.struck === true
+  readonly property bool moved: isTask && entry.moved === true
+  // Its completion or move is still in the undo window (the view says).
+  property bool undoable: false
+  // The cursor row's actions in the time's place: Tomorrow, and a menu of
+  // days (the view says when: a task that can move, not waiting for Undo).
+  property bool showActions: false
+  readonly property alias dateAction: dateAction
   signal hovered
   signal completeRequested
+  signal undoRequested
+  signal tomorrowRequested
+  signal dateMenuRequested
+  // Today's Overdue heading: its tasks to today.
+  signal moveAllRequested
   signal openRequested
   signal foldRequested
 
@@ -27,24 +49,29 @@ Item {
   readonly property real contentInset: FoamyStyle.gapLarge + FoamyStyle.rowPadding
   readonly property real indent: isTask ? entry.depth * (FoamyStyle.iconSize + FoamyStyle.gapLarge) : 0
 
+  // Marks and icons on the surface (rings): readable in a light theme too.
   function roleColor(role) {
     switch (role) {
     case "error":
-      return FoamyPalette.error
+      return FoamyPalette.onSurface(FoamyPalette.error)
     case "warning":
-      return FoamyPalette.warning
+      return FoamyPalette.onSurface(FoamyPalette.warning)
     case "success":
-      return FoamyPalette.success
+      return FoamyPalette.onSurface(FoamyPalette.success)
     case "info":
-      return FoamyPalette.info
+      return FoamyPalette.onSurface(FoamyPalette.info)
     case "accent":
-      return FoamyPalette.accent
+      return FoamyPalette.onSurface(FoamyPalette.accent)
     default:
       return FoamyPalette.mutedText
     }
   }
-  // The date on the detail line (Model.detailDate, from the list).
+  // The date on the detail line (Model.detailDate, from the list), the
+  // deadline's day (Model.dayWords), and the tone of a time today: "late"
+  // (passed), "next" (the list's next one), "later" ("" otherwise).
   property string dateText: ""
+  property string deadlineText: ""
+  property string timeTone: ""
   // Upcoming's group headers: {title, sub} (Model.upcomingHeading, from the
   // list), and a task's day before its time in the later groups.
   property var heading: null
@@ -86,9 +113,10 @@ Item {
     anchors.bottom: parent.bottom
     anchors.bottomMargin: FoamyStyle.gapSmall
     height: headerTitle.implicitHeight
+    readonly property bool countAtEnd: headerSub.text !== ""
     Row {
       anchors.left: parent.left
-      anchors.right: headerCount.left
+      anchors.right: moveAll.visible ? moveAll.left : headerCount.visible ? headerCount.left : parent.right
       anchors.rightMargin: FoamyStyle.gap
       anchors.verticalCenter: parent.verticalCenter
       spacing: FoamyStyle.gap
@@ -110,7 +138,19 @@ Item {
         font.weight: Font.DemiBold
         color: row.entry && row.entry.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : row.isGroup ? FoamyPalette.text : FoamyPalette.secondaryText
       }
+      // The count beside its word; after a date range it stays at the end.
       PlainText {
+        objectName: "headerCountInline"
+        visible: !headerRow.countAtEnd && text !== ""
+        anchors.baseline: headerTitle.baseline
+        text: headerCount.text
+        wrapMode: Text.NoWrap
+        font.family: FoamyStyle.monoFamily
+        font.pixelSize: FoamyStyle.font.caption
+        color: headerCount.color
+      }
+      PlainText {
+        id: headerSub
         objectName: "headerSub"
         visible: text !== ""
         text: row.isGroup && row.heading ? row.heading.sub : ""
@@ -119,9 +159,34 @@ Item {
         color: FoamyPalette.mutedText
       }
     }
+    // Today's Overdue: every task in it to today (each with its Undo).
+    FoamyCursorSurface {
+      id: moveAll
+      objectName: "moveAllToToday"
+      visible: row.kind === "header" && row.entry.moveAll === true
+      anchors.right: headerCount.visible ? headerCount.left : parent.right
+      anchors.rightMargin: headerCount.visible ? FoamyStyle.gap : 0
+      anchors.verticalCenter: parent.verticalCenter
+      width: moveAllLabel.implicitWidth + FoamyStyle.gap * 2
+      height: FoamyStyle.actionSize - 6
+      radius: FoamyStyle.radiusSmall
+      onClicked: row.moveAllRequested()
+      Accessible.role: Accessible.Button
+      Accessible.name: moveAllLabel.text
+      PlainText {
+        id: moveAllLabel
+        anchors.centerIn: parent
+        text: FoamyI18n.t("Move to today")
+        wrapMode: Text.NoWrap
+        color: FoamyPalette.onSurface(FoamyPalette.accent)
+        font.pixelSize: FoamyStyle.font.caption
+        font.weight: Font.DemiBold
+      }
+    }
     PlainText {
       id: headerCount
       objectName: "headerCount"
+      visible: headerRow.countAtEnd
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       text: row.entry && row.entry.count > 0 ? FoamyI18n.number(row.entry.count) : ""
@@ -140,6 +205,7 @@ Item {
     width: parent.width - FoamyStyle.gapLarge * 2
     height: FoamyStyle.rowHeight
     hasCursor: row.hasCursor
+    byKeys: row.byKeys
     onHovered: row.hovered()
     onClicked: row.foldRequested()
     Accessible.role: Accessible.Button
@@ -188,7 +254,10 @@ Item {
     anchors.rightMargin: FoamyStyle.gapLarge
     height: parent.height
     hasCursor: row.hasCursor
+    byKeys: row.byKeys
     current: row.isTask && row.selected
+    // Its details are in the pane: the bar marks it.
+    currentBar: true
     cursorShape: Qt.PointingHandCursor
     onHovered: row.hovered()
     onClicked: row.openRequested()
@@ -216,13 +285,14 @@ Item {
         objectName: "ringMark"
         anchors.left: parent.left
         anchors.leftMargin: FoamyStyle.gapSmall
-        // Centred on the text block, which is centred in the row.
-        y: (parent.height - height) / 2
+        // On the title's line (the text block is centred in the row).
+        y: textColumn.y + (titleLine.height - height) / 2
         width: 16
         height: 16
         radius: 8
         border.width: 1.5
         border.color: taskSurface.ringColor
+        opacity: row.moved ? FoamyStyle.disabledOpacity : 1
         color: Qt.alpha(taskSurface.ringColor, row.struck ? 0.9 : ringArea.containsMouse ? 0.28 : 0.12)
         FoamyIcon {
           visible: row.struck || ringArea.containsMouse
@@ -245,14 +315,38 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       spacing: 1
       PlainText {
+        id: titleLine
         objectName: "taskText"
+        visible: !row.matched
         width: parent.width
         text: row.isTask ? row.entry.text : ""
         wrapMode: Text.NoWrap
         elide: Text.ElideRight
         maximumLineCount: 1
         font.strikeout: row.struck
-        color: row.struck ? FoamyPalette.mutedText : FoamyPalette.text
+        color: row.struck || row.moved ? FoamyPalette.mutedText : FoamyPalette.text
+      }
+      // The same title in runs, the matched parts DemiBold; the run that
+      // reaches the line's end is cut there.
+      Row {
+        id: matchLine
+        objectName: "taskTextRuns"
+        visible: row.matched
+        width: parent.width
+        Repeater {
+          model: row.matched ? row.titleRuns : []
+          PlainText {
+            required property var modelData
+            width: Math.min(implicitWidth, Math.max(0, matchLine.width - x))
+            text: modelData.text
+            wrapMode: Text.NoWrap
+            elide: Text.ElideRight
+            maximumLineCount: 1
+            font.weight: modelData.bold ? Font.DemiBold : Font.Normal
+            font.strikeout: row.struck
+            color: row.struck ? FoamyPalette.mutedText : FoamyPalette.text
+          }
+        }
       }
       Row {
         id: detail
@@ -264,14 +358,59 @@ Item {
         spacing: FoamyStyle.gap
         clip: true
         opacity: row.struck ? FoamyStyle.disabledOpacity : 1
-        PlainText {
-          id: dateLabel
-          objectName: "taskDate"
-          visible: text !== ""
-          text: row.isTask ? row.dateText : ""
-          wrapMode: Text.NoWrap
-          font.pixelSize: FoamyStyle.font.caption
-          color: row.isTask && row.entry.overdue ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.secondaryText
+        // What is left for the project and the labels (which elide, in that
+        // order of claim) after the parts that show whole: the date, the
+        // deadline, the assignee and the repeat mark, each with its gap.
+        readonly property real room: Math.max(0, width - [dateBox, deadlineBox, assigneeLabel, repeatIcon].reduce(function (sum, part) {
+          return sum + (part.visible ? part.width + spacing : 0)
+        }, 0) - (labelsLabel.visible && projectLabel.visible ? spacing : 0))
+        // The date; an overdue one with a warning mark (not only its colour).
+        Row {
+          id: dateBox
+          visible: dateLabel.text !== ""
+          spacing: 3
+          FoamyIcon {
+            objectName: "taskLateMark"
+            visible: row.isTask && row.entry.overdue && !row.moved
+            anchors.verticalCenter: parent.verticalCenter
+            width: FoamyStyle.font.caption
+            height: width
+            name: "triangle-alert"
+            color: dateLabel.color
+          }
+          PlainText {
+            id: dateLabel
+            objectName: "taskDate"
+            // A moved row: its new day, and while Undo has the time's place
+            // the time it keeps.
+            text: row.moved ? (row.dateText === "" ? FoamyI18n.t("No date") : row.undoable && row.entry.dueTime !== "" ? row.dateText + " " + row.entry.dueTime : row.dateText) : row.isTask ? row.dateText : ""
+            wrapMode: Text.NoWrap
+            font.pixelSize: FoamyStyle.font.caption
+            font.weight: row.moved ? Font.DemiBold : Font.Normal
+            color: row.moved ? FoamyPalette.onSurface(FoamyPalette.accent) : row.isTask && row.entry.overdue ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.secondaryText
+          }
+        }
+        // The deadline: its day after the target mark, red once it is due.
+        Row {
+          id: deadlineBox
+          objectName: "taskDeadline"
+          visible: row.deadlineText !== ""
+          spacing: 3
+          FoamyIcon {
+            anchors.verticalCenter: parent.verticalCenter
+            width: FoamyStyle.font.caption
+            height: width
+            name: "target"
+            color: deadlineLabel.color
+          }
+          PlainText {
+            id: deadlineLabel
+            objectName: "taskDeadlineText"
+            text: row.deadlineText
+            wrapMode: Text.NoWrap
+            font.pixelSize: FoamyStyle.font.caption
+            color: row.isTask && row.entry.deadlineLate ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.secondaryText
+          }
         }
         Row {
           id: projectLabel
@@ -282,14 +421,14 @@ Item {
             width: FoamyStyle.font.caption
             height: width
             name: "hash"
-            color: row.isTask ? row.roleColor(row.entry.projectRole) : FoamyPalette.mutedText
+            color: FoamyPalette.mutedText
           }
           PlainText {
             objectName: "taskProject"
             text: row.isTask ? row.entry.projectName : ""
             wrapMode: Text.NoWrap
             elide: Text.ElideRight
-            width: Math.min(implicitWidth, detail.width * 0.5)
+            width: Math.min(implicitWidth, detail.width * 0.5, detail.room)
             font.pixelSize: FoamyStyle.font.caption
             color: FoamyPalette.secondaryText
           }
@@ -303,7 +442,7 @@ Item {
           }).join(" ") : ""
           wrapMode: Text.NoWrap
           elide: Text.ElideRight
-          width: Math.min(implicitWidth, Math.max(0, detail.width - dateLabel.width - projectLabel.width - assigneeLabel.width - FoamyStyle.gap * 4 - FoamyStyle.font.caption))
+          width: Math.min(implicitWidth, Math.max(0, detail.room - (projectLabel.visible ? projectLabel.width + detail.spacing : 0)))
           font.pixelSize: FoamyStyle.font.caption
           color: FoamyPalette.onSurface(FoamyPalette.info)
         }
@@ -343,14 +482,14 @@ Item {
       id: trailing
       anchors.right: parent.right
       anchors.rightMargin: FoamyStyle.rowPadding
-      // The time (or Undo) centres on the text block, as the ring does.
-      anchors.verticalCenter: parent.verticalCenter
-      width: row.struck ? undoButton.width : trailingRow.implicitWidth
+      // The time (or Undo, or the actions) on the title's line, as the ring.
+      y: textColumn.y + (titleLine.height - height) / 2
+      width: row.undoable ? undoButton.width : row.showActions ? actionsRow.implicitWidth : trailingRow.implicitWidth
       height: FoamyStyle.font.body * 1.35
       // Upcoming's later groups: the day (body font) before the time (mono).
       Row {
         id: trailingRow
-        visible: !row.struck
+        visible: !row.undoable && !row.showActions
         anchors.verticalCenter: parent.verticalCenter
         spacing: FoamyStyle.gap
         PlainText {
@@ -371,19 +510,47 @@ Item {
           wrapMode: Text.NoWrap
           font.family: FoamyStyle.monoFamily
           font.pixelSize: FoamyStyle.font.bodySmall
-          color: row.isTask && row.entry.overdue ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.secondaryText
+          // Today: a passed time in the error tone, the next one bright.
+          color: row.isTask && (row.entry.overdue || row.timeTone === "late") ? FoamyPalette.onSurface(FoamyPalette.error) : row.timeTone === "next" ? FoamyPalette.text : FoamyPalette.secondaryText
+        }
+      }
+      // The cursor row: Tomorrow (t) and the menu of days (d).
+      Row {
+        id: actionsRow
+        objectName: "rowActions"
+        visible: row.showActions && !row.undoable
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.right: parent.right
+        FoamyAction {
+          objectName: "tomorrowAction"
+          iconName: "sun"
+          foreground: FoamyPalette.secondaryText
+          tooltipText: FoamyI18n.t("Tomorrow") + " (t)"
+          onHoveredChanged: if (hovered)
+            row.hovered()
+          onClicked: row.tomorrowRequested()
+        }
+        FoamyAction {
+          id: dateAction
+          objectName: "dateAction"
+          iconName: "calendar"
+          foreground: FoamyPalette.secondaryText
+          tooltipText: FoamyI18n.t("Date") + " (d)"
+          onHoveredChanged: if (hovered)
+            row.hovered()
+          onClicked: row.dateMenuRequested()
         }
       }
       FoamyCursorSurface {
         id: undoButton
         objectName: "undo"
-        visible: row.struck
+        visible: row.undoable
         anchors.verticalCenter: parent.verticalCenter
         width: undoLabel.implicitWidth + FoamyStyle.gap * 2
         height: FoamyStyle.actionSize - 6
         radius: FoamyStyle.radiusSmall
         onHovered: row.hovered()
-        onClicked: row.completeRequested()
+        onClicked: row.undoRequested()
         Accessible.role: Accessible.Button
         Accessible.name: FoamyI18n.t("Undo")
         PlainText {
