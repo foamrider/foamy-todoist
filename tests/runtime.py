@@ -631,11 +631,15 @@ ShellRoot {
     var command = shell.find(page, "openCommand");
     var editor = command.field.editorItem;
     var savedCommand = command.value;
-    // The page is laid out by the next frame: click what is drawn.
+    // The page is laid out by the next frame: click what is drawn. It gives
+    // Back the keys in a deferred call (focusBack), which under load can
+    // come after a click made sooner and take the keys from the field.
+    wait.waitFor(function() { return page.backTarget.activeFocus; }, 5000, function(opened) {
+    if (!check(opened, "the settings page gave Back the keys")) return;
     shell.afterFrame(page, function() {
       ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       wait.waitFor(function() { return command.field.inputActiveFocus; }, 5000, function(focused) {
-        if (!check(focused, "a click put the keys in the Open command field")) return;
+        if (!check(focused, "a click put the keys in the Open command field (" + JSON.stringify([one.popup.drawnHeight, one.popup.contentHeight, editor.mapToItem(null, 0, 0).y, editor.height, String(editor.Window.activeFocusItem)]) + ")")) return;
         for (var c of "todoist-open {url}") ev.keyClickChar(c, Qt.NoModifier, -1);
         ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
         // What the next drawn frame shows.
@@ -644,6 +648,7 @@ ShellRoot {
           next(0);
         });
       });
+    });
     });
   }
   // A right-click on the empty add field opens its menu, which takes the
