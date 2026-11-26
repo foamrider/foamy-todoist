@@ -1034,10 +1034,12 @@ function movedDate(task, day) {
 // its list, each in one pass over the view's tasks. Built only while it
 // shows (TodoView).
 
-// Today's timeline covers these hours, stretched to any timed task outside
-// them; a task's block is BLOCK_MINUTES long (its time has no end in Todoist).
-var TIMELINE_START = 8
-var TIMELINE_END = 18
+// Today's timeline covers the hours its blocks and "now" need (todayOverview);
+// a task's block is BLOCK_MINUTES long (its time has no end in Todoist).
+// Empty hours outside the day hours (FOLD_BEFORE to FOLD_FROM) fold into one
+// row, so one late or early task doesn't stretch the timeline.
+var FOLD_BEFORE = 8
+var FOLD_FROM = 18
 var BLOCK_MINUTES = 60
 // At most this many blocks side by side: a timeline can't show thousands,
 // and a lane keeps room to click (the rest are summed up, todayOverview).
@@ -1046,17 +1048,21 @@ var MAX_LANES = 3
 // Today (the personal tasks due today or before): {kind: "today", left
 // (due today), overdue, untimed (due today without a time), next (the
 // first timed task after `options.nowMinutes` that isn't struck: {id,
-// text, time, inMinutes}, or null), start and end (the timeline's hours),
-// nowMinutes, now (whether nowMinutes is inside them), blocks}. Each block: {id, text,
-// time, minutes, length (minutes, cut at the range's end), past (started
-// before now), struck, lane, lanes}: blocks that overlap share their
-// width in lanes.
+// text, time, inMinutes}, or null), start and end (the timeline's hours:
+// from the first block's hour, or now's when it is earlier, to the hour the
+// last block ends in; both 0 without blocks), rows, nowMinutes, now
+// (whether nowMinutes is inside the hours), blocks}. `rows`: the
+// timeline's rows, [{from, to, fold}] (hours, `to` excluded): an hour each,
+// or a fold, two or more empty hours outside FOLD_BEFORE to FOLD_FROM. An
+// hour is empty when no block and not now is in it. Each block: {id, text,
+// time, minutes, length (minutes, cut at midnight), struck, lane, lanes}:
+// blocks that overlap share their width in lanes.
 function todayOverview(model, today, options) {
   options = Object.assign({}, options, { personalView: true })
   var now = Number(options.nowMinutes) || 0
   // `tomorrow`: how many tasks are due tomorrow and the first of them
   // ({id, text, time}), for a day with nothing left.
-  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: TIMELINE_START, end: TIMELINE_END, nowMinutes: now, now: false, blocks: [], tomorrow: { count: 0, first: null } }
+  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: 0, end: 0, rows: [], nowMinutes: now, now: false, blocks: [], tomorrow: { count: 0, first: null } }
   var timed = []
   var tomorrow = addDays(today, 1)
   var tomorrows = []
@@ -1081,15 +1087,23 @@ function todayOverview(model, today, options) {
     out.tomorrow.first = { id: tomorrows[0].id, text: tomorrows[0].text, time: tomorrows[0].due.time }
   timed.sort(byDay)
   var struck = options.struck
-  timed.forEach(function (task) {
+  // The hours a block is in ({hour: true}), for the fold.
+  var busy = dict()
+  timed.forEach(function (task, i) {
     var m = task.due.minutes
-    out.start = Math.min(out.start, Math.floor(m / 60))
+    if (i === 0)
+      out.start = Math.floor(Math.min(m, now) / 60)
     out.end = Math.max(out.end, Math.min(24, Math.ceil((m + BLOCK_MINUTES) / 60)))
+    for (var h = Math.floor(m / 60); h * 60 < Math.min(m + BLOCK_MINUTES, 24 * 60); h++)
+      busy[h] = true
     var done = has(struck, task.id) && !!struck[task.id]
     if (!out.next && !done && m > now)
       out.next = { id: task.id, text: task.text, time: task.due.time, inMinutes: m - now }
   })
-  out.now = now >= out.start * 60 && now <= out.end * 60
+  out.now = timed.length > 0 && now >= out.start * 60 && now <= out.end * 60
+  if (out.now)
+    busy[Math.floor(now / 60)] = true
+  out.rows = timelineRows(out.start, out.end, busy)
   // Lanes: a block takes the lowest lane free at its time; a run of blocks
   // that overlap one another splits the width by its number of lanes, at
   // most MAX_LANES. A run that needs more keeps MAX_LANES - 1 lanes of
@@ -1115,11 +1129,10 @@ function todayOverview(model, today, options) {
         return
       }
       if (!more) {
-        more = { id: block.id, text: "", time: block.time, minutes: block.minutes, length: 0, past: false, struck: false, lane: low, lanes: MAX_LANES, more: 0 }
+        more = { id: block.id, text: "", time: block.time, minutes: block.minutes, length: 0, struck: false, lane: low, lanes: MAX_LANES, more: 0 }
         out.blocks.push(more)
       }
       more.more++
-      more.past = block.past
       more.length = Math.max(more.length, block.minutes + block.length - more.minutes)
     })
     run = []
@@ -1157,7 +1170,6 @@ function todayOverview(model, today, options) {
       time: task.due.time,
       minutes: m,
       length: Math.min(BLOCK_MINUTES, out.end * 60 - m),
-      past: m < now,
       struck: has(struck, task.id) && !!struck[task.id],
       lane: lane,
       lanes: 1,
@@ -1166,6 +1178,42 @@ function todayOverview(model, today, options) {
   })
   close()
   return out
+}
+
+// The timeline's rows from `start` to `end` (todayOverview's `rows`): a
+// run of two or more empty hours outside FOLD_BEFORE to FOLD_FROM is one
+// fold row; `busy` holds the hours that aren't empty.
+function timelineRows(start, end, busy) {
+  var rows = []
+  var run = []
+  var flush = function () {
+    if (run.length > 1)
+      rows.push({ from: run[0], to: run[run.length - 1] + 1, fold: true })
+    else if (run.length)
+      rows.push({ from: run[0], to: run[0] + 1, fold: false })
+    run = []
+  }
+  for (var h = start; h < end; h++) {
+    if (!has(busy, h) && (h < FOLD_BEFORE || h >= FOLD_FROM)) {
+      run.push(h)
+      continue
+    }
+    flush()
+    rows.push({ from: h, to: h + 1, fold: false })
+  }
+  flush()
+  return rows
+}
+
+// Where `minutes` stands on the timeline, in rows from its top (a fold row
+// as tall as an hour's): the place of a block or of now.
+function timelineAt(rows, minutes) {
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i]
+    if (minutes < row.to * 60 || i === rows.length - 1)
+      return i + Math.max(0, minutes - row.from * 60) / ((row.to - row.from) * 60)
+  }
+  return 0
 }
 
 // When a list's tasks are due, in order: overdue, today, "week" (after
@@ -1613,5 +1661,5 @@ if (typeof module !== "undefined")
     TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion, suggestionTyped, typedAfter, weekDayHeading,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
     MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
-    weekEndOf, searchWords, matchRuns, movedDue, movedDate, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
+    weekEndOf, searchWords, matchRuns, movedDue, movedDate, FOLD_BEFORE, FOLD_FROM, BLOCK_MINUTES, timelineRows, timelineAt, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
   }

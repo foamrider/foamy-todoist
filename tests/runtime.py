@@ -1398,7 +1398,27 @@ ShellRoot {
     }, function() {
       // Today: the date, the figures, Next, the timeline, the untimed count.
       var todayTexts = shell.visibleTexts(pane);
-      if (!check(pane.visible && pane.summary.kind === "today" && inOrder(todayTexts, ["Wednesday 18 November", "4", "left today", "2", "overdue", "Next", "Review pull request #482", "14:00 · in 2 h", "Today's times", "09:30 Stand-up with the platform team", "14:00 Review pull request #482", "2 tasks without a time"]) && todayTexts.indexOf("with a time") < 0, "Today's overview (" + JSON.stringify(todayTexts) + ")")) return false;
+      if (!check(pane.visible && pane.summary.kind === "today" && inOrder(todayTexts, ["Wednesday 18 November", "4", "due today", "·", "2", "overdue", "Next", "Review pull request #482", "14:00 · in 2 h", "Today's times", "09:30 Stand-up with the platform team", "14:00 Review pull request #482", "2 tasks without a time"]) && todayTexts.indexOf("with a time") < 0, "Today's overview (" + JSON.stringify(todayTexts) + ")")) return false;
+      // The figures on one line, in other words than the band's "left":
+      // together they are its number.
+      var figureLine = shell.visibleTexts(part("overviewFigures")).join(" ");
+      if (!check(figureLine === "4 due today · 2 overdue" && view.band.meta.indexOf("6 left") >= 0 && figureLine.indexOf("left") < 0, "one line of figures that add up to the band's (" + JSON.stringify([figureLine, view.band.meta]) + ")")) return false;
+      // The hours from the first block's (09) to the end of the last (15).
+      var timeline = part("timeline");
+      var hourRows = timeline.children.filter(function(item) { return /^(hour|fold)-/.test(item.objectName); }).map(function(item) { return item.objectName; });
+      if (!check(JSON.stringify(hourRows) === JSON.stringify(["hour-9", "hour-10", "hour-11", "hour-12", "hour-13", "hour-14"]), "the hours come from the tasks (" + JSON.stringify(hourRows) + ")")) return false;
+      // Now: a 1 px line in the text tone under the blocks, its time in
+      // the hours' column in place of the hour it covers.
+      var nowLabel = part("nowLabel");
+      var nowRule = part("nowRule");
+      var nowAt = part("nowLine");
+      var under = timeline.children.indexOf(nowAt) < timeline.children.indexOf(part("block-t3")) && nowAt.z <= part("block-t3").z;
+      if (!check(nowLabel.visible && nowLabel.text === "12:00" && nowRule.height === 1 && Qt.colorEqual(nowRule.color, Kit.FoamyPalette.text) && under && !shell.find(part("hour-12"), "hourLabel").visible && shell.find(part("hour-11"), "hourLabel").visible, "the now line: 12:00 in the hours' column, 1 px, the text tone, under the blocks (" + JSON.stringify([nowLabel.text, nowRule.height, String(nowRule.color), under]) + ")")) return false;
+      // A task that started (09:30) and is still open keeps full strength,
+      // with its accent bar.
+      var startedBar = shell.find(part("block-t3"), "blockBar");
+      var startedText = shell.find(part("block-t3"), "blockText");
+      if (!check(Qt.colorEqual(startedBar.color, Kit.FoamyPalette.accent) && Qt.colorEqual(startedText.color, Kit.FoamyPalette.text) && Qt.colorEqual(part("block-t3").rest, part("block-t4").rest), "a started open task keeps full strength (" + JSON.stringify([String(startedBar.color), String(startedText.color)]) + ")")) return false;
       // The first line level with the list's first heading (Overdue).
       var dateTop = part("overviewDate").mapToItem(view, 0, 0).y;
       var firstHeading = shell.find(shell.builtHeaders(view)[0], "headerTitle");
@@ -1434,6 +1454,14 @@ ShellRoot {
       if (!check(drawn.every(function(item) { return item.width >= Kit.FoamyStyle.controlHeight && item.height >= Kit.FoamyStyle.iconSize + Kit.FoamyStyle.gapSmall && item.y + item.height <= timeline.height && item.x >= 0 && item.x + item.width <= timeline.width + 1; }), "each block big enough to click (" + JSON.stringify(sizes) + ")")) return false;
       var more = part("more-c01");
       if (!check(shell.visibleTexts(more).indexOf("+99 more") >= 0 && more.Accessible.name === "10:00 +99 more", "the rest summed up: +99 more (" + JSON.stringify(shell.visibleTexts(more)) + ")")) return false;
+      // A block that shares its row's width keeps its title, not its time
+      // (a screen reader still hears it); one alone keeps both.
+      var shared = part("block-c00");
+      if (!check(JSON.stringify(shell.visibleTexts(shared)) === JSON.stringify(["Crowd 0"]) && shared.Accessible.name === "10:00 Crowd 0" && JSON.stringify(shell.visibleTexts(part("block-t4"))) === JSON.stringify(["14:00 Review pull request #482"]), "a shared row drops the time (" + JSON.stringify([shell.visibleTexts(shared), shell.visibleTexts(part("block-t4"))]) + ")")) return false;
+      // 23:59: the empty hours 18 to 22 fold into one dashed row.
+      var crowdRows = timeline.children.filter(function(item) { return /^(hour|fold)-/.test(item.objectName); }).map(function(item) { return item.objectName; });
+      var fold = part("fold-18");
+      if (!check(JSON.stringify(crowdRows.slice(-3)) === JSON.stringify(["hour-17", "fold-18", "hour-23"]) && shell.find(fold, "hourLabel").text === "18–22", "the evening folds into 18–22 (" + JSON.stringify(crowdRows) + ")")) return false;
       // 23:59, scrolled into view: a click selects it.
       var late = part("block-late");
       pane.reveal(late);
@@ -1449,9 +1477,9 @@ ShellRoot {
       if (!check(view.paneTask === "c01" && view.cursorRow() && view.cursorRow().id === "c01", "a click on +99 more selected its first task (" + view.paneTask + ")")) return false;
       view.clearSelection();
       // A short pane, today's timed tasks past (no Next): the first block
-      // is far down.
+      // is far down (the timeline has two hours, 09 and 10).
       store.snapshot = shell.snapshot(["t4"]);
-      pane.height = Kit.FoamyStyle.rowHeight * 4;
+      pane.height = Kit.FoamyStyle.rowHeight * 3;
       view.focusList();
       return true;
     }, function() {
@@ -1541,6 +1569,18 @@ ShellRoot {
       return true;
     }, function() {
       // Upcoming: tomorrow lit; a day lights and scrolls the list to it.
+      // Its day names stand alone: a capital, also in Norwegian, where the
+      // locale writes them in lower case.
+      var dayNames = function() { return ["19", "20", "21"].map(function(d) { return shell.visibleTexts(part("day-2026-11-" + d)).slice(-1)[0]; }); };
+      if (!check(JSON.stringify(dayNames()) === JSON.stringify(["Thu", "Fri", "Sat"]), "Upcoming's day names (" + JSON.stringify(dayNames()) + ")")) return false;
+      shell.pickLanguage("no");
+      return [function() { return dayNames()[0] !== "Thu"; }, "the overview in Norwegian"];
+    }, function() {
+      var norwegianDays = shell.visibleTexts(part("day-2026-11-19")).slice(-1)[0];
+      if (!check(norwegianDays === "Tor.", "Norwegian day names start with a capital (" + norwegianDays + ")")) return false;
+      shell.pickLanguage("en");
+      return [function() { return shell.visibleTexts(part("day-2026-11-19")).slice(-1)[0] === "Thu"; }, "the overview in English again"];
+    }, function() {
       var upTexts = shell.visibleTexts(pane);
       var day19 = part("day-2026-11-19");
       var day21 = part("day-2026-11-21");

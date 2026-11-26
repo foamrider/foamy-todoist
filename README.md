@@ -206,15 +206,21 @@ view. Parts with nothing to show are left out (a zero, **When** for an
 empty list); a click on a part (or Tab to it and Enter) acts on it. An
 empty list's line stands in the middle of the list.
 
-- **Today**: the date, how many tasks are left today and how many are
-  overdue (only when any are). With nothing left or overdue, **Tomorrow**
-  with its count and its first task instead (a click selects it). **Next** (the next task with a time still ahead today, and how
-  far ahead), and **Today's times**: the hours from 08 to 18 (wider when a
-  task is outside them), each task with a time as a block at its time, and
-  a red line at now; under it, how many tasks have no time. Tasks at the
-  same time share the width, three side by side at most: the rest show
-  as one "+N more" block. A block or Next selects that task ("+N more"
-  the first of its tasks, in the list beside the others).
+- **Today**: the date as the title, then one line with how many tasks are
+  due today and how many are overdue ("4 due today · 2 overdue"; a zero is
+  left out); together they are the band's "left". With nothing left or
+  overdue, **Tomorrow** with its count and its first task instead (a click
+  selects it). **Next** (the next task with a time still ahead today, and
+  how far ahead), and **Today's times**: the hours from the first task's
+  (or now's, when that is earlier) to the end of the last one, each task
+  with a time as a block at its time, and a thin line at now with its time
+  ("11:50") beside it; under it, how many tasks have no time. Two or more
+  empty hours before 08 or after 18 fold into one dashed row ("18–22"). A
+  task keeps its full look until it is completed, also after its time.
+  Tasks at the same time share the width (without their time), three side
+  by side at most: the rest show as one "+N more" block. A block or Next
+  selects that task ("+N more" the first of its tasks, in the list beside
+  the others).
 - **A project**: **Sections** with their task counts ("(No section)" for
   the tasks without one) and its sub-projects: a section scrolls the list
   to it, a sub-project opens it. **When**: one bar of overdue, today, this
@@ -223,8 +229,8 @@ empty list's line stands in the middle of the list.
   label searches for it (`@label`). A long label's name is shortened with
   "…" (in full when you point at it).
 - **Inbox** and **search**: When and Labels, as for a project.
-- **Upcoming**: the next seven days as columns, a bar each by its number
-  of tasks; the day a new task goes to is lit (tomorrow, or the day you
+- **Upcoming**: the next seven days as columns (the day's short name with
+  a capital), a bar each by its number of tasks; the day a new task goes to is lit (tomorrow, or the day you
   picked). A day scrolls the list to it. **Next deadline**: the nearest
   deadline from today on (selects its task), then how many tasks have no
   date (Upcoming doesn't list them).
