@@ -588,7 +588,9 @@ ShellRoot {
   // so the settings queue refuses each pick: a click opens the list, ↓ (↑
   // from the last option) and Enter pick another option. The choice shows
   // the saved value again at once, beside the error, and nothing is saved.
-  // Then the bar entry is back, the error goes, and done().
+  // The Open command first: a click in the field, a command typed, Enter;
+  // the field shows the saved command again by the next frame. Then the
+  // bar entry is back, the error goes, and done().
   function refusedPicks(view, done) {
     var page = view.settingsPage;
     var keys = ["panelWidth", "afterAdd", "openOn", "othersTasks", "barCount", "refreshSeconds"];
@@ -623,8 +625,23 @@ ShellRoot {
         });
       });
     };
+    var command = shell.find(page, "openCommand");
+    var editor = command.field.editorItem;
+    var savedCommand = command.value;
     // The page is laid out by the next frame: click what is drawn.
-    shell.afterFrame(page, function() { next(0); });
+    shell.afterFrame(page, function() {
+      ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { return command.field.inputActiveFocus; }, 5000, function(focused) {
+        if (!check(focused, "a click put the keys in the Open command field")) return;
+        for (var c of "todoist-open {url}") ev.keyClickChar(c, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+        // What the next drawn frame shows.
+        shell.afterFrame(page, function() {
+          if (!check(command.field.text === savedCommand && !command.editing && view.settingsError === noEntry && bar.saved.length === saves, "a refused Open command shows the saved command " + JSON.stringify(savedCommand) + " again at once (" + JSON.stringify([command.field.text, command.editing, view.settingsError, bar.saved.length - saves]) + ")")) return;
+          next(0);
+        });
+      });
+    });
   }
   // A right-click on the empty add field opens its menu, which takes the
   // keys. That isn't the end of the edit: the field stays open, the menu's

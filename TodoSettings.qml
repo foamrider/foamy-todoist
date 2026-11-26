@@ -43,6 +43,18 @@ FoamySettingsPage {
   }
   onVisibleChanged: if (!visible)
     tokenInput.clear()
+  // A save of the Open command that the queue refuses leaves its value as
+  // it was: saveFailed() makes the field show the saved command again and
+  // lets the same text be sent again. A refusal at once (no bar entry)
+  // comes inside the field's own commit, which then shows the sent text
+  // again (kit 0.14.0), so the call waits until that commit has ended.
+  Connections {
+    target: page.prefs
+    function onFailed(key) {
+      if (key === "openCommand")
+        Qt.callLater(openCommandField.saveFailed)
+    }
+  }
 
   FoamySettingsSection {
     id: accountSection
@@ -271,6 +283,7 @@ FoamySettingsPage {
     }
     // A command, so full width (DESIGN.md); Preferences.js validates it.
     FoamyTextSettingField {
+      id: openCommandField
       objectName: "openCommand"
       width: parent.width
       label: FoamyI18n.t("Open command")
