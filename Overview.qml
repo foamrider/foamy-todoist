@@ -13,7 +13,9 @@ import "Model.js" as Model
 // task and the day's timeline. A project, the Inbox and search: the
 // sections and sub-projects (a project), when the tasks are due, the
 // labels. Upcoming: the next seven days, the next deadline, the tasks
-// without a date. A part with nothing to show is left out.
+// without a date. A part with nothing to show is left out: a zero figure,
+// When for an empty list. A Today with nothing left or overdue shows what
+// tomorrow holds instead of its figures.
 //
 // Every clickable part is one click target and one Tab stop with one hover
 // fill, as the editor's sections: Enter or Space does what a click does.
@@ -38,6 +40,8 @@ FocusScope {
   signal keysReturned
 
   readonly property string kind: summary ? summary.kind : ""
+  // Today with nothing left or overdue.
+  readonly property bool dayClear: kind === "today" && summary.left === 0 && summary.overdue === 0
   readonly property alias scroll: scroll
   // The first caption's top: level with the list's first heading, which
   // stands at the bottom of its row less a small gap (TaskRow's header,
@@ -46,7 +50,8 @@ FocusScope {
   implicitHeight: topInset + parts.implicitHeight + FoamyStyle.gap
 
   function roleColor(role) {
-    return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "success" ? FoamyPalette.success : role === "info" ? FoamyPalette.info : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
+    // Marks and icons on the surface: readable in a light theme too.
+    return role === "error" ? FoamyPalette.onSurface(FoamyPalette.error) : role === "warning" ? FoamyPalette.onSurface(FoamyPalette.warning) : role === "success" ? FoamyPalette.onSurface(FoamyPalette.success) : role === "info" ? FoamyPalette.onSurface(FoamyPalette.info) : role === "accent" ? FoamyPalette.onSurface(FoamyPalette.accent) : FoamyPalette.mutedText
   }
   // The first click target, with the keys (Tab from the list); false when
   // there is none. From the top, so the parts above it show when they fit;
@@ -127,7 +132,7 @@ FocusScope {
       }
       RowLayout {
         objectName: "overviewFigures"
-        visible: overview.kind === "today"
+        visible: overview.kind === "today" && !overview.dayClear
         Layout.leftMargin: FoamyStyle.gap
         spacing: FoamyStyle.padding
         Figure {
@@ -137,9 +142,26 @@ FocusScope {
         }
         Figure {
           objectName: "figureOverdue"
+          visible: value > 0
           value: overview.kind === "today" ? overview.summary.overdue : 0
           label: FoamyI18n.t("overdue")
           tone: FoamyPalette.onSurface(FoamyPalette.error)
+        }
+      }
+      // Nothing left or overdue: tomorrow's count and its first task.
+      Part {
+        id: tomorrowPart
+        objectName: "overviewTomorrow"
+        readonly property var tomorrow: overview.kind === "today" ? overview.summary.tomorrow : null
+        visible: overview.dayClear && tomorrow !== null && tomorrow.count > 0
+        caption: tomorrow ? FoamyI18n.tn("Tomorrow · %1 tasks", tomorrow.count) : ""
+        TaskTarget {
+          objectName: "tomorrowTask"
+          readonly property var first: tomorrowPart.tomorrow ? tomorrowPart.tomorrow.first : null
+          iconName: "calendar"
+          text: first ? first.text : ""
+          detail: first ? first.time : ""
+          onActivated: overview.taskPicked(first.id)
         }
       }
       Part {
@@ -232,9 +254,9 @@ FocusScope {
       }
       Part {
         objectName: "overviewWhen"
-        visible: overview.kind === "list"
+        visible: overview.kind === "list" && overview.summary.total > 0
         caption: FoamyI18n.t("When")
-        // One bar, a part per group with tasks (an empty track for none).
+        // One bar, a part per group with tasks.
         Item {
           id: whenBar
           objectName: "whenBar"
@@ -245,12 +267,6 @@ FocusScope {
           Layout.rightMargin: FoamyStyle.gap
           Layout.topMargin: FoamyStyle.gapSmall
           implicitHeight: FoamyStyle.gap
-          Rectangle {
-            visible: whenBar.total === 0
-            anchors.fill: parent
-            radius: height / 2
-            color: FoamyPalette.fieldFill
-          }
           Row {
             anchors.fill: parent
             spacing: FoamyStyle.gapTiny
@@ -274,19 +290,13 @@ FocusScope {
           Layout.rightMargin: FoamyStyle.gap
           spacing: FoamyStyle.gapLarge
           Repeater {
-            model: whenBar.total > 0 ? whenBar.parts : [
-              {
-                key: "empty",
-                count: 0
-              }
-            ]
+            model: whenBar.parts
             Row {
               id: legendEntry
               required property var modelData
               readonly property string label: whenColors.label(modelData.key, modelData.count)
               spacing: FoamyStyle.gapSmall
               Rectangle {
-                visible: legendEntry.modelData.key !== "empty"
                 anchors.verticalCenter: parent.verticalCenter
                 width: FoamyStyle.gap
                 height: width
@@ -485,10 +495,8 @@ FocusScope {
         return FoamyI18n.tn("%1 this week", count)
       case "later":
         return FoamyI18n.tn("%1 later", count)
-      case "none":
-        return FoamyI18n.tn("%1 without a date", count)
       default:
-        return FoamyI18n.tn("%1 tasks", count)
+        return FoamyI18n.tn("%1 without a date", count)
       }
     }
   }
@@ -609,6 +617,7 @@ FocusScope {
       }
       PlainText {
         objectName: "targetDetail"
+        visible: text !== ""
         width: parent.width
         text: taskTarget.detail
         wrapMode: Text.NoWrap

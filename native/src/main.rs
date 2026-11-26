@@ -11,7 +11,7 @@
 //! foamy-todoist-helper token-set    < {"token":"…"}
 //! foamy-todoist-helper token-clear
 //! foamy-todoist-helper sync         < {} | {"full":true}
-//! foamy-todoist-helper apply        < {"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD"},{"op":"update","id":…,…}]}
+//! foamy-todoist-helper apply        < {"commands":[{"op":"close","id":…},{"op":"due","id":…,"date":"YYYY-MM-DD[THH:MM:SS[Z]]"|null},{"op":"update","id":…,…}]}
 //! foamy-todoist-helper add          < {"text":…,"due_date":"YYYY-MM-DD"|null,"project_id":…|null}
 //! foamy-todoist-helper task         < {"id":…}
 //! ```
@@ -68,7 +68,9 @@
 //!   follows; nothing else is retried.
 //! - `apply` takes 1–100 changes (at most 512 KiB), at most one per task:
 //!   `close` is `item_close` (a recurring task moves to its next date),
-//!   `due` sets an all-day date with `item_update`, and `update` edits a
+//!   `due` sets the date with `item_update` (`"date"`: `YYYY-MM-DD`, a
+//!   floating `YYYY-MM-DDTHH:MM:SS` or a UTC `…Z`, as `due.date` is read;
+//!   null removes the date), and `update` edits a
 //!   task: `{"op":"update","id",` then at least one of `"content"` (1–500
 //!   characters after trimming, no control characters), `"description"`
 //!   (0–16 383 characters; line breaks and tabs allowed; "" clears it),

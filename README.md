@@ -20,7 +20,8 @@ Two sizes (**Size** in Settings), both the popup under the bar:
 
 - **Small**: 420 px. A row of tabs under the band picks **Inbox**,
   **Today** or **Upcoming**, with their counts (Today's in red while
-  something is overdue).
+  something is overdue). It is as tall as its list, up to 70% of the
+  screen.
 - **Wide**: no tabs. A rail on the left lists the views (with **Week** after
   Upcoming), then **My projects** (sub-projects indented one step) with
   their open tasks; the list is beside it, and a pane on the right shows
@@ -28,17 +29,18 @@ Two sizes (**Size** in Settings), both the popup under the bar:
   or, with none selected, an overview of the view (see "The overview").
   The popup is always 880 px, with or without a selection, in the Week
   view and on its settings page (whose sections keep the 560 px column,
-  centred), so it never changes width while open. It is as tall as its
-  content up to 70% of the screen (the list scrolls inside). Where the
+  centred), so it never changes width while open. Its height holds while
+  it is open too: at least 12 rows, and never lower than the tallest it has
+  been since it opened (a longer view or task grows it once; a shorter one
+  leaves room at the bottom), up to 70% of the screen (the list scrolls
+  inside). Closing the panel lets the height go. Where the
   screen has no room for 880 px beside the popup's margins, it opens Small
   instead.
 
 The band at the top holds the Todoist mark, the title, the current view and
 its count, and three buttons: **+** (add a task, `a`), **Search** (`/`) and
 ⋯ (**Open in Todoist** opens the current view in the browser; **Settings**
-is last). In Wide, while the details pane shows a task, the middle button
-is **Open in Todoist** for that task and **Search** is the first entry in
-⋯ (`/` still searches). Nothing has the cursor when the panel opens.
+is last). Nothing has the cursor when the panel opens.
 
 - **Inbox**: the Inbox project in Todoist's order, subtasks under their
   parent, sections with a header.
@@ -64,19 +66,32 @@ is **Open in Todoist** for that task and **Search** is the first entry in
   column, ←/→ across (← from the first column goes to the rail), Space
   completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move it a
   day earlier or later (never before today; recurring tasks stay, as with
-  `t`). Enter, `e` or a click opens the details over the right part of the
-  view; Esc closes them. Small shows Today instead, and so does **Open on:
-  Last view**.
+  `t`). A moved card goes to its new column at once; the move is sent as
+  a move in a list is (see "Moving"), and moving it back to its day
+  cancels it. Enter, `e` or a click opens the details beside the board,
+  which keeps its four columns, narrower (titles on up to three lines); Esc
+  or the pane's Close closes them. Small shows Today instead, and so does
+  **Open on: Last view**.
 
 Each row has a ring in the priority's colour (p1 red, p2 orange, p3 accent,
 p4 grey), the task (Markdown links show their text), and a line with what
-the view doesn't already say, in this order: the date (red when overdue;
-"Yesterday", a weekday within a week, else "Mon 23 Nov" in your language;
-none in Today's Today section or in Upcoming, which groups by day), the
-project (in every view but that project's own), `@labels`, the person it is
-assigned to when that isn't you (first name), and a repeat icon for
-recurring tasks; a due time shows on the right. A row without that line is
-one line tall; the text, the ring and the time are centred either way.
+the view doesn't already say, in this order: the date ("Yesterday", a
+weekday within the coming week, else "Mon 23 Nov" in your language, so
+last Friday never reads like next Friday; an overdue date is red with a
+warning mark; none in Today's Today section or in Upcoming, which groups
+by day), the deadline (a target mark and its day, red once it is due), the
+project (its # muted; in every view but that project's own), `@labels`, the
+person it is assigned to when that isn't you (first name), and a repeat
+icon for recurring tasks. The date, deadline, person and repeat mark show
+whole; the project and then the labels are cut with "…" when the line is
+full. A due time shows on the right: today, a time that has passed is red
+and the next one ahead is bright. The ring and the time stand on the
+task's first line. A heading's count stands beside its word (after a date
+range, at the row's end).
+
+In Small the band's line leaves the view's name to the tabs: Today says the
+date first ("Thu 26 Nov · 6 left · 2 overdue"), the Inbox and Upcoming
+their counts.
 
 **Completing**: click the ring or press Space. The task stays, struck
 through, with **Undo**; four seconds after the last completion every
@@ -87,6 +102,18 @@ why. When the request fails as a whole (no answer, the network), Todoist may
 or may not have done it, so those tasks show dimmed and can't be completed
 or moved again until the next refresh, which starts at once. A recurring
 task moves to its next date, as in Todoist.
+
+**Moving** to another day: the row under the cursor shows two buttons in
+its time's place: **Tomorrow** (`t`) and a calendar (`d`) with **Today**,
+**Tomorrow**, **Next week** (the first day of your locale's next week) and
+**No date**. Today's **Overdue** heading has **Move to today** for all its
+tasks. A moved task keeps its time (a 14:00 task moved to tomorrow is due
+tomorrow at 14:00). Like a completion, the row stays where it is, dimmed,
+with its new day in the accent colour and **Undo**; the move is sent with
+the completions four seconds after the last change (at once when the panel
+closes), and a refusal brings the task back with the reason on the line
+under the band. A recurring task isn't moved: its rule decides its dates,
+so the line says to open it and change the date there (in its own words).
 
 **Adding**: click **+** or press `a` anywhere: a field grows out of the
 button across the band (the band keeps its height, and nothing moves under
@@ -146,17 +173,25 @@ closed, Enter adds the task as before. Search never shows suggestions.
 **Search** (the button, or `/`): the same field grows out of **Search** and
 searches every open task by text, project name and labels; a word that
 starts with `@` matches labels only (a label whose name starts with it;
-write a space in a label's name as `\ `, as in Quick Add). The results
-replace the list, grouped by project. Esc clears the text, then leaves
-search. Leaving search (Esc, another view) puts back an add draft you had
-started before it, the caret at its end; without one, the field closes.
+write a space in a label's name as `\ `, as in Quick Add). Until you type,
+the open view stays as it was. The results then replace the list, grouped
+by project (the project's name heads its results, so the rows leave it
+out), with the matched part of each title in bold; in Small the tab row
+says how many tasks were found. When nothing matches, the list says so and
+offers **Add as a task**, which puts what you typed in the add field
+(not when search put an add draft aside). Esc clears the text, then leaves
+search; the field's × leaves it at once. Leaving search (Esc, ×, another
+view) puts back an add draft you had started before it, the caret at its
+end; without one, the field closes.
 
 **The overview** (Wide): with no task selected, the pane sums up the
-view. Parts with nothing to show are left out; a click on a part (or Tab
-to it and Enter) acts on it.
+view. Parts with nothing to show are left out (a zero, **When** for an
+empty list); a click on a part (or Tab to it and Enter) acts on it. An
+empty list's line stands in the middle of the list.
 
 - **Today**: the date, how many tasks are left today and how many are
-  overdue, **Next** (the next task with a time still ahead today, and how
+  overdue (only when any are). With nothing left or overdue, **Tomorrow**
+  with its count and its first task instead (a click selects it). **Next** (the next task with a time still ahead today, and how
   far ahead), and **Today's times**: the hours from 08 to 18 (wider when a
   task is outside them), each task with a time as a block at its time, and
   a red line at now; under it, how many tasks have no time. Tasks at the
@@ -177,19 +212,23 @@ to it and Enter) acts on it.
   deadline from today on (selects its task), then how many tasks have no
   date (Upcoming doesn't list them).
 
+A list that continues past the card's edge fades out at that edge.
+
 **Editing**: a click on a task, Enter or `e` opens it in the editor. In
 Small the editor takes the panel's place, like the settings page:
 **Back** (or Esc, or ← on Back) returns to the list with the task under the
 cursor. Its band says "Saving…" while a change is sent. In Wide it is
 the details pane on the right (the left in right-to-left languages), which
 shows the selected task (the one the keys or a click moved to; pointing at
-a row doesn't change it): `e` or a click on a part puts the caret there,
-Tab moves through the parts, and Esc gives the keys back to the list.
+a row doesn't change it). Its header row shows the task's project (and
+section), **Open in Todoist** and **Close** (as Esc in the list). `e` or a
+click on a part puts the caret there, Tab moves through the parts (the
+header's two buttons last), and Esc gives the keys back to the list.
 While a change is sent, the footer says "Saving…" in place of "Updated …",
 then "Saved" for two seconds. A click on the list's space that isn't a row
 (below the last row, a heading, the Week view's empty column space), or
 Esc in the list, clears the selection: no row is selected and the pane
-shows the overview again (over the Week view it closes); what you typed in
+shows the overview again (beside the Week view it closes); what you typed in
 the pane is saved first.
 A task completed or deleted elsewhere closes the pane too. A click on
 empty space anywhere in the panel takes the keys from a text field, which
@@ -197,28 +236,34 @@ saves as when you leave it.
 
 The editor reads like the task, as Todoist's task view does: the ring and
 the title, the description under it, then the task's **Project**, **Date**,
-**Deadline**, **Priority** and **Labels**, each under a small caption. Each
-part is edited where it is. Each property is one click target, its caption and value
-together, as in Todoist: a click anywhere in it, or Enter on it (one Tab
-stop each), changes it.
+**Deadline**, **Priority** and **Labels**, one row each: the icon under the
+ring, the value in line with the title, a small caption at the row's end.
+An empty row says what a click adds ("Add deadline"). Each part is edited
+where it is. Each property row is one click target, as in Todoist: a click
+anywhere in it, or Enter on it (one Tab stop each), changes it.
 
 - The **title** and the **description** look like text; a click (or Tab)
   makes them fields. The description is read from Todoist when the editor
   opens the task ("Loading…" meanwhile; a failed read says why, with
   **Retry**). One that is longer than the editor takes (16 384 characters)
   is shown, not edited: open it in Todoist.
-- **Date** and **Deadline**: a click on the section (or Enter on it) opens
-  a one-line field. The date is written as in Todoist ("tomorrow 9am",
+- **Date**: a click on the row (or Enter on it) opens the days a row's
+  calendar has (see "Moving") and **Type a date…**; a recurring task opens
+  the field at once. From the keys a menu starts on the task's current
+  choice, so Enter keeps it.
+- **Date** (Type a date…) and **Deadline**: a one-line field. The date is
+  written as in Todoist ("tomorrow 9am",
   "every Monday") and Todoist reads it; the field starts with Todoist's
   own words for the date (a repeating task's rule). A deadline is
   `YYYY-MM-DD`. Enter saves, Esc cancels; an empty field removes the date
-  or deadline. Without one, the caption shows a **+**.
+  or deadline.
   The calendar icon has the date's colour (overdue, today, tomorrow, this
   week).
 - **Project** (and section), **Priority** (P1 to P4, flags in the rows'
-  colours) and **Labels** (× takes one off; a click elsewhere in the
-  section, marked **+**, adds one of your personal labels) open a menu and
-  save when you pick.
+  colours) and **Labels** (× takes one off; a click elsewhere in the row,
+  marked **+** after the labels, adds one of your personal labels) open a
+  menu and save when you pick. A label too long for the row is cut, and
+  keeps its ×.
 - A text field saves when it loses the keys, or on Enter (Ctrl+Enter in
   the description); Esc in it drops what you typed there. Each save sends
   only the part that changed. Leaving the task (another task, Back, another
@@ -233,8 +278,7 @@ stop each), changes it.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
 - The **ring** beside the title completes the task. **Open in Todoist** is
-  an icon in the band: the page's, or in Wide the panel's (in Search's
-  place).
+  an icon in the page's band, or in Wide in the pane's header.
   Completing the task (here, or with its row's ring or Space) saves what
   you typed first. A task completed or deleted elsewhere meanwhile: the
   page says it is no longer in Todoist.
@@ -268,6 +312,10 @@ project's view moves the task there only when the text names no project: a
 
 ## Keyboard
 
+One cursor for the keys and the pointer. Where the keys moved it, it has a
+thin accent border; the selected task (the one the Wide pane shows) has an
+accent tint and a bar at its start.
+
 | Key | Where | Does |
 |---|---|---|
 | Alt+1, Alt+2, Alt+3 | anywhere, also while typing | Inbox, Today, Upcoming |
@@ -280,10 +328,11 @@ project's view moves the task there only when the text names no project: a
 | Esc | the field | clear the text; when empty close the field (and leave search) |
 | ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list |
 | ↑ ↓ j k | the list | move; ↑ on the first row goes to the tabs (the rail), ↑ from there to ⋯, Search and + |
-| Space | a row | complete (again: undo) |
+| Space | a row | complete (again, or on a moved row: undo) |
 | Enter, e | a row | open the task in the editor (Wide: the caret in the details pane) |
 | Ctrl+O | a row | open the task in Todoist |
-| t | a row | move to tomorrow (not for recurring tasks) |
+| t | a row | move to tomorrow, keeping the time (not for recurring tasks) |
+| d | a row | the menu of days: Today, Tomorrow, Next week, No date |
 | / | the list | search |
 | ← → | the tabs | pick a view (Enter or Space shows it) |
 | ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |
@@ -291,20 +340,22 @@ project's view moves the task there only when the text names no project: a
 | Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
 | Enter, Space | a value in the editor | change it (a menu, or the date field) |
 | Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
-| Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts) |
+| Tab, Shift+Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts); with neither, the next or previous panel |
 | Enter, Space | a part of the overview | what a click does |
 | Esc | the overview | the keys back to the list |
 | r, s | the list | refresh, Settings |
 | Esc | the list | close (Wide: close the details pane first; in a list that clears the selection) |
-| Tab, Shift+Tab | the list, or an empty field | the next or previous panel (in a field with text: nothing) |
+| Tab, Shift+Tab | the list (Small), or an empty field | the next or previous panel (in a field with text: nothing) |
 
 ## Settings
 
-Open them from the ⋯ menu, with `s`, or by right-clicking the bar icon.
+Open them from the ⋯ menu (signed out: the gear in its place), with `s`,
+or by right-clicking the bar icon.
 
-- **Account**: signed out, paste your API token and press **Save token**.
-  Find it in Todoist under Settings → Integrations → Developer (**Open
-  Todoist settings** goes there). The token is checked with Todoist before
+- **Account**: signed out, the section says where the API token is in
+  Todoist (Settings → Integrations → Developer; **Open Todoist settings**
+  beside the field's label goes there); paste it in the field and press
+  **Save token** beside it. The token is checked with Todoist before
   it is stored. Signed in, the page shows who, and **Sign out**. When the
   stored token can't be used (for example the keyring holds a value that
   isn't a token), the page shows why, the token field and **Sign out**. A

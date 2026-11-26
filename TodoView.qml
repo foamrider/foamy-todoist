@@ -14,8 +14,8 @@ import "Model.js" as Model
 // on the editor page in place of the list; Wide shows it in the details
 // pane beside the list, and has the Week view. Wide's pane is always there
 // beside a list: the selected task's details, else an overview of the view
-// (Overview.qml; Tab goes into it). The Week view shows the pane over its
-// columns only while a card is open in it.
+// (Overview.qml; Tab goes into it). The Week view shows the pane beside its
+// (narrowed) columns only while a card is open in it.
 //
 // The band field: + (or `a`) and Search (or `/`) open it, growing from
 // their button over the title row. Adding, it colours the Quick Add tokens
@@ -25,8 +25,8 @@ import "Model.js" as Model
 // when its edit ends without the keys (not for its own right-click menu);
 // one with text stays open.
 //
-// One cursor (FoamyCursor) over the stops, in on-screen order: +, Search
-// (Open, while the Wide pane shows a task), ⋯ (the band's, while its
+// One cursor (FoamyCursor) over the stops, in on-screen order: +, Search,
+// ⋯ (the band's, while its
 // field is closed), the tabs or the rail, each list row that does something
 // (the Week view's grid is one stop), the footer's Todoist button and
 // Refresh. Nothing has the cursor on open. While a field, the editor or a
@@ -119,11 +119,22 @@ PanelKeyCatcher {
   property bool overdueOpen: false
   // Upcoming's default date: the day of the group the cursor was in last.
   property string upcomingDay: ""
-  readonly property string listView: searching ? "search" : view
-  readonly property bool weekShown: view === "week" && !searching
+  // Search lists its results from the first character typed; until then
+  // the open view stays, with its tab or rail row, so the panel keeps its
+  // place.
+  readonly property bool searchActive: searching && query.trim() !== ""
+  readonly property string listView: searchActive ? "search" : view
+  readonly property bool weekShown: view === "week" && !searchActive
+  // Small: the list's height when search started; results never make the
+  // card shorter than that while searching (Wide holds its height anyway).
+  property real searchHeldHeight: 0
+  readonly property int searchCount: searchActive ? rows.reduce(function (sum, row) {
+    return sum + (row.kind === "task" ? 1 : 0)
+  }, 0) : 0
   readonly property var store: TodoStore
   readonly property var rows: !live || weekShown ? [] : Model.rows(store.model, listView, store.today, {
     struck: store.struck,
+    moves: store.shownMoves,
     hidden: store.sending,
     hideOthers: store.hideOthers,
     unconfirmed: store.unconfirmed,
@@ -135,6 +146,7 @@ PanelKeyCatcher {
   // The Week view's columns, only while it shows.
   readonly property var weekColumns: live && weekShown ? Model.weekColumns(store.model, store.today, {
     struck: store.struck,
+    moves: store.shownMoves,
     hidden: store.sending,
     hideOthers: store.hideOthers,
     unconfirmed: store.unconfirmed
@@ -190,14 +202,17 @@ PanelKeyCatcher {
       weekHome()
   }
   // The Week view is Wide's: Small shows Today instead.
-  onWideChanged: if (!wide && view === "week")
-    setView("today")
+  onWideChanged: {
+    releaseHeight()
+    if (!wide && view === "week")
+      setView("today")
+  }
   readonly property var viewKeys: ["inbox", "today", "upcoming"]
 
   // ---- cursor stops ------------------------------------------------------------------
   // The band's buttons are stops only while its field is closed.
   readonly property int addStop: 0
-  // Search, or Open while the Wide pane shows a task (taskInBand).
+  // Search.
   readonly property int searchStop: 1
   readonly property int menuStop: 2
   readonly property int switchStop: wide ? -1 : 3
@@ -254,6 +269,7 @@ PanelKeyCatcher {
     if (addField.inputActiveFocus)
       focusList()
     viewCursor.index = stop
+    viewCursor.byKeys = true
     if (stop === railStop)
       railCursor = railIndexOfView()
     if (stop === firstRowStop && weekShown && !weekCurrent())
@@ -274,6 +290,7 @@ PanelKeyCatcher {
   // the list.
   function clearSelection() {
     viewCursor.index = -1
+    upcomingDay = ""
     paneTask = ""
     weekPaneOpen = false
   }
@@ -329,6 +346,7 @@ PanelKeyCatcher {
       searchDraft = fieldOpen ? addField.text : ""
       if (searchDraft !== "")
         store.addDraft = searchDraft
+      searchHeldHeight = wide ? 0 : listHeight
       searching = true
       clearSuggest()
       addField.text = ""
@@ -349,6 +367,7 @@ PanelKeyCatcher {
       return
     var hadKeys = fieldFocused
     searching = false
+    searchHeldHeight = 0
     query = ""
     var draft = searchDraft
     searchDraft = ""
@@ -369,6 +388,99 @@ PanelKeyCatcher {
     fieldOpen = true
     viewCursor.index = -1
     addField.focusInput()
+  }
+  // No match: the query becomes a new task (only when search didn't put
+  // an add draft aside, which would come back in the field).
+  function addQuery() {
+    var text = query.trim()
+    if (text === "" || searchDraft !== "")
+      return
+    leaveSearch()
+    openAdd()
+    addField.text = text
+    addField.cursorPosition = text.length
+  }
+  // ---- moving tasks to another day -----------------------------------------------
+  // The menu of days for a task (a row's date action, or `d` on the cursor
+  // row): Today, Tomorrow, Next week (the start of the locale's next
+  // week), No date. A pick moves it, undoable (TodoStore.move).
+  property string dateMenuTask: ""
+  readonly property alias dateMenuItem: dateMenu
+  // The menu task's day as it stands (a pending move's), "" for none: its
+  // entry is checked, so the keys start on it.
+  readonly property string dateMenuDay: {
+    var task = store.model.byId[dateMenuTask]
+    if (!task)
+      return "-"
+    return Model.has(store.shownMoves, dateMenuTask) ? store.shownMoves[dateMenuTask] : task.due ? task.due.day : ""
+  }
+  function openDateMenu(id, anchor, keyboard) {
+    var task = store.model.byId[id]
+    if (!task || !store.canMove(id))
+      return
+    // A repeating task: why at once, not after a pick.
+    var refusal = store.moveRefusal(id)
+    if (refusal !== "") {
+      store.editRefused(refusal)
+      return
+    }
+    const stop = stopOf(id)
+    const built = !anchor && stop >= 0 ? taskList.itemAtIndex(stops[stop - firstRowStop]) as TaskRow : null
+    const at = anchor || (built ? built.dateAction : null)
+    if (!at)
+      return
+    dateMenuTask = id
+    dateMenu.anchorItem = at
+    dateMenu.open(keyboard)
+  }
+  function moveFromMenu(day) {
+    store.move(dateMenuTask, day)
+  }
+  readonly property string nextWeekDay: Model.addDays(Model.weekEndOf(store.today, weekStart), 1)
+  // Today's Overdue heading: each of its tasks to today. A repeating task
+  // stays (the error line says why).
+  function moveOverdueToToday() {
+    store.moveAll(rows.filter(function (row) {
+      return row.kind === "task" && row.overdue && !row.struck && !row.moved
+    }).map(function (row) {
+      return row.id
+    }), store.today)
+  }
+  FoamyMenu {
+    id: dateMenu
+    onAboutToOpen: root.store.holdUndo(true)
+    onClosed: root.store.holdUndo(false)
+    FoamyMenuItem {
+      objectName: "dateToday"
+      checked: root.dateMenuDay === root.store.today
+      text: FoamyI18n.t("Today")
+      iconName: "calendar"
+      onTriggered: root.moveFromMenu(root.store.today)
+    }
+    FoamyMenuItem {
+      objectName: "dateTomorrow"
+      checked: root.dateMenuDay === Model.addDays(root.store.today, 1)
+      text: FoamyI18n.t("Tomorrow")
+      iconName: "sun"
+      onTriggered: root.moveFromMenu(Model.addDays(root.store.today, 1))
+    }
+    FoamyMenuItem {
+      objectName: "dateNextWeek"
+      checked: root.dateMenuDay === root.nextWeekDay
+      text: FoamyI18n.t("Next week")
+      iconName: "calendar-range"
+      onTriggered: root.moveFromMenu(root.nextWeekDay)
+    }
+    FoamyMenuItem {
+      separator: true
+    }
+    FoamyMenuItem {
+      objectName: "dateNone"
+      checked: root.dateMenuDay === ""
+      text: FoamyI18n.t("No date")
+      iconName: "x"
+      onTriggered: root.moveFromMenu("")
+    }
   }
   // The task row under the cursor (the Week view's card), or null.
   function cursorRow() {
@@ -402,12 +514,11 @@ PanelKeyCatcher {
     function onIndexChanged() {
       var row = root.cursorRow()
       root.cursorKey = row && !root.weekShown ? row.key : ""
-      // Upcoming's add date: the day group the cursor was last in; tomorrow
-      // in the week and month groups, or with no cursor.
-      if (row && row.kind === "task" && root.view === "upcoming" && !root.searching)
+      // Upcoming's add date: the day group the cursor was last in (it stays
+      // when the cursor leaves for the add field); tomorrow in the week and
+      // month groups, or once the selection is cleared (clearSelection).
+      if (row && row.kind === "task" && root.view === "upcoming" && !root.searchActive)
         root.upcomingDay = row.group === "day" ? row.dueDay : ""
-      else if (viewCursor.index < 0)
-        root.upcomingDay = ""
     }
   }
   onRowsChanged: {
@@ -617,6 +728,14 @@ PanelKeyCatcher {
     projectCounts: store.counts.projects,
     nowMinutes: nowMinutes
   }) : null
+  // The list's next time ahead today (its row's time stands out).
+  readonly property string nextTimedId: {
+    var best = null
+    for (const row of rows)
+      if (row.kind === "task" && row.dueDay === store.today && row.dueMinutes > nowMinutes && !row.struck && (!best || row.dueMinutes < best.dueMinutes))
+        best = row
+    return best ? best.id : ""
+  }
   // The store's clock (tests set it), read again on each minute tick
   // (the wall clock's date is the binding's dependency).
   readonly property int nowMinutes: minutesOf(clock.date, store.now())
@@ -631,12 +750,14 @@ PanelKeyCatcher {
     if (!task)
       return
     focusList()
-    if (view === "upcoming" && !searching && task.due && task.due.day < store.today)
+    if (view === "upcoming" && !searchActive && task.due && task.due.day < store.today)
       overdueOpen = true
     var stop = stopOf(id)
-    if (stop >= 0)
+    if (stop >= 0) {
       goTo(stop)
-    else
+      // Picked with the pointer (the overview): not the keys' look.
+      viewCursor.byKeys = false
+    } else
       paneTask = id
   }
   // A section ("" for the tasks without one): the list scrolls to it.
@@ -760,9 +881,10 @@ PanelKeyCatcher {
     if (at === addStop)
       return openAdd()
     if (at === searchStop)
-      return taskInBand ? openPaneTask() : searching ? leaveSearch() : startSearch()
+      return searching ? leaveSearch() : startSearch()
+    // The stop is ⋯, or the gear alone while signed out (no menu entries).
     if (at === menuStop)
-      return heroBand.openMenu(true)
+      return heroBand.menuButton.visible ? heroBand.openMenu(true) : root.settingsRequested()
     if (on(switchStop))
       return views.activateCursor()
     if (on(railStop))
@@ -785,20 +907,18 @@ PanelKeyCatcher {
   }
   // A row's ring or Space: the editor's typed changes to the same task are
   // saved first, so they reach the queue ahead of the completion.
+  // A moved Week card shows no Undo: Space completes it (dropping the
+  // move); on a list row Space undoes a move, as its Undo does.
   function completeTask(id) {
     if (taskEditor.shownId === id)
       taskEditor.commit()
-    store.toggleComplete(id)
+    if (weekShown && Model.has(store.moves, id))
+      store.complete(id)
+    else
+      store.toggleComplete(id)
   }
   function openViewInTodoist() {
     store.openView(view === "week" ? "upcoming" : view, projectId)
-  }
-  // Wide, a task in the pane: Open (that task) takes Search's place in the
-  // band and Search moves to the top of the ⋯ menu; `/` still searches.
-  readonly property bool taskInBand: paneShown && taskEditor.task !== null
-  function openPaneTask() {
-    if (taskInBand)
-      store.openView("task", paneTask)
   }
   onActivateRequested: {
     var enter = enterPressed
@@ -806,6 +926,7 @@ PanelKeyCatcher {
     activate(enter)
   }
   onMoveRequested: function (dx, dy) {
+    viewCursor.byKeys = true
     if (dy === 0 && on(switchStop)) {
       views.moveCursor(dx)
       return
@@ -870,6 +991,8 @@ PanelKeyCatcher {
       openTask(row.id, true)
     else if (text === "t" && row && row.kind === "task")
       store.moveToTomorrow(row.id)
+    else if (text === "d" && row && row.kind === "task" && !weekShown)
+      openDateMenu(row.id, null, true)
   }
   // ---- autocomplete (#project, @label) in the add field ---------------------------------------
   // Model.suggestions for the word at the caret, or null. Esc dismisses the
@@ -1017,10 +1140,22 @@ PanelKeyCatcher {
     viewCursor.reset()
     heroBand.closeMenu()
   }
-  onActiveChanged: active ? prepare() : closed()
+  // The hold starts from the view the popup opens on (prepare sets it).
+  onActiveChanged: {
+    if (active) {
+      prepare()
+    } else {
+      closed()
+    }
+    releaseHeight()
+  }
   // The popup builds this view on its first open with `active` already true.
-  Component.onCompleted: if (active)
+  // A menu of days open as the view goes: its undo hold goes too.
+  Component.onDestruction: store.holdUndo(false)
+  Component.onCompleted: if (active) {
     prepare()
+    releaseHeight()
+  }
   // When Settings hides (Back, or the reset as the popup closes), FoamyPopup
   // gives the keys the page had to foamyKeyHome (keyFocus), as focusList().
   onEditingSettingsChanged: {
@@ -1031,7 +1166,7 @@ PanelKeyCatcher {
       Qt.callLater(settingsView.focusBack)
     }
   }
-  blocked: editingSettings || pageShown || heroBand.menuOpen || fieldFocused || taskEditor.activeFocus || taskEditor.menuOpen || overviewPane.activeFocus
+  blocked: editingSettings || pageShown || heroBand.menuOpen || dateMenu.opened || fieldFocused || taskEditor.activeFocus || taskEditor.menuOpen || overviewPane.activeFocus
   // A minute tick for "Updated …" while the popup is open.
   FoamyWallClock {
     id: clock
@@ -1039,7 +1174,8 @@ PanelKeyCatcher {
   }
 
   implicitWidth: wide ? Commons.Style.space(880) : FoamyStyle.popupWidth
-  readonly property real maxListHeight: FoamyStyle.rowHeight * (wide ? 18 : 13)
+  // 18 rows; the popup also stops at 70% of the screen (Panel.qml).
+  readonly property real maxListHeight: FoamyStyle.rowHeight * 18
   // Row heights are fixed per kind, so the list's height is known without
   // building its (lazy) rows.
   function heightOf(row) {
@@ -1052,13 +1188,28 @@ PanelKeyCatcher {
   }, 0)
   // The suggestion list floats over the rows; the list pane is at least as
   // tall as it while it shows, so it stays inside the card.
-  readonly property real listHeight: Math.max(stateBox.visible ? stateBox.implicitHeight : weekShown ? Math.min(weekView.implicitHeight, maxListHeight) : Math.min(rowsHeight, maxListHeight), suggestions.visible ? suggestions.height : 0)
+  readonly property real listHeight: Math.max(stateBox.visible ? stateBox.implicitHeight : weekShown ? Math.min(weekView.implicitHeight, maxListHeight) : Math.min(rowsHeight, maxListHeight), suggestions.visible ? suggestions.height : 0, searching ? searchHeldHeight : 0)
   // The list pane around the rows: a gap, the error lines (when shown), and a gap.
   readonly property real listChrome: FoamyStyle.gap + (errorLine.visible ? errorLine.height + FoamyStyle.gapSmall : 0) + FoamyStyle.gap
   readonly property real railHeight: Math.min(railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
   // The pane (also over the Week view, which then grows to show it).
   readonly property real paneHeight: paneShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : overviewShown ? Math.min(overviewPane.implicitHeight, maxListHeight) : 0
-  readonly property real bodyHeight: wide ? Math.max(railHeight, listChrome + listHeight, paneHeight) : (tabsBox.visible ? tabsBox.height : 0) + listChrome + listHeight
+  // Wide keeps its height while it is open, as it keeps its width: the body
+  // is never lower than 12 rows, and never lower than the tallest it has
+  // been since the popup opened (a view or a task that needs more grows it
+  // once; nothing shrinks it). The columns stay top-aligned with the spare
+  // room at their bottom, so the footer does not move. Closing the popup,
+  // or a change of size, lets the height go (releaseHeight).
+  readonly property real bodyFloor: FoamyStyle.rowHeight * 12
+  readonly property real fittedBodyHeight: Math.max(railHeight, listChrome + listHeight, paneHeight)
+  property real heldBodyHeight: 0
+  onFittedBodyHeightChanged: if (wide && active && fittedBodyHeight > heldBodyHeight)
+    heldBodyHeight = fittedBodyHeight
+  // Starts the hold again from what the body needs now.
+  function releaseHeight() {
+    heldBodyHeight = wide && active ? fittedBodyHeight : 0
+  }
+  readonly property real bodyHeight: wide ? Math.min(maxListHeight, Math.max(bodyFloor, heldBodyHeight, fittedBodyHeight)) : (tabsBox.visible ? tabsBox.height : 0) + listChrome + listHeight
   implicitHeight: editingSettings ? settingsView.implicitHeight : pageShown ? taskEditor.implicitHeight : heroBand.implicitHeight + bodyHeight + (panelFooter.visible ? panelFooter.implicitHeight : 0)
 
   // ---- the band ----------------------------------------------------------------------------
@@ -1069,6 +1220,17 @@ PanelKeyCatcher {
     var counts = store.counts
     if (searching)
       return FoamyI18n.t("Search")
+    // Small: the open tab names the view, so the line says the rest (Today:
+    // the date first).
+    if (!wide) {
+      if (view === "inbox")
+        return FoamyI18n.tn("%1 tasks", counts.inbox)
+      if (view === "upcoming")
+        return FoamyI18n.tn("%1 tasks in the next 7 days", counts.week)
+      const date = formatDate(Model.dayDate(store.today), translate("ddd d MMM"))
+      const leftNow = date + " · " + FoamyI18n.tn("%1 left", counts.today)
+      return counts.overdue ? leftNow + " · " + FoamyI18n.tn("%1 overdue", counts.overdue) : leftNow
+    }
     if (view === "inbox")
       return FoamyI18n.tn("Inbox · %1 tasks", counts.inbox)
     if (view === "upcoming")
@@ -1108,15 +1270,10 @@ PanelKeyCatcher {
         viewCursor.hover(root.menuStop)
     }
     menuItems: [
-      FoamyMenuItem {
-        objectName: "searchItem"
-        visible: root.taskInBand && root.store.signedIn
-        text: FoamyI18n.t("Search")
-        iconName: "search"
-        onTriggered: root.startSearch()
-      },
+      // Signed out there is no view to open: the band keeps only Settings.
       FoamyMenuItem {
         objectName: "openInTodoist"
+        visible: root.store.signedIn
         text: FoamyI18n.t("Open in Todoist")
         iconName: "external-link"
         onTriggered: root.openViewInTodoist()
@@ -1130,6 +1287,7 @@ PanelKeyCatcher {
         iconName: "plus"
         tooltipText: FoamyI18n.t("Add a task")
         hasCursor: viewCursor.at(root.addStop)
+        cursorByKeys: viewCursor.byKeys
         onHoveredChanged: if (hovered && !root.fieldFocused)
           viewCursor.hover(root.addStop)
         onClicked: root.openAdd()
@@ -1137,30 +1295,16 @@ PanelKeyCatcher {
       FoamyAction {
         id: searchAction
         objectName: "searchAction"
-        visible: root.store.signedIn && !root.taskInBand
+        visible: root.store.signedIn
         iconName: "search"
         tooltipText: FoamyI18n.t("Search")
         hasCursor: viewCursor.at(root.searchStop)
+        cursorByKeys: viewCursor.byKeys
         onHoveredChanged: if (hovered && !root.fieldFocused)
           viewCursor.hover(root.searchStop)
         onClicked: {
           root.leaveField()
           root.searching ? root.leaveSearch() : root.startSearch()
-        }
-      },
-      // The pane's task in Todoist, in Search's place (the same cursor stop).
-      FoamyAction {
-        id: openTaskAction
-        objectName: "openTaskAction"
-        visible: root.taskInBand
-        iconName: "external-link"
-        tooltipText: FoamyI18n.t("Open in Todoist")
-        hasCursor: viewCursor.at(root.searchStop)
-        onHoveredChanged: if (hovered && !root.fieldFocused)
-          viewCursor.hover(root.searchStop)
-        onClicked: {
-          root.leaveField()
-          root.openPaneTask()
         }
       }
     ]
@@ -1182,10 +1326,10 @@ PanelKeyCatcher {
       maximumLength: 500
       // Quick Add's tokens in colour, only while adding.
       runs: root.adding ? Model.quickAddRuns(text, root.tokenColors) : []
-      // The icon at the reading start, the spinner at the end: padding
-      // isn't mirrored, so RTL swaps the sides.
+      // The icon at the reading start, the spinner or search's × at the
+      // end: padding isn't mirrored, so RTL swaps the sides.
       readonly property real startPadding: FoamyStyle.iconSize + FoamyStyle.gap * 2
-      readonly property real endPadding: spinner.visible ? FoamyStyle.iconSize + FoamyStyle.gap * 2 : FoamyStyle.gap
+      readonly property real endPadding: spinner.visible ? FoamyStyle.iconSize + FoamyStyle.gap * 2 : searchClose.visible ? searchClose.width + (parent.height - searchClose.height) : FoamyStyle.gap
       leftPadding: LayoutMirroring.enabled ? endPadding : startPadding
       rightPadding: LayoutMirroring.enabled ? startPadding : endPadding
       Accessible.name: fieldBox.placeholder
@@ -1219,6 +1363,19 @@ PanelKeyCatcher {
       height: width
       name: root.searching ? "search" : "plus"
       color: FoamyPalette.mutedText
+    }
+    // Search's way out for the pointer (Esc for the keys).
+    FoamyAction {
+      id: searchClose
+      objectName: "searchClose"
+      visible: root.searching
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.right: parent.right
+      anchors.rightMargin: (parent.height - height) / 2
+      iconName: "x"
+      foreground: FoamyPalette.secondaryText
+      tooltipText: FoamyI18n.t("Close search")
+      onClicked: root.leaveSearch()
     }
     FoamyIcon {
       id: spinner
@@ -1254,8 +1411,9 @@ PanelKeyCatcher {
       id: views
       objectName: "viewSwitch"
       width: parent.width
-      value: root.searching ? "" : root.view
+      value: root.searchActive ? "" : root.view
       hasCursor: root.on(root.switchStop)
+      cursorByKeys: viewCursor.byKeys
       model: [
         {
           value: "inbox",
@@ -1283,6 +1441,19 @@ PanelKeyCatcher {
       }
       onHovered: if (!root.fieldFocused)
         viewCursor.hover(root.switchStop)
+    }
+    // Search: how many tasks it found, at the row's end (no tab is
+    // selected meanwhile).
+    PlainText {
+      objectName: "searchCount"
+      visible: root.searchActive && root.searchCount > 0
+      anchors.right: parent.right
+      anchors.rightMargin: FoamyStyle.gapLarge + FoamyStyle.rowPadding
+      anchors.verticalCenter: parent.verticalCenter
+      text: FoamyI18n.tn("%1 tasks", root.searchCount)
+      wrapMode: Text.NoWrap
+      font.pixelSize: FoamyStyle.font.caption
+      color: FoamyPalette.secondaryText
     }
   }
 
@@ -1326,7 +1497,7 @@ PanelKeyCatcher {
             objectName: "rail-" + (modelData.value || "label")
             width: railColumn.width
             height: modelData.kind === "label" ? FoamyStyle.rowHeight - 4 : FoamyStyle.rowHeight - 6
-            readonly property bool selected: (modelData.kind === "view" && root.view === modelData.value && !root.searching) || (modelData.kind === "project" && root.view === "project" && root.projectId === modelData.value && !root.searching)
+            readonly property bool selected: (modelData.kind === "view" && root.view === modelData.value && !root.searchActive) || (modelData.kind === "project" && root.view === "project" && root.projectId === modelData.value && !root.searchActive)
             PlainText {
               objectName: "railLabel"
               visible: railRow.modelData.kind === "label"
@@ -1344,6 +1515,7 @@ PanelKeyCatcher {
               visible: railRow.modelData.kind !== "label"
               anchors.fill: parent
               hasCursor: root.on(root.railStop) && root.railCursor === railRow.index
+              byKeys: viewCursor.byKeys
               current: railRow.selected
               onHovered: if (!root.fieldFocused) {
                 viewCursor.hover(root.railStop)
@@ -1398,7 +1570,8 @@ PanelKeyCatcher {
     QtObject {
       id: railColors
       function of(role) {
-        return role === "error" ? FoamyPalette.error : role === "warning" ? FoamyPalette.warning : role === "success" ? FoamyPalette.success : role === "info" ? FoamyPalette.info : role === "accent" ? FoamyPalette.accent : FoamyPalette.mutedText
+        // Marks and icons on the surface: readable in a light theme too.
+        return role === "error" ? FoamyPalette.onSurface(FoamyPalette.error) : role === "warning" ? FoamyPalette.onSurface(FoamyPalette.warning) : role === "success" ? FoamyPalette.onSurface(FoamyPalette.success) : role === "info" ? FoamyPalette.onSurface(FoamyPalette.info) : role === "accent" ? FoamyPalette.onSurface(FoamyPalette.accent) : FoamyPalette.mutedText
       }
     }
     Rectangle {
@@ -1414,9 +1587,9 @@ PanelKeyCatcher {
       objectName: "listArea"
       anchors.left: rail.visible ? rail.right : parent.left
       anchors.leftMargin: rail.visible ? FoamyStyle.borderWidth : 0
-      // Beside it, the details pane at the reading end (over the Week
-      // view, which keeps its width).
-      width: content.width - (rail.visible ? rail.width + FoamyStyle.borderWidth : 0) - (root.paneOpen && !root.weekShown ? root.paneWidth + FoamyStyle.borderWidth : 0)
+      // Beside it, the details pane at the reading end (the Week view
+      // narrows its four columns for it).
+      width: content.width - (rail.visible ? rail.width + FoamyStyle.borderWidth : 0) - (root.paneOpen ? root.paneWidth + FoamyStyle.borderWidth : 0)
       height: parent.height
 
       // The list's space that isn't a row (the margins, the error lines,
@@ -1484,22 +1657,79 @@ PanelKeyCatcher {
           // Below the last row, a heading between groups.
           onSpaceClicked: root.clearSelection()
         }
+        // The list continues past an edge: the rows fade out there.
+        Rectangle {
+          objectName: "listFadeTop"
+          visible: !taskList.atYBeginning
+          parent: taskList
+          z: 2
+          width: taskList.width
+          height: FoamyStyle.padding
+          gradient: Gradient {
+            GradientStop {
+              position: 0
+              color: FoamyPalette.background
+            }
+            GradientStop {
+              position: 1
+              color: Qt.alpha(FoamyPalette.background, 0)
+            }
+          }
+        }
+        Rectangle {
+          objectName: "listFadeBottom"
+          visible: !taskList.atYEnd
+          parent: taskList
+          z: 2
+          y: taskList.height - height
+          width: taskList.width
+          height: FoamyStyle.padding
+          gradient: Gradient {
+            GradientStop {
+              position: 0
+              color: Qt.alpha(FoamyPalette.background, 0)
+            }
+            GradientStop {
+              position: 1
+              color: FoamyPalette.background
+            }
+          }
+        }
         delegate: TaskRow {
           required property var modelData
           required property int index
           entry: modelData
+          titleRuns: root.searchActive && modelData.kind === "task" ? Model.matchRuns(modelData.text, root.query) : []
           heading: modelData.kind === "header" && modelData.group ? Model.upcomingHeading(modelData, root.formatDate, root.translate) : null
           trailDay: modelData.kind === "task" ? Model.trailingDay(modelData, root.formatDate, root.translate) : ""
           dateText: modelData.kind === "task" ? Model.detailDate(modelData, root.formatDate, root.translate, root.store.today) : ""
+          deadlineText: modelData.kind === "task" && modelData.deadline ? Model.dayWords(modelData.deadline, root.formatDate, root.translate, root.store.today) : ""
+          timeTone: modelData.kind !== "task" || modelData.dueMinutes < 0 || modelData.dueDay !== root.store.today ? "" : modelData.dueMinutes <= root.nowMinutes ? "late" : modelData.id === root.nextTimedId ? "next" : "later"
           width: ListView.view.width
           height: root.heightOf(modelData)
           hasCursor: root.stopOfRow[index] >= 0 && viewCursor.index === root.stopOfRow[index]
+          byKeys: viewCursor.byKeys
           selected: root.paneShown && modelData.kind === "task" && root.paneTask === modelData.id
           onHovered: if (!root.fieldFocused && root.stopOfRow[index] >= 0)
             viewCursor.hover(root.stopOfRow[index])
+          undoable: modelData.kind === "task" && (modelData.struck || Model.has(root.store.moves, modelData.id))
+          showActions: hasCursor && modelData.kind === "task" && !modelData.recurring && !modelData.unconfirmed && !modelData.struck && !Model.has(root.store.shownMoves, modelData.id) && !root.fieldFocused
+          onTomorrowRequested: {
+            root.leaveField()
+            root.store.moveToTomorrow(modelData.id)
+          }
+          onDateMenuRequested: root.openDateMenu(modelData.id, dateAction, false)
+          onMoveAllRequested: {
+            root.leaveField()
+            root.moveOverdueToToday()
+          }
           onCompleteRequested: {
             root.leaveField()
             root.completeTask(modelData.id)
+          }
+          onUndoRequested: {
+            root.leaveField()
+            root.store.undo(modelData.id)
           }
           // Small: the editor page; Wide: the pane shows it.
           onOpenRequested: {
@@ -1524,8 +1754,10 @@ PanelKeyCatcher {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: FoamyStyle.gap
         width: parent.width
+        narrow: root.paneShown
         columns: root.weekColumns
         hasCursor: root.on(root.firstRowStop)
+        byKeys: viewCursor.byKeys
         cursorColumn: root.weekColumn
         cursorCard: root.weekCard
         selectedId: root.weekPaneOpen ? root.paneTask : ""
@@ -1556,7 +1788,12 @@ PanelKeyCatcher {
         objectName: "stateBox"
         readonly property string kind: root.store.account === "unavailable" ? "unavailable" : root.store.account === "error" ? "accountError" : root.store.account === "checking" ? "loading" : !root.store.signedIn ? "signedOut" : !root.store.loaded ? (root.store.error !== "" ? "failed" : "loading") : root.weekShown || root.rows.length ? "" : "empty"
         visible: kind !== ""
-        anchors.top: errorLine.visible ? errorLine.bottom : parent.top
+        // Wide, an empty list: its line in the middle of the column (the
+        // card keeps its height, see bodyHeight).
+        readonly property bool centred: root.wide && kind === "empty"
+        // A y, not anchors: switching between top and centre anchors would
+        // hold both for a moment and stretch the column.
+        y: centred ? Math.round((parent.height - implicitHeight) / 2) : errorLine.visible ? errorLine.y + errorLine.height : 0
         width: parent.width
         topPadding: FoamyStyle.gapLarge
         bottomPadding: FoamyStyle.gapLarge
@@ -1584,7 +1821,7 @@ PanelKeyCatcher {
             case "unavailable":
               return root.store.accountError
             case "empty":
-              return FoamyI18n.t(Model.emptyText(root.listView, root.store.model.truncated))
+              return root.searchActive && !root.store.model.truncated ? FoamyI18n.t("No open task matches “%1”", [root.query.trim()]) : FoamyI18n.t(Model.emptyText(root.listView, root.store.model.truncated))
             default:
               return ""
             }
@@ -1598,14 +1835,17 @@ PanelKeyCatcher {
           // token or Sign out: Retry would only get the same refusal. Other
           // failures, such as a locked keyring, can pass: Retry.
           readonly property bool opensSettings: stateBox.kind === "signedOut" || stateBox.code === "INVALID_TOKEN"
-          visible: stateBox.kind === "signedOut" || stateBox.kind === "failed" || stateBox.kind === "accountError"
+          // No match: the query as a new task.
+          readonly property bool addsQuery: stateBox.kind === "empty" && root.searchActive && root.searchDraft === ""
+          visible: stateBox.kind === "signedOut" || stateBox.kind === "failed" || stateBox.kind === "accountError" || addsQuery
           anchors.horizontalCenter: parent.horizontalCenter
-          text: opensSettings ? FoamyI18n.t("Open settings") : FoamyI18n.t("Retry")
+          text: addsQuery ? FoamyI18n.t("Add as a task") : opensSettings ? FoamyI18n.t("Open settings") : FoamyI18n.t("Retry")
+          iconName: addsQuery ? "plus" : ""
           kind: stateBox.kind === "signedOut" ? "primary" : "secondary"
           hasCursor: viewCursor.at(root.firstRowStop) && !root.stops.length
           onHoveredChanged: if (hovered)
             viewCursor.hover(root.firstRowStop)
-          onClicked: opensSettings ? root.settingsRequested() : root.store.retry()
+          onClicked: addsQuery ? root.addQuery() : opensSettings ? root.settingsRequested() : root.store.retry()
         }
       }
     }
@@ -1719,8 +1959,8 @@ PanelKeyCatcher {
 
   // ---- the details pane (Wide) and the editor (the page in Small) ------------------------
   readonly property real paneWidth: Commons.Style.space(270)
-  // The pane's surface at the body's reading end: over the Week view it
-  // covers that part. Anchored, so RTL puts it on the left.
+  // The pane's surface at the body's reading end. Anchored, so RTL puts it
+  // on the left.
   Rectangle {
     visible: root.paneOpen
     anchors.right: content.right
@@ -1751,6 +1991,14 @@ PanelKeyCatcher {
     height: root.wide ? content.height : root.height
     onBack: root.closeTask()
     onKeysReturned: root.focusList()
+    // The pane's Close: as Esc in the list (the pane saves on the way out).
+    onCloseRequested: {
+      if (root.weekShown)
+        root.weekPaneOpen = false
+      else
+        root.clearSelection()
+      root.focusList()
+    }
   }
   Overview {
     id: overviewPane
@@ -1763,7 +2011,7 @@ PanelKeyCatcher {
     height: content.height
     summary: root.overviewData
     today: root.store.today
-    litDay: root.view === "upcoming" && !root.searching ? root.addDay : ""
+    litDay: root.view === "upcoming" && !root.searchActive ? root.addDay : ""
     format: root.formatDate
     translate: root.translate
     onTaskPicked: function (id) {
@@ -1833,6 +2081,7 @@ PanelKeyCatcher {
       foreground: FoamyPalette.secondaryText
       tooltipText: FoamyI18n.t("Open Todoist")
       hasCursor: root.on(root.openStop)
+      cursorByKeys: viewCursor.byKeys
       onHoveredChanged: if (hovered && !root.fieldFocused)
         viewCursor.hover(root.openStop)
       onClicked: {

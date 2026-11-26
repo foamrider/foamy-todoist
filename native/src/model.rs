@@ -97,7 +97,7 @@ fn valid_time(text: &str) -> bool {
 
 /// A due `date`: `YYYY-MM-DD`, optionally followed by a time
 /// (`THH:MM:SS`, fractions, `Z` for a fixed zone). The panel parses it.
-fn valid_due_date(text: &str) -> bool {
+pub fn valid_due_date(text: &str) -> bool {
     if text.len() > 40 || !valid_date(text.get(..10).unwrap_or("")) {
         return false;
     }

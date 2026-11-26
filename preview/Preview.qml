@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "completed", "row-cursor", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-task", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -36,11 +36,19 @@ Item {
     var view = previewPopup.ensureBody()
     if (!view)
       return
+    // Each state is a fresh opening: Wide holds its tallest height only
+    // while it is open, and the renderer keeps one view for every state.
+    view.heldBodyHeight = 0
     var signedIn = previewState !== "signed-out" && previewState !== "settings-signed-out"
     var data = ["loading", "signed-out", "settings-signed-out"].indexOf(previewState) >= 0 ? null : sample()
-    if (previewState === "empty")
+    // Nothing left today (the overview shows tomorrow); an empty Inbox.
+    if (previewState === "empty" || previewState === "wide-today-done")
       data.tasks = data.tasks.filter(function (task) {
         return task.due === null || task.due.date.slice(0, 10) > Model.dayKey(new Date())
+      })
+    if (previewState === "wide-inbox-empty")
+      data.tasks = data.tasks.filter(function (task) {
+        return task.project_id !== data.user.inbox_project_id
       })
     if (previewState === "truncated")
       data.truncated = true
@@ -73,15 +81,16 @@ Item {
     } : ({})
     store.launchError = previewState === "footer-error" ? FoamyI18n.t("Can't open Todoist") : ""
     view.prepare()
-    var next = previewState === "inbox" || previewState === "wide-inbox" || previewState === "wide-long-label" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
+    var next = previewState === "inbox" || previewState === "wide-inbox" || previewState === "wide-long-label" || previewState === "wide-inbox-empty" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
     view.setView(next, "work")
     if (previewState === "error")
       store.error = FoamyI18n.t("Can't reach Todoist. Check your connection.")
-    if (previewState === "search" || previewState === "wide-search")
+    // Search: results with their matches bold; no match, with Add as a task.
+    if (previewState === "search" || previewState === "wide-search" || previewState === "search-none")
       Qt.callLater(function () {
         view.startSearch()
-        view.field.text = "the"
-        view.query = "the"
+        view.field.text = previewState === "search-none" ? "xyz" : "the"
+        view.query = view.field.text
       })
     // The band's field, its Quick Add tokens in colour, the keys in the footer.
     if (previewState === "add-open" || previewState === "wide-add-open")
@@ -113,6 +122,17 @@ Item {
     if (previewState === "row-cursor" || previewState === "completed")
       Qt.callLater(function () {
         view.goTo(view.firstRowStop + 2)
+      })
+    // A move waiting for its undo window; the menu of days on the cursor row.
+    if (previewState === "row-moved")
+      store.move("t4", Model.addDays(store.today, 1))
+    if (previewState === "row-moved" || previewState === "date-menu")
+      Qt.callLater(function () {
+        view.goTo(view.firstRowStop + 3)
+        if (previewState === "date-menu")
+          Qt.callLater(function () {
+            view.openDateMenu(view.cursorRow().id, null, true)
+          })
       })
     // The editor: the page (Small), the pane (Wide); the Date field open,
     // a refused save under the date, the keys on the empty Deadline section
@@ -158,7 +178,7 @@ Item {
     open: true
     // As Panel.qml: Wide is always 880.
     contentWidth: previewPopup.fittedContentWidth(preview.wide ? Commons.Style.space(880) : FoamyStyle.popupWidth)
-    maxHeight: preview.wide ? Math.round(previewPopup.screenH * 0.7) : 0
+    maxHeight: Math.round(previewPopup.screenH * 0.7)
     body: Component {
       Plugin.TodoView {
         size: preview.wide ? "wide" : "standard"

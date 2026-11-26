@@ -151,7 +151,8 @@ Ui.Panel {
     owner: root
     open: root.opened
     contentWidth: root.cardWidth
-    maxHeight: root.wide ? Math.round(panelPopup.screenH * 0.7) : 0
+    // Both sizes: at most 70% of the screen (a long list scrolls inside).
+    maxHeight: Math.round(panelPopup.screenH * 0.7)
     body: Component {
       TodoView {
         active: root.opened

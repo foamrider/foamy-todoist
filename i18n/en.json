@@ -3,6 +3,14 @@
     "one": "%1 later",
     "other": "%1 later"
   },
+  "%1 left": {
+    "one": "%1 left",
+    "other": "%1 left"
+  },
+  "%1 tasks in the next 7 days": {
+    "one": "%1 task in the next 7 days",
+    "other": "%1 tasks in the next 7 days"
+  },
   "%1 left today": {
     "one": "%1 left today",
     "other": "%1 left today"
@@ -52,6 +60,7 @@
   "A description can have at most 16383 characters.": "A description can have at most 16383 characters.",
   "A description can't have control characters other than line breaks and tabs.": "A description can't have control characters other than line breaks and tabs.",
   "A label is given twice.": "A label is given twice.",
+  "A repeating task can't be moved here: open it to change its date.": "A repeating task can't be moved here: open it to change its date.",
   "A task can have at most 500 characters.": "A task can have at most 500 characters.",
   "A task can't have line breaks or other control characters.": "A task can't have line breaks or other control characters.",
   "Account": "Account",
@@ -61,6 +70,7 @@
   "Add a task to %1…": "Add a task to %1…",
   "Add a task to the Inbox…": "Add a task to the Inbox…",
   "add and close": "add and close",
+  "Add as a task": "Add as a task",
   "Add date": "Add date",
   "Add deadline": "Add deadline",
   "Add label": "Add label",
@@ -82,6 +92,8 @@
   "cancel": "cancel",
   "Clipboard paste timed out. Copy the text again.": "Clipboard paste timed out. Copy the text again.",
   "Clipboard text is too large or contains invalid characters.": "Clipboard text is too large or contains invalid characters.",
+  "Close": "Close",
+  "Close search": "Close search",
   "Close the panel": "Close the panel",
   "Complete": "Complete",
   "Copy": "Copy",
@@ -132,15 +144,18 @@
   "Loading…": "Loading…",
   "More information": "More information",
   "More options": "More options",
+  "Move to today": "Move to today",
   "Moving a task out of its section needs the project's id.": "Moving a task out of its section needs the project's id.",
   "My projects": "My projects",
   "Next": "Next",
   "Next 7 days": "Next 7 days",
   "Next deadline": "Next deadline",
   "Next week": "Next week",
+  "No date": "No date",
   "No keyring is available to store the Todoist token (%1).": "No keyring is available to store the Todoist token (%1).",
   "No keyring is available to store the Todoist token.": "No keyring is available to store the Todoist token.",
   "No matching tasks": "No matching tasks",
+  "No open task matches “%1”": "No open task matches “%1”",
   "No tasks": "No tasks",
   "Not signed in to Todoist.": "Not signed in to Todoist.",
   "Nothing left for today": "Nothing left for today",
@@ -155,6 +170,7 @@
   "overdue": "overdue",
   "Panel": "Panel",
   "Paste": "Paste",
+  "Paste your API token": "Paste your API token",
   "Pick a priority from 1 to 4.": "Pick a priority from 1 to 4.",
   "Priority": "Priority",
   "Project": "Project",
@@ -227,9 +243,14 @@
   "Todoist: %1, %2": "Todoist: %1, %2",
   "Todoist: not signed in": "Todoist: not signed in",
   "Tomorrow": "Tomorrow",
+  "Tomorrow · %1 tasks": {
+    "one": "Tomorrow · %1 task",
+    "other": "Tomorrow · %1 tasks"
+  },
   "Too long to edit here. Open it in Todoist.": "Too long to edit here. Open it in Todoist.",
   "Too many changes are waiting. Try again in a moment.": "Too many changes are waiting. Try again in a moment.",
   "Type a date": "Type a date",
+  "Type a date…": "Type a date…",
   "Undo": "Undo",
   "Unknown change.": "Unknown change.",
   "Upcoming": "Upcoming",

@@ -542,7 +542,7 @@ fn apply_sends_one_request_and_reports_each_change() {
     });
     let input = json!({"commands": [
         {"op": "close", "id": "T1"},
-        {"op": "due", "id": "T9", "date": "2026-11-17"}
+        {"op": "due", "id": "T9", "date": "2026-11-17T14:00:00"}
     ]});
     let (reply, _) = home.run("apply", &input.to_string(), &base);
     thread.join().unwrap();
@@ -561,7 +561,8 @@ fn apply_sends_one_request_and_reports_each_change() {
     assert_eq!(commands[1]["type"], "item_update");
     assert_eq!(
         commands[1]["args"],
-        json!({"id": "T9", "due": {"date": "2026-11-17"}})
+        json!({"id": "T9", "due": {"date": "2026-11-17T14:00:00"}}),
+        "a move keeps its time"
     );
     assert_ne!(commands[0]["uuid"], commands[1]["uuid"]);
     // Invalid changes never reach Todoist.

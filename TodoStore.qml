@@ -108,90 +108,238 @@ QtObject {
   // until the next snapshot says what happened.
   property var unconfirmed: ({})
   readonly property int struckCount: Object.keys(struck).length
+  // Moved to another day in the panel and still undoable: {id: day} (""
+  // for no date). They go with the completions when the undo window ends;
+  // `movesSent` keeps showing them until the reply has the new snapshot.
+  property var moves: ({})
+  property var movesSent: ({})
+  // Why a task's last move failed ({id: message}), for its editor (in Small
+  // the list's error line is out of sight); a new move of it clears it.
+  property var moveErrors: ({})
+  // What the rows show: the sent moves, and the waiting ones over them.
+  readonly property var shownMoves: Object.assign({}, movesSent, moves)
+  readonly property bool pending: struckCount > 0 || Object.keys(moves).length > 0
   property Timer undoWindow: Timer {
     interval: store.undoMs
     onTriggered: store.flushCompletions()
   }
   function complete(id) {
-    if (!signedIn || !Model.validId(id) || Model.has(struck, id) || Model.has(sending, id) || Model.has(unconfirmed, id))
+    if (!signedIn || !Model.validId(id) || Model.has(struck, id) || Model.has(sending, id) || Model.has(unconfirmed, id) || Model.has(movesSent, id))
       return
+    // Completed instead of moved.
+    if (Model.has(moves, id))
+      undoMove(id)
     var next = Object.assign({}, struck)
     next[id] = true
     struck = next
     undoWindow.restart()
   }
+  // A row's Undo: its completion or its move.
   function undo(id) {
+    if (Model.has(moves, id))
+      return undoMove(id)
     if (!Model.has(struck, id))
       return
     var next = Object.assign({}, struck)
     delete next[id]
     struck = next
-    if (!struckCount)
+    if (!pending)
       undoWindow.stop()
   }
+  function undoMove(id) {
+    var next = Object.assign({}, moves)
+    delete next[id]
+    moves = next
+    if (!pending)
+      undoWindow.stop()
+  }
+  // Space: completes; again (or on a moved row) undoes, as the row's Undo.
   function toggleComplete(id) {
-    if (Model.has(struck, id))
+    if (Model.has(struck, id) || Model.has(moves, id))
       undo(id)
     else
       complete(id)
   }
+  // The completions and moves whose undo window ended (or the popup
+  // closed), in one apply call per 100.
   function flushCompletions() {
     undoWindow.stop()
-    var ids = Object.keys(struck)
-    if (!ids.length)
+    var closing = Object.keys(struck)
+    var waiting = [current].concat(queue)
+    // A task that left the snapshot meanwhile has nothing to move. One
+    // whose typed date is still on its way waits for it (its move is built
+    // from the date Todoist then has, so the typed time isn't lost).
+    var held = ({})
+    var moved = ({})
+    Object.keys(moves).forEach(function (id) {
+      var saving = waiting.some(function (job) {
+        return !!job && job.extra.update === id
+      })
+      if (saving)
+        held[id] = moves[id]
+      else
+        moved[id] = moves[id]
+    })
+    var movedIds = Object.keys(moved).filter(function (id) {
+      return !!model.byId[id]
+    })
+    if (!closing.length && !Object.keys(moved).length) {
+      if (Object.keys(held).length)
+        undoWindow.restart()
       return
-    var moving = Object.assign({}, sending)
-    ids.forEach(function (id) {
-      moving[id] = true
+    }
+    var hiding = Object.assign({}, sending)
+    closing.forEach(function (id) {
+      hiding[id] = true
     })
     struck = ({})
-    sending = moving
+    sending = hiding
+    moves = held
+    if (Object.keys(held).length)
+      undoWindow.restart()
+    var sent = Object.assign({}, movesSent)
+    movedIds.forEach(function (id) {
+      sent[id] = moved[id]
+    })
+    movesSent = sent
+    var commands = closing.map(function (id) {
+      return {
+        op: "close",
+        id: id
+      }
+    }).concat(movedIds.map(function (id) {
+      return {
+        op: "due",
+        id: id,
+        date: Model.movedDate(model.byId[id], moved[id])
+      }
+    }))
     // At most 100 changes per helper call.
-    for (let i = 0; i < ids.length; i += 100)
+    for (let i = 0; i < commands.length; i += 100) {
+      const batch = commands.slice(i, i + 100)
       enqueue("apply", {
-        commands: ids.slice(i, i + 100).map(function (id) {
-          return {
-            op: "close",
-            id: id
-          }
-        })
+        commands: batch
       }, {
-        closing: ids.slice(i, i + 100)
+        closing: batch.filter(function (command) {
+          return command.op === "close"
+        }).map(function (command) {
+          return command.id
+        }),
+        moving: batch.filter(function (command) {
+          return command.op === "due"
+        }).map(function (command) {
+          return command.id
+        })
       })
+    }
   }
-  // `t`: due tomorrow (all-day). Recurring tasks are left alone: moving one
-  // occurrence isn't something the API describes.
-  function moveToTomorrow(id) {
-    moveDue(id, Model.addDays(today, 1))
-  }
-  // Ctrl+←/→ in the Week view: a day earlier or later, never before today,
-  // with the same rules as `t`.
-  function shiftDue(id, delta) {
-    var day = Model.shiftedDay(model.byId[id], delta, today)
-    if (day !== "")
-      moveDue(id, day)
-  }
-  function moveDue(id, day) {
+  // Why a move was refused, for the list's error line ("" when it wasn't).
+  function moveRefusal(id) {
     var task = model.byId[id]
-    if (!signedIn || !task || (task.due && task.due.recurring) || Model.has(struck, id) || Model.has(sending, id) || Model.has(unconfirmed, id))
-      return
-    // A key repeat: this task's move is already waiting or running.
-    var moving = [current].concat(queue).some(function (job) {
-      return !!job && job.extra.due === id
+    return task && task.due && task.due.recurring ? FoamyI18n.t("A repeating task can't be moved here: open it to change its date.") : ""
+  }
+  // A move to `day` ("" for no date), undoable like a completion: the row
+  // shows its new day at once, the change goes when the undo window ends.
+  // The time stays (Model.movedDate). A repeating task isn't moved: one
+  // occurrence's date isn't something the API describes; the error line
+  // says so. Returns whether the move was taken.
+  // Whether a task can take a move now (not completed, sending, unknown,
+  // or moving already; a repeating one is refused with a reason, in move).
+  function canMove(id) {
+    return signedIn && !!model.byId[id] && !Model.has(struck, id) && !Model.has(sending, id) && !Model.has(unconfirmed, id) && !Model.has(movesSent, id)
+  }
+  function move(id, day) {
+    var task = model.byId[id]
+    if (!canMove(id))
+      return false
+    var refusal = moveRefusal(id)
+    if (refusal !== "") {
+      error = refusal
+      return false
+    }
+    var next = Object.assign({}, moves)
+    placeMove(next, task, day)
+    moves = next
+    settleWindow()
+    return true
+  }
+  // Several tasks to one day (Overdue's Move to today), published once: a
+  // repeating task stays, and the error line says why.
+  function moveAll(ids, day) {
+    var next = Object.assign({}, moves)
+    var refused = ""
+    ids.forEach(function (id) {
+      var task = model.byId[id]
+      if (!task || Model.has(struck, id) || Model.has(sending, id) || Model.has(unconfirmed, id) || Model.has(movesSent, id))
+        return
+      var refusal = moveRefusal(id)
+      if (refusal !== "")
+        refused = refusal
+      else
+        placeMove(next, task, day)
     })
-    if (moving)
-      return
-    enqueue("apply", {
-      commands: [
-        {
-          op: "due",
-          id: id,
-          date: day
-        }
-      ]
-    }, {
-      due: id
+    moves = next
+    if (refused !== "")
+      error = refused
+    settleWindow()
+  }
+  function placeMove(next, task, day) {
+    var id = task.id
+    clearMoveError(id)
+    // Back to where it was: nothing to send, unless a typed date is still on
+    // its way (then Todoist's date will change, and this pick must follow).
+    var savingDate = [current].concat(queue).some(function (job) {
+      return !!job && job.extra.update === id
     })
+    if (day === (task.due ? task.due.day : "") && !savingDate)
+      delete next[id]
+    else
+      next[id] = day
+  }
+  function settleWindow() {
+    if (pending && !holdingUndo)
+      undoWindow.restart()
+    else if (!pending)
+      undoWindow.stop()
+  }
+  // While a menu of days is open the undo window waits, so a pick there
+  // still changes a waiting move (it can't once the move is sent).
+  property bool holdingUndo: false
+  function holdUndo(on) {
+    holdingUndo = on
+    if (on)
+      undoWindow.stop()
+    else
+      settleWindow()
+  }
+  function clearMoveError(id) {
+    if (!Model.has(moveErrors, id))
+      return
+    var next = Object.assign({}, moveErrors)
+    delete next[id]
+    moveErrors = next
+  }
+  function noteMoveErrors(ids, message) {
+    if (message === "" || !ids.length)
+      return
+    var next = Object.assign({}, moveErrors)
+    ids.forEach(function (id) {
+      next[id] = message
+    })
+    moveErrors = next
+  }
+  // `t`: due tomorrow.
+  function moveToTomorrow(id) {
+    return move(id, Model.addDays(today, 1))
+  }
+  // Ctrl+←/→ in the Week view: a day earlier or later than where the card
+  // stands, never before today.
+  function shiftDue(id, delta) {
+    var task = model.byId[id]
+    if (task && task.due && task.due.recurring)
+      return move(id, task.due.day)
+    var day = Model.shiftedDay(task, delta, today, Model.has(moves, id) ? moves[id] : "")
+    return day !== "" && move(id, day)
   }
 
   // ---- editing (the task editor) ---------------------------------------------------
@@ -458,9 +606,13 @@ QtObject {
       if (message !== "")
         error = message
     }
-    // A move to tomorrow that never ran: the task stays, the line says why.
-    if (job.extra.due && message !== "")
-      error = message
+    // Moves that never ran: the tasks stay where they were, the line says why.
+    if (job.extra.moving) {
+      movingDone(job.extra.moving)
+      noteMoveErrors(job.extra.moving, message)
+      if (message !== "")
+        error = message
+    }
     // A save that never ran: the editor keeps the text and says why.
     if (job.extra.update) {
       Qt.callLater(function () {
@@ -544,6 +696,9 @@ QtObject {
       })
       struck = ({})
       sending = ({})
+      moves = ({})
+      movesSent = ({})
+      moveErrors = ({})
       undoWindow.stop()
       if (job.command === "add")
         addFinished(job.extra.request, false, accountError)
@@ -569,6 +724,8 @@ QtObject {
       return stale ? undefined : describeDone(job, reply, ok, code)
     if (job.extra.closing)
       closingDone(job.extra.closing, ok, stale)
+    if (job.extra.moving)
+      movingDone(job.extra.moving)
     if (stale) {
       if (job.command === "add")
         addFinished(job.extra.request, false, "")
@@ -586,9 +743,20 @@ QtObject {
     // now shows whether it does (the queue still honours a rate limit).
     if (job.command === "add" && !ok && reply && reply.code === "UNKNOWN_OUTCOME")
       syncSoon()
-    // What the failed completions did is learned from a snapshot, now.
-    if (!ok && job.extra.closing)
+    // What the failed completions and moves did is learned from a
+    // snapshot, now.
+    if (!ok && (job.extra.closing || job.extra.moving))
       syncSoon()
+    if (job.extra.moving) {
+      if (!ok)
+        noteMoveErrors(job.extra.moving, failureText(reply, code))
+      else if (reply.results)
+        job.extra.moving.forEach(function (id) {
+          var result = reply.results[id]
+          if (result !== undefined && result !== "ok")
+            store.noteMoveErrors([id], result && typeof result.error === "string" ? store.helperText(result.error) : FoamyI18n.t("Todoist didn't accept the change."))
+        })
+    }
     if (job.command === "add")
       addFinished(job.extra.request, ok, ok ? (reply.warning ? helperText(reply.warning) : "") : failureText(reply, code))
     else if (ok && reply.warning)
@@ -653,6 +821,15 @@ QtObject {
     })
     unconfirmed = next
   }
+  // Sent moves stop showing: the reply's snapshot has their new dates, or
+  // the error line says why they didn't happen.
+  function movingDone(ids) {
+    var next = Object.assign({}, movesSent)
+    ids.forEach(function (id) {
+      delete next[id]
+    })
+    movesSent = next
+  }
   function release(ids) {
     var next = Object.assign({}, sending)
     ids.forEach(function (id) {
@@ -681,6 +858,9 @@ QtObject {
     var fresh = Model.freshSnapshot(reply)
     if (fresh)
       unconfirmed = ({})
+    // A fresh read says where every task is: an old move's reason goes.
+    if (fresh)
+      moveErrors = ({})
     var at = Date.parse(reply.synced_at)
     syncedAt = isNaN(at) ? Date.now() : at
     if (reply.user)
@@ -722,6 +902,9 @@ QtObject {
     retryUntil = 0
     struck = ({})
     sending = ({})
+    moves = ({})
+    movesSent = ({})
+    moveErrors = ({})
     unconfirmed = ({})
     undoWindow.stop()
     dropDescription()
