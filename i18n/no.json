@@ -89,7 +89,9 @@
   "Can't save the Todoist cache (%1).": "Kan ikke lagre Todoist-hurtigbufferen (%1).",
   "Can't use the Todoist cache (%1).": "Kan ikke bruke Todoist-hurtigbufferen (%1).",
   "Can't use the Todoist lock file (%1).": "Kan ikke bruke Todoist-låsefilen (%1).",
+  "Cancel": "Avbryt",
   "cancel": "avbryt",
+  "Changes not sent to Todoist yet will be lost.": "Endringer som ikke er sendt til Todoist ennå, går tapt.",
   "Checking with Todoist…": "Sjekker med Todoist…",
   "Clipboard paste timed out. Copy the text again.": "Innliming fra utklippstavlen tok for lang tid. Kopier teksten på nytt.",
   "Clipboard text is too large or contains invalid characters.": "Teksten på utklippstavlen er for stor eller inneholder ugyldige tegn.",
@@ -125,6 +127,7 @@
   "Hide": "Skjul",
   "HTTPS isn't supported on this CPU (foamy helpers need AES, carry-less multiply, AVX2, BMI2 and ADX on x86-64, or the crypto extensions on ARMv8)": "HTTPS støttes ikke på denne prosessoren (foamy-hjelpere trenger AES, carry-less multiply, AVX2, BMI2 og ADX på x86-64, eller kryptoutvidelsene på ARMv8)",
   "Icon only": "Bare ikon",
+  "In Today, Upcoming, Week, the Inbox and the bar": "Gjelder I dag, Kommende, Uke, Innboks og linjen",
   "in %1 days": {
     "one": "om %1 dag",
     "other": "om %1 dager"
@@ -198,6 +201,8 @@
   "Show in the bar": "Vis i linjen",
   "Showing part of your tasks: the account has more than this panel keeps": "Viser en del av oppgavene: kontoen har flere enn dette panelet tar vare på",
   "Sign out": "Logg ut",
+  "Sign out of %1?": "Vil du logge ut %1?",
+  "Sign out?": "Vil du logge ut?",
   "Signed in": "Logget inn",
   "Signed in as %1": "Logget inn som %1",
   "Size": "Størrelse",

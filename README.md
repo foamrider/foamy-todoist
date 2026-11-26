@@ -384,42 +384,52 @@ accent tint and a bar at its start.
 Open them from the ⋯ menu (signed out: the gear in its place), with `s`,
 or by right-clicking the bar icon.
 
+The page has five sections: **Panel**, **Open command**, **Bar**,
+**Refresh** and **Account** last; signed out, **Account** comes first.
+
+- **Panel**:
+  - **Size**: Small (default) or Wide (see "The panel"). A **Large** saved
+    by an earlier version opens as Wide.
+  - **After adding a task**: Close the panel (default) or Keep the field
+    open: what Enter in the add field does; Shift+Enter does the other.
+  - **Open on**: Today, Inbox, Upcoming or Last view (kept until the shell
+    restarts).
+  - **Tasks assigned to others**: Hide (default) or Show. A task is someone
+    else's when it is assigned to a person other than you (unassigned tasks
+    are yours). Hidden, they stay out of Today, Upcoming, Week and the
+    Inbox, the bar number and its tooltip, and the Inbox/Today/Upcoming
+    counts (the line under the setting says so). A project view, search
+    and the projects' counts in the rail always show every task.
+- **Open command**: what opens Todoist links (the footer button, Ctrl+O on
+  a task, **Open in Todoist**); the (i) beside the title explains it.
+  Empty (**Browser (default)**) uses `xdg-open`. Otherwise, for example
+  `omarchy-launch-or-focus-webapp Todoist {url}`: the command is split on
+  spaces and run without a shell (quotes and pipes aren't supported),
+  `{url}` is replaced with the link, and without it the link is added at
+  the end. It must start with a command name or an absolute path, at most
+  300 characters. It runs in its own session, so what it opens stays when
+  the shell restarts. Only `https://app.todoist.com/` links are ever
+  opened.
+- **Bar**: **Show in the bar**: Tasks left today or Icon only.
+- **Refresh**: **Refresh every**: 1 to 30 minutes (5 by default). The
+  panel also refreshes when it opens and the data is older than 30
+  seconds. After a failure the wait doubles, up to 30 minutes, and never
+  ends before Todoist's own retry time when it asks to slow down.
 - **Account**: signed out, the section says where the API token is in
   Todoist (Settings → Integrations → Developer; **Open Todoist settings**
   beside the field's label goes there); paste it in the field and press
-  **Save token** beside it. The token is checked with Todoist before
-  it is stored. Signed in, the page shows who, and **Sign out**. When the
-  stored token can't be used (for example the keyring holds a value that
-  isn't a token), the page shows why, the token field and **Sign out**. A
-  stored token that Todoist refuses keeps the page signed in; the list says
-  why. While the list has no tasks to show, it offers **Open settings**
-  when Todoist refuses the token or the keyring holds a value that isn't
-  one, and **Retry** for other failures, such as a locked keyring.
-- **Size**: Small (default) or Wide (see "The panel"). A **Large** saved by
-  an earlier version opens as Wide.
-- **After adding a task**: Close the panel (default) or Keep the field
-  open: what Enter in the add field does; Shift+Enter does the other.
-- **Open on**: Today, Inbox, Upcoming or Last view (kept until the shell
-  restarts).
-- **Tasks assigned to others**: Hide (default) or Show. A task is someone
-  else's when it is assigned to a person other than you (unassigned tasks are
-  yours). Hidden, they stay out of Today, Upcoming and the Inbox, the bar
-  number and its tooltip, and the Inbox/Today/Upcoming counts. A project
-  view, search and the projects' counts in the rail always show every task.
-- **Open command**: what opens Todoist links (the footer button, Ctrl+O on
-  a task, **Open in Todoist**). Empty (**Browser (default)**) uses
-  `xdg-open`. Otherwise, for example `omarchy-launch-or-focus-webapp
-  Todoist {url}`: the command is split on spaces and run without a shell
-  (quotes and pipes aren't supported), `{url}` is replaced with the link,
-  and without it the link is added at the end. It must start with a command
-  name or an absolute path, at most 300 characters. It runs in its own
-  session, so what it opens stays when the shell restarts. Only
-  `https://app.todoist.com/` links are ever opened.
-- **Show in the bar**: Tasks left today or Icon only.
-- **Refresh every**: 1 to 30 minutes (5 by default). The panel also
-  refreshes when it opens and the data is older than 30 seconds. After a
-  failure the wait doubles, up to 30 minutes, and never ends before
-  Todoist's own retry time when it asks to slow down.
+  **Save token** beside it. The token is checked with Todoist before it is
+  stored. Signed in, the page shows who, and **Sign out**, which asks
+  first: "Sign out of Ada Lovelace?" with **Cancel** and **Sign out**
+  (Cancel, Esc, leaving the page or closing the panel keep you signed in).
+  While completions, moves, adds or changes haven't been sent to Todoist
+  yet, the question says they will be lost. When the stored token can't
+  be used (for example the keyring holds a value that isn't a token), the
+  page shows why, the token field and **Sign out**. A stored token that
+  Todoist refuses keeps the page signed in; the list says why. While the
+  list has no tasks to show, it offers **Open settings** when Todoist
+  refuses the token or the keyring holds a value that isn't one, and
+  **Retry** for other failures, such as a locked keyring.
 
 IPC (`omarchy-shell foamy.todoist <function>`): `toggle` (the panel),
 `add` (opens the panel with the add field open and the caret in it) and

@@ -982,6 +982,13 @@ ShellRoot {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
     return ok;
   }
+  // The settings page's sections as drawn, top to bottom: their titles.
+  function settingsSections(page) {
+    var names = ["accountSection", "panelSection", "openCommandSection", "barSection", "refreshSection", "signedInSection"];
+    return names.map(function(name) { return shell.find(page, name); }).filter(function(section) { return section && section.visible; }).sort(function(a, b) {
+      return a.mapToItem(page, 0, 0).y - b.mapToItem(page, 0, 0).y;
+    }).map(function(section) { return section.title; });
+  }
   // Every visible item under `item` named `name`.
   function findAll(item, name) {
     var out = [];
@@ -2385,6 +2392,8 @@ ShellRoot {
       var saveToken = shell.find(page, "saveTokenButton");
       var tokenTop = page.tokenField.mapToItem(page, 0, 0).y;
       if (!check(openTodoist.visible && openTodoist.mapToItem(page, 0, 0).y < tokenTop && Math.abs(saveToken.mapToItem(page, 0, 0).y + saveToken.height / 2 - (tokenTop + page.tokenField.height / 2)) <= 1 && page.tokenField.placeholderText === "Paste your API token" && shell.find(page, "accountSection").description !== "", "signed out: Open Todoist settings, then the field with Save token beside it")) return;
+      // Signed out, the account's steps come first.
+      if (!check(JSON.stringify(shell.settingsSections(page)) === JSON.stringify(["Account", "Panel", "Open command", "Bar", "Refresh"]), "signed out: the sections, Account first (" + JSON.stringify(shell.settingsSections(page)) + ")")) return;
       // Typed like a user: a masked field ignores an assigned text. Later,
       // so the settings page has already taken focus (its own callLater),
       // as it has by the time a user clicks the field.
@@ -3926,13 +3935,82 @@ ShellRoot {
       });
       break;
     case 111:
-      // A sign-out the keyring refuses (locked): the token stays, so the
-      // user is still signed in, with the reason.
+      // Settings, signed in: Account last. Sign out asks first: one click,
+      // Enter or Space only asks; Cancel, Esc and leaving the page put the
+      // row back; the question's own Sign out signs out. The keyring
+      // refuses it (locked): the token stays, so the user is still signed
+      // in, with the reason under the row.
       shell.put("reply-token-clear.json", JSON.stringify({ ok: false, code: "KEYRING_LOCKED", error: "The keyring that holds the Todoist token is locked. Unlock it and try again." }));
-      store.signOut();
+      ev.mouseClick(button, button.width / 2, button.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, function(opened) {
+        if (!check(opened, "the popup opened for Settings")) return;
+        var settingsView = one.popup.bodyItem;
+        settingsView.settingsRequested();
+        var page = settingsView.settingsPage;
+        wait.waitFor(function() { return page.backTarget.activeFocus; }, 5000, function(shown) {
+          if (!check(shown, "the settings page has the keys")) return;
+          if (!check(JSON.stringify(shell.settingsSections(page)) === JSON.stringify(["Panel", "Open command", "Bar", "Refresh", "Account"]), "signed in: the sections, Account last (" + JSON.stringify(shell.settingsSections(page)) + ")")) return;
+          var others = shell.find(page, "othersTasks");
+          if (!check(others.description === "In Today, Upcoming, Week, the Inbox and the bar" && shell.find(page, "openCommand").field.Accessible.name === "Open command", "Tasks assigned to others says where; the command field keeps its name")) return;
+          var clears = shell.calls("token-clear").length;
+          var signOut = shell.find(page, "signOutButton");
+          var shownOn = function(name) { var item = shell.find(page, name); return !!item && item.visible; };
+          var asking = function() { return shownOn("signOutQuestion") && !shownOn("signedInRow"); };
+          var unchanged = function() { return store.signedIn && shell.calls("token-clear").length === clears && !store.tokenBusy; };
+          var click = function(name) { var item = shell.find(page, name); ev.mouseClick(item, item.width / 2, item.height / 2, Qt.LeftButton, Qt.NoModifier, -1); };
+          // Each stage after a frame: a row that just showed is laid out then.
+          var stages = [function() {
+            click("signOutButton");
+          }, function() {
+            if (!check(asking() && unchanged() && shell.find(page, "signOutAsk").text === "Sign out of Ada Lovelace?" && !shownOn("signOutUnsent"), "a click on Sign out only asks (" + JSON.stringify([asking(), unchanged()]) + ")")) return false;
+            // A completion still in its undo window would be dropped: the question says so.
+            store.complete("t4");
+            if (!check(shownOn("signOutUnsent") && shell.find(page, "signOutUnsent").text === "Changes not sent to Todoist yet will be lost.", "unsent changes: the question says they will be lost")) return false;
+            store.undo("t4");
+          }, function() {
+            click("cancelSignOut");
+            if (!check(!asking() && shownOn("signedInRow") && unchanged(), "Cancel put the row back")) return false;
+          }, function() {
+            click("signOutButton");
+          }, function() {
+            shell.find(page, "cancelSignOut").forceActiveFocus();
+            ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+            if (!check(!asking() && settingsView.editingSettings && unchanged(), "Esc put the row back, the page stays")) return false;
+          }, function() {
+            click("signOutButton");
+          }, function() {
+            if (!check(asking(), "asked again")) return false;
+            settingsView.settingsClosed();
+            settingsView.settingsRequested();
+          }, function() {
+            if (!check(!asking() && shownOn("signedInRow") && unchanged(), "leaving the page put the row back")) return false;
+            // The keys: Enter asks (the keys on Cancel), Tab to the
+            // question's Sign out, Enter signs out.
+            signOut.forceActiveFocus(Qt.TabFocusReason);
+            ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+            if (!check(asking() && unchanged() && shell.find(page, "cancelSignOut").activeFocus, "Enter on Sign out only asks, the keys on Cancel")) return false;
+          }, function() {
+            ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+            var confirm = shell.find(page, "confirmSignOut");
+            if (!check(confirm.activeFocus && confirm.kind === "destructive" && signOut.kind === "secondary", "Tab: the destructive Sign out")) return false;
+            ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+            check(store.tokenBusy && !asking() && signOut.activeFocus, "the second Sign out signs out; the row is back, with the keys");
+          }];
+          var go = function() {
+            if (!stages.length) return;
+            var stage = stages.shift();
+            shell.afterFrame(page, function() { if (stage() !== false) go(); });
+          };
+          go();
+        });
+      });
       break;
     case 112:
       if (!check(store.tokenError === "The keyring that holds the Todoist token is locked. Unlock it and try again.", "a refused sign-out says why (" + store.tokenError + ")")) return;
+      var refusedSignOut = shell.find(view.settingsPage, "signedInError");
+      if (!check(view.editingSettings && refusedSignOut.visible && refusedSignOut.text === store.tokenError && shell.find(view.settingsPage, "signedInRow").visible, "the page says why, under the signed-in row (" + JSON.stringify([view.editingSettings, refusedSignOut.visible, refusedSignOut.text, shell.find(view.settingsPage, "signedInRow").visible, view.settingsPage.visible, one.opened]) + ")")) return;
+      view.settingsClosed();
+      one.close();
       // A sync that times out (exit 124, no reply) keeps the cached tasks.
       shell.put("exit-sync", "124");
       store.sync();

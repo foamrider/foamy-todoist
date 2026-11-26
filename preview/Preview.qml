@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-completed", "wide-long-heading", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-completed", "wide-long-heading", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -124,8 +124,13 @@ Item {
         view.field.cursorPosition = view.field.text.length
         view.field.textEdited()
       })
-    if (previewState === "completed" || previewState === "editor-completed" || previewState === "wide-task-completed")
+    // Sign out's question, with a completion still in its undo window.
+    if (previewState === "completed" || previewState === "editor-completed" || previewState === "wide-task-completed" || previewState === "settings-sign-out")
       store.complete("t4")
+    if (previewState === "settings-sign-out")
+      Qt.callLater(function () {
+        view.settingsPage.askSignOut()
+      })
     if (previewState === "row-cursor" || previewState === "completed")
       Qt.callLater(function () {
         view.goTo(view.firstRowStop + 2)
