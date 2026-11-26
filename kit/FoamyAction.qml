@@ -1,4 +1,4 @@
-// foamy-kit 0.14.1 6c74e32394a14bc04278c919cde64fe0e696005c6180624527265a7d452c25cd — do not edit; change foamy-kit and run sync
+// foamy-kit 0.15.0 b9f28f4e02f44f9aef21977b6289fa89f78b0f42348a3e4815527c0a166ebe3d — do not edit; change foamy-kit and run sync
 import QtQuick
 import qs.Commons as Commons
 import qs.Ui
@@ -29,6 +29,8 @@ Rectangle {
   property bool spinning: false
   property bool actionEnabled: true
   property bool hasCursor: false
+  // The keys moved the cursor here (FoamyCursor.byKeys): an accent border.
+  property bool cursorByKeys: false
   property bool focusable: false
   property bool settings: false
   property bool destructive: false
@@ -47,7 +49,7 @@ Rectangle {
   radius: FoamyStyle.radius
   opacity: enabled ? (actionEnabled ? 1 : 0.7) : FoamyStyle.disabledOpacity
   color: active && (hasCursor || mouse.containsMouse || activeFocus) ? (destructive ? Qt.alpha(Commons.Color.urgent, 0.14) : FoamyPalette.hoverFill) : "transparent"
-  border.width: activeFocus && focusable ? 1 : 0
+  border.width: (activeFocus && focusable) || (active && hasCursor && cursorByKeys) ? 1 : 0
   border.color: Commons.Color.accent
   activeFocusOnTab: focusable && active
 
