@@ -1639,7 +1639,7 @@ FocusScope {
       Layout.fillWidth: true
       text: line.shown
       font.pixelSize: FoamyStyle.font.caption
-      color: Commons.Color.urgent
+      color: FoamyPalette.onSurface(FoamyPalette.error)
       Accessible.role: Accessible.AlertMessage
     }
     FoamyButton {

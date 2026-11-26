@@ -1749,7 +1749,7 @@ PanelKeyCatcher {
           width: parent.width
           text: errorLine.message
           font.pixelSize: FoamyStyle.font.bodySmall
-          color: Commons.Color.urgent
+          color: FoamyPalette.onSurface(FoamyPalette.error)
           Accessible.role: Accessible.AlertMessage
         }
         PlainText {
@@ -1947,7 +1947,7 @@ PanelKeyCatcher {
           width: parent.width - FoamyStyle.padding * 2
           horizontalAlignment: Text.AlignHCenter
           font.pixelSize: FoamyStyle.font.bodySmall
-          color: stateBox.failure ? Commons.Color.urgent : FoamyPalette.mutedText
+          color: stateBox.failure ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.mutedText
           Accessible.role: stateBox.failure ? Accessible.AlertMessage : Accessible.StaticText
           text: {
             switch (stateBox.kind) {

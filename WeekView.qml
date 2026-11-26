@@ -228,13 +228,11 @@ Item {
               border: 1,
               fill: 0
             }) : Model.ringLook(entry ? entry.priority : 0)
-          readonly property color checkInk: {
-            const fill = Qt.tint(FoamyPalette.background, Qt.alpha(ringColor, Model.RING_DONE))
-            return FoamyPalette.contrastRatio(FoamyPalette.text, fill) >= FoamyPalette.contrastRatio(FoamyPalette.background, fill) ? FoamyPalette.text : FoamyPalette.background
-          }
           readonly property bool ringLit: ringArea.containsMouse && !unconfirmed
-          // The move actions: on the cursor's card, while it can move.
-          readonly property bool movable: hasCursor && !!entry && !struck && !unconfirmed
+          // The move actions: on the cursor's card, while it can move. Not on
+          // the narrow cards beside the pane: there they would cover the
+          // date (the pane's Date menu and Ctrl+←/→ move the card then).
+          readonly property bool movable: hasCursor && !!entry && !struck && !unconfirmed && !week.narrow
           MouseArea {
             id: ringArea
             objectName: "weekRing"
@@ -266,7 +264,7 @@ Item {
                 width: 11
                 height: 11
                 name: "check"
-                color: cardSurface.struck ? cardSurface.checkInk : cardSurface.ringColor
+                color: cardSurface.struck ? FoamyPalette.background : cardSurface.ringColor
               }
             }
           }

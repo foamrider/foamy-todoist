@@ -1400,15 +1400,9 @@ ShellRoot {
     var card = shell.find(view.week, "card-t6");
     ev.mouseMove(card, card.width / 2, card.height / 2, -1, Qt.NoButton, Qt.NoModifier);
     if (!check(view.cursorRow() && view.cursorRow().id === "t6" && !view.cursor.byKeys && view.paneTask === "t4", "the pointer on t6: the cursor there, the pane on t4 (" + JSON.stringify([view.cursorRow() && view.cursorRow().id, view.cursor.byKeys, view.paneTask]) + ")")) return;
-    // The pointer's card shows its move actions; they act on it, not on
-    // the pane's task, and their tooltip names no keys (the keys act on t4).
-    var later6 = shell.find(card, "moveLater");
-    var earlier6 = shell.find(card, "moveEarlier");
-    var text6 = shell.find(card, "cardText");
-    if (!check(shell.find(card, "moveActions").visible && !shell.find(shell.find(view.week, "card-t4"), "moveActions").visible && later6.tip === "A day later" && earlier6.tip === "A day earlier", "the pointer's card shows its actions, no keys in their tooltips (" + JSON.stringify([later6.tip, earlier6.tip]) + ")")) return;
-    ev.mouseClick(later6, later6.width / 2, later6.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-    if (!check(store.moves.t6 === Model.addDays(shell.today, 1) && !Model.has(store.moves, "t4"), "a day later moved the card it is on (" + JSON.stringify(store.moves) + ")")) return;
-    store.undo("t6");
+    // Beside the pane the cards are narrow: no move actions there (they
+    // would cover the date), neither on the pointer's card nor the pane's.
+    if (!check(!shell.find(card, "moveActions").visible && !shell.find(shell.find(view.week, "card-t4"), "moveActions").visible, "beside the pane no card shows move actions")) return;
     ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
     if (!check(store.struck.t4 === true && !Model.has(store.struck, "t6"), "Week: Space completed the pane's card (" + JSON.stringify(store.struck) + ")")) return;
     ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
@@ -1419,32 +1413,46 @@ ShellRoot {
       if (!check(read && !store.pending, "t4's description read, nothing pending")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!view.weekPaneOpen, "Esc closed the week's pane")) return;
-      // The keys on t4: its actions' tooltips name them. The card keeps
-      // its height and its text's place while they show.
-      var card4 = shell.find(view.week, "card-t4");
-      var place4 = function() { return [card4.height, shell.find(card4, "cardText").mapToItem(card4, 0, 0).x, shell.find(card4, "cardTime").mapToItem(card4, 0, 0).x]; };
-      view.weekPlace(1, 2);
-      shell.afterFrame(view, function() {
-        var without = place4();
-        view.weekPlace(1, 1);
-        view.cursor.byKeys = true;
+      // The pane closed: once the board is wide again, the pointer on t6
+      // shows its card's move actions, and they move the card they are on.
+      var wideCard = function() { var c = shell.find(view.week, "card-t6"); return !view.week.narrow && !!c && c.width > 150; };
+      wait.waitFor(wideCard, 5000, function(wide) {
+        var card6 = shell.find(view.week, "card-t6");
+        if (!check(wide, "the board is wide again (" + (card6 ? card6.width : -1) + ")")) return;
+        ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+        ev.mouseMove(card6, card6.width / 2, card6.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+        var later6 = shell.find(card6, "moveLater");
+        if (!check(view.cursorRow() && view.cursorRow().id === "t6" && shell.find(card6, "moveActions").visible && !shell.find(shell.find(view.week, "card-t4"), "moveActions").visible, "the pointer's card shows its move actions (" + JSON.stringify([view.cursorRow() && view.cursorRow().id, shell.find(card6, "moveActions").visible]) + ")")) return;
+        ev.mouseClick(later6, later6.width / 2, later6.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+        if (!check(store.moves.t6 === Model.addDays(shell.today, 1) && Object.keys(store.moves).length === 1, "a day later moved the card it is on (" + JSON.stringify([store.moves, store.error]) + ")")) return;
+        store.undo("t6");
+        // The keys on t4: its actions' tooltips name them. The card keeps
+        // its height and its text's place while they show.
+        var card4 = shell.find(view.week, "card-t4");
+        var place4 = function() { return [card4.height, shell.find(card4, "cardText").mapToItem(card4, 0, 0).x, shell.find(card4, "cardTime").mapToItem(card4, 0, 0).x]; };
+        view.weekPlace(1, 2);
         shell.afterFrame(view, function() {
-          if (!check(shell.find(card4, "moveActions").visible && shell.find(card4, "moveLater").tip === "A day later (Ctrl+→)" && shell.find(card4, "moveEarlier").tip === "A day earlier (Ctrl+←)", "the keys' card: its actions name Ctrl+←/→ (" + shell.find(card4, "moveLater").tip + ")")) return;
-          if (!check(JSON.stringify(place4()) === JSON.stringify(without), "the actions change neither the card's height nor its text's place (" + JSON.stringify([without, place4()]) + ")")) return;
-          // A repeating task: the actions refuse it as Ctrl+→ does, with the same reason.
-          view.weekPlace(1, 0);
-          ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
-          var byKeys = store.error;
-          store.error = "";
+          var without = place4();
+          view.weekPlace(1, 1);
+          view.cursor.byKeys = true;
           shell.afterFrame(view, function() {
-            var later3 = shell.find(shell.find(view.week, "card-t3"), "moveLater");
-            ev.mouseClick(later3, later3.width / 2, later3.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-            if (!check(byKeys !== "" && store.error === byKeys && !Model.has(store.moves, "t3"), "a repeating card's action refuses as Ctrl+→ does (" + JSON.stringify([byKeys, store.error]) + ")")) return;
+            if (!check(shell.find(card4, "moveActions").visible && shell.find(card4, "moveLater").tip === "A day later (Ctrl+→)" && shell.find(card4, "moveEarlier").tip === "A day earlier (Ctrl+←)", "the keys' card: its actions name Ctrl+←/→ (" + shell.find(card4, "moveLater").tip + ")")) return;
+            if (!check(JSON.stringify(place4()) === JSON.stringify(without), "the actions change neither the card's height nor its text's place (" + JSON.stringify([without, place4()]) + ")")) return;
+            // A repeating task: the actions refuse it as Ctrl+→ does, with the same reason.
+            view.weekPlace(1, 0);
+            ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
+            var byKeys = store.error;
             store.error = "";
-            done();
+            shell.afterFrame(view, function() {
+              var later3 = shell.find(shell.find(view.week, "card-t3"), "moveLater");
+              ev.mouseClick(later3, later3.width / 2, later3.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+              if (!check(byKeys !== "" && store.error === byKeys && !Model.has(store.moves, "t3"), "a repeating card's action refuses as Ctrl+→ does (" + JSON.stringify([byKeys, store.error]) + ")")) return;
+              store.error = "";
+              done();
+            });
           });
         });
-      });
+          });
     });
   }
   // The Week view: `a` adds for the day of the column the cursor is in
