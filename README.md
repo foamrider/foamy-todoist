@@ -112,7 +112,8 @@ meanwhile). An error shows under the band and keeps the text. When the task
 was sent but no answer came back (a timeout, a lost connection), Todoist may
 have added it: the line says so, the text stays, and the list refreshes at
 once, so you can check before sending it again. An empty field also closes
-when it loses the keys (a click on a tab, a task, ↓ into the list); one with
+when it loses the keys (a click on a tab, a task, ↓ into the list), but not
+for its own right-click menu, so the menu's Paste lands in it; one with
 text stays open. Text you've typed is never thrown away by moving around: it
 stays when you switch views, Tab doesn't leave a field with text in it (Tab
 from an empty field goes to the next panel), and when the panel closes, also

@@ -22,7 +22,8 @@ import "Model.js" as Model
 // and the footer shows the keys; Enter adds and does what "After adding a
 // task" says (close the panel, or keep the field open), Shift+Enter the
 // other. Esc clears the text, then closes the field. An empty field closes
-// when it loses the keys; one with text stays open.
+// when its edit ends without the keys (not for its own right-click menu);
+// one with text stays open.
 //
 // One cursor (FoamyCursor) over the stops, in on-screen order: +, Search
 // (Open, while the Wide pane shows a task), ⋯ (the band's, while its
@@ -50,6 +51,8 @@ PanelKeyCatcher {
   property bool editingSettings: false
   property bool addOnOpen: false
   property var preferences: ({})
+  // The Panel's FoamyPrefsQueue, for the settings page's choices.
+  property FoamyPrefsQueue prefs: null
   property bool saving: false
   property string settingsError: ""
   property bool retryable: false
@@ -278,12 +281,8 @@ PanelKeyCatcher {
   property bool fieldOpen: false
   readonly property bool adding: fieldOpen && !searching
   readonly property bool fieldFocused: addField.inputActiveFocus
-  onFieldFocusedChanged: {
-    if (fieldFocused)
-      viewCursor.index = -1
-    else if (fieldOpen && !searching && addField.text === "")
-      closeField()
-  }
+  onFieldFocusedChanged: if (fieldFocused)
+    viewCursor.index = -1
   // The add field, open and with the keys (search mode ends).
   function openAdd() {
     if (!store.signedIn)
@@ -297,16 +296,20 @@ PanelKeyCatcher {
     addField.focusInput()
   }
   // A click outside the field (a tab, a ring, the rail, a button) takes
-  // the keys back first, so an empty field closes as it does on any blur.
+  // the keys back first, which ends the field's edit: an empty field
+  // closes (onEditingFinished). With the field's own menu open, the press
+  // closes the menu and the keys come back to the field before the click.
   // Suggestions never call it: the field keeps the keys there.
   function leaveField() {
     if (fieldFocused)
       focusList()
   }
   // Closes the field (the band's title row comes back); the cursor goes to
-  // the button it grew from when the field had the keys.
+  // the button it grew from when the field had the keys. The field itself
+  // says whether it has them: at the end of its edit (editingFinished) the
+  // fieldFocused binding may not have caught up yet.
   function closeField() {
-    var hadKeys = fieldFocused
+    var hadKeys = addField.inputActiveFocus
     fieldOpen = false
     clearSuggest()
     addField.text = ""
@@ -1018,14 +1021,15 @@ PanelKeyCatcher {
   // The popup builds this view on its first open with `active` already true.
   Component.onCompleted: if (active)
     prepare()
+  // When Settings hides (Back, or the reset as the popup closes), FoamyPopup
+  // gives the keys the page had to foamyKeyHome (keyFocus), as focusList().
   onEditingSettingsChanged: {
     if (editingSettings) {
       heroBand.closeMenu()
       viewCursor.reset()
       settingsView.resetScroll()
       Qt.callLater(settingsView.focusBack)
-    } else
-      Qt.callLater(focusList)
+    }
   }
   blocked: editingSettings || pageShown || heroBand.menuOpen || fieldFocused || taskEditor.activeFocus || taskEditor.menuOpen || overviewPane.activeFocus
   // A minute tick for "Updated …" while the popup is open.
@@ -1196,6 +1200,12 @@ PanelKeyCatcher {
       // like typing, it ends the add's error, so the line says why.
       onPasteErrorChanged: if (pasteError !== "")
         root.store.addError = ""
+      // An empty add field closes when its edit ends without the keys (a
+      // click elsewhere, ↓ into the list). The edit's end, not the focus
+      // change: the field's own right-click menu takes the keys too, and
+      // its Paste needs the field open.
+      onEditingFinished: if (!inputActiveFocus && root.fieldOpen && !root.searching && text === "")
+        root.closeField()
       onCursorPositionChanged: root.updateSuggest()
       onKeyPressed: function (event) {
         root.fieldKey(event)
@@ -1884,6 +1894,7 @@ PanelKeyCatcher {
     // Wide's page is 880, its column the settings width (the kit's wide one).
     columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width
     preferences: root.preferences
+    prefs: root.prefs
     saving: root.saving
     error: root.settingsError
     retryable: root.retryable

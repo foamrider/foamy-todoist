@@ -1,4 +1,4 @@
-// foamy-kit 0.13.1 7553db52a3e957cca0815cf30008ebc6ba824dc8dc579eb5bb283e48f5f38b0f — do not edit; change foamy-kit and run sync
+// foamy-kit 0.14.0 be923fba18d9fea0de2687970298fa53611e91e290dc48c184dd8866862ac37a — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Controls as Controls
 import qs.Commons
@@ -44,7 +44,9 @@ import qs.Ui
 //   undo, redo); editingFinished when the field loses the focus (to
 //   anything but its own context menu: then when the menu closes without
 //   giving the focus back). A field that hides gives up the focus, so keys
-//   never edit hidden text.
+//   never edit hidden text; if it had them, they go to the nearest key home
+//   that shows (FoamyClickAway's `foamyKeyHome`), else to the nearest focus
+//   scope.
 // - Styled like SafeTextField (foamy radius, control fill and border), with
 //   its `quiet` mode for text edited in place.
 //   clipboardScript resolves relative to FoamyClipboard.qml unless absolute.
@@ -463,7 +465,24 @@ Flickable {
     // Qt keeps the active focus on a hidden item, so keys would still edit
     // text the user cannot see. Losing it ends the edit (editingFinished).
     // An open menu would give the focus back on Esc or Paste: close it first.
+    var hadKeys = editor.activeFocus || editMenu.visible
     editMenu.close()
     editor.focus = false
+    // The keys go where a click-away gives them, so the panel's keys (Esc,
+    // arrows) work at once; without a key home they stay with the nearest
+    // focus scope.
+    var home = hadKeys ? _keyHome(root.parent) : null
+    if (home)
+      home.forceActiveFocus()
+  }
+  // The nearest `foamyKeyHome` above the area that shows (FoamyClickAway's
+  // key home), or null. A hidden one, such as a settings page that hides
+  // with the area, passes the search on.
+  function _keyHome(item) {
+    for (let at = item; at; at = at.parent) {
+      if ("foamyKeyHome" in at && at.foamyKeyHome && at.foamyKeyHome.visible)
+        return at.foamyKeyHome
+    }
+    return null
   }
 }

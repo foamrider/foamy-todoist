@@ -158,6 +158,7 @@ Ui.Panel {
         shown: panelPopup.visible
         size: root.size
         preferences: prefsQueue.effectiveSettings
+        prefs: prefsQueue
         saving: prefsQueue.busy
         settingsError: prefsQueue.error !== "" ? FoamyI18n.t(prefsQueue.error) : ""
         retryable: prefsQueue.canRetry

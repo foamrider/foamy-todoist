@@ -100,6 +100,9 @@ ShellRoot {
   // Wide's list before the pane opened: its width and x in the view.
   property var listBox: []
   property bool othersChecked: false
+  // Set when step 41's clicks away from the empty add field are done: on
+  // the way, the view and the field pass through what gate 42 waits for.
+  property bool clickedAway: false
   // The store's wall clock: moved by setting `clock.at`, which (like a real
   // clock) notifies nothing, so only the store's own checks see it.
   property var clock: ({ at: new Date(2026, 10, 18, 12, 0, 0) })
@@ -582,6 +585,150 @@ ShellRoot {
         done();
       });
     });
+    });
+  }
+  // Every choice on the settings page while the widget has no bar entry,
+  // so the settings queue refuses each pick: a click opens the list, ↓ (↑
+  // from the last option) and Enter pick another option. The choice shows
+  // the saved value again at once, beside the error, and nothing is saved.
+  // The Open command first: a click in the field, a command typed, Enter;
+  // the field shows the saved command again by the next frame. Then the
+  // bar entry is back, the error goes, and done().
+  function refusedPicks(view, done) {
+    var page = view.settingsPage;
+    var keys = ["panelWidth", "afterAdd", "openOn", "othersTasks", "barCount", "refreshSeconds"];
+    var noEntry = "Settings can't be saved: this widget has no bar entry.";
+    var saves = bar.saved.length;
+    one.moduleName = "";
+    var next = function(i) {
+      if (i === keys.length) {
+        one.moduleName = "foamy.todoist";
+        // The saved value again: nothing to write, and the error goes.
+        one.prefs.save("afterAdd", one.prefs.value("afterAdd"));
+        if (!check(view.settingsError === "" && bar.saved.length === saves, "the bar entry back: no error, nothing saved (" + view.settingsError + ")")) return;
+        done();
+        return;
+      }
+      var dropdown = shell.find(page, keys[i]);
+      var saved = dropdown.value;
+      var values = dropdown.options.map(function(option) { return dropdown.optionValue(option); });
+      var at = values.indexOf(saved);
+      var down = at + 1 < values.length;
+      var picked = values[down ? at + 1 : at - 1];
+      var trigger = dropdown.triggerItem;
+      ev.mouseClick(trigger, trigger.width / 2, trigger.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { return dropdown.popupOpen; }, 5000, function(opened) {
+        if (!check(opened && at >= 0, keys[i] + ": a click opened the list on the saved value " + saved)) return;
+        ev.keyClick(down ? Qt.Key_Down : Qt.Key_Up, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+        if (!check(dropdown.shownValue === saved && dropdown.currentLabel() === dropdown.optionLabel(dropdown.options[at]) && view.settingsError === noEntry && bar.saved.length === saves, keys[i] + ": a refused pick of " + picked + " shows the saved value again at once (" + JSON.stringify([dropdown.shownValue, dropdown.currentLabel(), view.settingsError, bar.saved.length - saves]) + ")")) return;
+        wait.waitFor(function() { return !dropdown.popupOpen; }, 5000, function(closed) {
+          if (!check(closed, keys[i] + ": the list closed")) return;
+          shell.afterFrame(page, function() { next(i + 1); });
+        });
+      });
+    };
+    var command = shell.find(page, "openCommand");
+    var editor = command.field.editorItem;
+    var savedCommand = command.value;
+    // The page is laid out by the next frame: click what is drawn.
+    shell.afterFrame(page, function() {
+      ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { return command.field.inputActiveFocus; }, 5000, function(focused) {
+        if (!check(focused, "a click put the keys in the Open command field")) return;
+        for (var c of "todoist-open {url}") ev.keyClickChar(c, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+        // What the next drawn frame shows.
+        shell.afterFrame(page, function() {
+          if (!check(command.field.text === savedCommand && !command.editing && view.settingsError === noEntry && bar.saved.length === saves, "a refused Open command shows the saved command " + JSON.stringify(savedCommand) + " again at once (" + JSON.stringify([command.field.text, command.editing, view.settingsError, bar.saved.length - saves]) + ")")) return;
+          next(0);
+        });
+      });
+    });
+  }
+  // A right-click on the empty add field opens its menu, which takes the
+  // keys. That isn't the end of the edit: the field stays open, the menu's
+  // Paste lands in it (the stand-in clipboard reads "folder"), and Esc
+  // clears it with the keys still in the field. The menu again, and a
+  // click on the Inbox tab beside it: the menu and the empty field close,
+  // the view switches, + doesn't get the cursor. Then the field opens
+  // again, with the keys, and done().
+  function emptyFieldMenu(view, done) {
+    var field = view.field;
+    var editor = field.editorItem;
+    var menu = editor.Controls.ContextMenu.menu;
+    var adds = shell.calls("add").length;
+    // Grown all the way, so the click lands on the drawn field.
+    wait.waitFor(function() { return view.band.fieldProgress === 1; }, 5000, function(grown) {
+      if (!check(grown && view.adding && field.text === "", "the empty add field is open")) return;
+      shell.afterFrame(field, function() {
+        ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.RightButton, Qt.NoModifier, -1);
+        wait.waitFor(function() { return menu.opened; }, 5000, function(opened) {
+          if (!check(opened && !field.inputActiveFocus && view.adding && field.visible, "the empty add field stays open while its menu has the keys (" + JSON.stringify([opened, field.inputActiveFocus, view.fieldOpen]) + ")")) return;
+          var paste = null;
+          for (var i = 0; i < menu.count; i++)
+            if (menu.itemAt(i) && menu.itemAt(i).text === "Paste") paste = menu.itemAt(i);
+          if (!check(paste && paste.enabled, "the add field's menu has Paste")) return;
+          ev.mouseClick(paste, paste.width / 2, paste.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+          wait.waitFor(function() { return !menu.visible && !field.pasteRunning && field.text !== ""; }, 10000, function(pasted) {
+            if (!check(pasted && field.text === "folder" && view.adding && view.fieldFocused && shell.calls("add").length === adds, "the menu's Paste landed in the open add field, nothing added (" + JSON.stringify([field.text, field.pasteError, view.fieldOpen, view.fieldFocused]) + ")")) return;
+            ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+            if (!check(field.text === "" && view.adding && view.fieldFocused, "Esc cleared the paste, the empty field keeps the keys")) return;
+            ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.RightButton, Qt.NoModifier, -1);
+            wait.waitFor(function() { return menu.opened; }, 5000, function(again) {
+              if (!check(again && !field.inputActiveFocus && view.adding && view.view === "today", "the menu is open again over the empty field, in Today")) return;
+              var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
+              // Beside the menu: its left edge, in the tab's coordinates.
+              var x = Math.min(tab.width / 2, menu.contentItem.mapToItem(tab, 0, 0).x - 4);
+              if (!check(x > 0, "the Inbox tab shows beside the menu (" + x + ")")) return;
+              ev.mouseClick(tab, x, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+              wait.waitFor(function() { return !menu.visible && !view.fieldOpen && view.view === "inbox"; }, 5000, function(left) {
+                if (!check(left && !view.fieldFocused && view.cursor.index !== view.addStop, "a click on a tab beside the open menu closed the menu and the empty field and switched the view (" + JSON.stringify([menu.visible, view.fieldOpen, view.view, view.fieldFocused, view.cursor.index]) + ")")) return;
+                view.openAdd();
+                wait.waitFor(function() { return view.fieldFocused && view.band.fieldProgress === 1; }, 5000, function(reopened) {
+                  if (!check(reopened, "the add field open again, with the keys")) return;
+                  done();
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+  // The keys once Settings hides (the page has them): Esc on Settings goes
+  // back to the list, and the next Esc closes the popup. Then Settings
+  // again (s), the popup closes on it and opens again on the list: the
+  // first Esc closes it. Then done(), the popup closed.
+  function keysAfterSettings(view, done) {
+    ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+    if (!check(!view.editingSettings && one.opened, "Esc on Settings went back to the list")) return;
+    // The keys move in a deferred call: one drawn frame later.
+    shell.afterFrame(view, function() {
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!one.opened, "after going back from Settings, Esc closed the popup")) return;
+      shell.afterClose(function() {
+        one.open();
+        wait.waitFor(function() { return one.opened && view.active; }, 5000, function(opened) {
+          if (!check(opened, "the popup opened again")) return;
+          view.cursor.emitTextKey(view, "s");
+          wait.waitFor(function() { return view.editingSettings && view.settingsPage.activeFocus; }, 5000, function(shown) {
+            if (!check(shown, "s opened Settings, with the keys")) return;
+            one.close();
+            shell.afterClose(function() {
+              one.open();
+              wait.waitFor(function() { return one.opened && view.active && !view.editingSettings; }, 5000, function(again) {
+                if (!check(again, "the popup closed on Settings opened again on the list")) return;
+                shell.afterFrame(view, function() {
+                  ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+                  if (!check(!one.opened, "closed on Settings and opened again, the first Esc closed the popup")) return;
+                  shell.afterClose(done);
+                });
+              });
+            });
+          });
+        });
+      });
     });
   }
   function check(ok, message) {
@@ -1089,7 +1236,7 @@ ShellRoot {
     case 39: return [function() { return store.launchError === "" && shell.opened().length === 5 && !store.launchRunning; }, 15000, "the next launch worked"];
     case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 10000, "the standard popup again, the completion sent"];
     case 41: return [function() { return view.fieldFocused; }, 10000, "the empty field, to click away from"];
-    case 42: return [function() { return view.fieldFocused; }, 10000, "the empty field again"];
+    case 42: return [function() { return shell.clickedAway && view.view === "inbox" && view.fieldFocused; }, 10000, "the empty field again, in the Inbox"];
     case 43: return [function() { return view.fieldFocused; }, 10000, "the field for search and drafts"];
     case 44: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.fieldFocused; }, 10000, "the reopened popup with the draft"];
     case 45: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the reopened popup after Esc"];
@@ -1146,7 +1293,7 @@ ShellRoot {
     case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 101: return [function() { return !store.busy && store.signedIn && store.loaded; }, 15000, "signed in and idle, before a held sync"];
+    case 101: return [function() { return one.prefs.value("openOn") === "today" && !store.busy && store.signedIn && store.loaded; }, 15000, "Open on: Today again, signed in and idle, before a held sync"];
     case 102: return [function() { return store.current !== null && store.current.command === "sync" && shell.held("sync"); }, 15000, "the sync is held"];
     case 103: return [function() { return store.current !== null && store.current.command === "token-clear" && shell.held("token-clear"); }, 15000, "the old sync's reply came, the sign-out is held"];
     case 104: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "signed out"];
@@ -1767,12 +1914,19 @@ ShellRoot {
       view.openAdd();
       break;
     case 41:
-      // A click on a tab while the empty field has the keys: it closes, the view switches.
+      // The empty field's own right-click menu keeps it open; a click on a
+      // tab beside the open menu closes both. Then a click on a tab while
+      // the empty field has the keys: it closes, the view switches, and +
+      // doesn't get the cursor.
       view.setView("today");
-      var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
-      ev.mouseClick(tab, tab.width / 2, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-      if (!check(view.view === "inbox" && !view.fieldOpen && !view.fieldFocused, "a tab click closed the empty field (" + view.view + ", " + view.fieldOpen + ")")) return;
-      view.openAdd();
+      shell.emptyFieldMenu(view, function() {
+        view.setView("today");
+        var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
+        ev.mouseClick(tab, tab.width / 2, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+        if (!check(view.view === "inbox" && !view.fieldOpen && !view.fieldFocused && view.cursor.index !== view.addStop, "a tab click closed the empty field (" + view.view + ", " + view.fieldOpen + ", cursor " + view.cursor.index + ")")) return;
+        view.openAdd();
+        shell.clickedAway = true;
+      });
       break;
     case 42:
       // A click on a ring: the field closes too.
@@ -2770,8 +2924,10 @@ ShellRoot {
       break;
     case 100:
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
-      one.close();
-      one.prefs.save("openOn", "today");
+      view.settingsRequested();
+      shell.refusedPicks(view, function() {
+        shell.keysAfterSettings(view, function() { one.prefs.save("openOn", "today"); });
+      });
       break;
     case 101:
       // A sync still running when the user signs out: its reply is for the
