@@ -584,6 +584,48 @@ ShellRoot {
     });
     });
   }
+  // Every choice on the settings page while the widget has no bar entry,
+  // so the settings queue refuses each pick: a click opens the list, ↓ (↑
+  // from the last option) and Enter pick another option. The choice shows
+  // the saved value again at once, beside the error, and nothing is saved.
+  // Then the bar entry is back, the error goes, and done().
+  function refusedPicks(view, done) {
+    var page = view.settingsPage;
+    var keys = ["panelWidth", "afterAdd", "openOn", "othersTasks", "barCount", "refreshSeconds"];
+    var noEntry = "Settings can't be saved: this widget has no bar entry.";
+    var saves = bar.saved.length;
+    one.moduleName = "";
+    var next = function(i) {
+      if (i === keys.length) {
+        one.moduleName = "foamy.todoist";
+        // The saved value again: nothing to write, and the error goes.
+        one.prefs.save("afterAdd", one.prefs.value("afterAdd"));
+        if (!check(view.settingsError === "" && bar.saved.length === saves, "the bar entry back: no error, nothing saved (" + view.settingsError + ")")) return;
+        done();
+        return;
+      }
+      var dropdown = shell.find(page, keys[i]);
+      var saved = dropdown.value;
+      var values = dropdown.options.map(function(option) { return dropdown.optionValue(option); });
+      var at = values.indexOf(saved);
+      var down = at + 1 < values.length;
+      var picked = values[down ? at + 1 : at - 1];
+      var trigger = dropdown.triggerItem;
+      ev.mouseClick(trigger, trigger.width / 2, trigger.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      wait.waitFor(function() { return dropdown.popupOpen; }, 5000, function(opened) {
+        if (!check(opened && at >= 0, keys[i] + ": a click opened the list on the saved value " + saved)) return;
+        ev.keyClick(down ? Qt.Key_Down : Qt.Key_Up, Qt.NoModifier, -1);
+        ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+        if (!check(dropdown.shownValue === saved && dropdown.currentLabel() === dropdown.optionLabel(dropdown.options[at]) && view.settingsError === noEntry && bar.saved.length === saves, keys[i] + ": a refused pick of " + picked + " shows the saved value again at once (" + JSON.stringify([dropdown.shownValue, dropdown.currentLabel(), view.settingsError, bar.saved.length - saves]) + ")")) return;
+        wait.waitFor(function() { return !dropdown.popupOpen; }, 5000, function(closed) {
+          if (!check(closed, keys[i] + ": the list closed")) return;
+          shell.afterFrame(page, function() { next(i + 1); });
+        });
+      });
+    };
+    // The page is laid out by the next frame: click what is drawn.
+    shell.afterFrame(page, function() { next(0); });
+  }
   function check(ok, message) {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
     return ok;
@@ -1146,7 +1188,7 @@ ShellRoot {
     case 98: return [function() { var l = shell.leader(); var v = l.popup.bodyItem; return v.fieldFocused && v.band.fieldProgress === 1 && l.popup.heightLive; }, 10000, "IPC add in the open Wide popup"];
     case 99: return [function() { return one.size === "standard" && one.prefs.value("openOn") === "last" && one.prefs.value("panelWidth") === "standard"; }, 10000, "Small, Open on: Last view"];
     case 100: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the popup on the last view"];
-    case 101: return [function() { return !store.busy && store.signedIn && store.loaded; }, 15000, "signed in and idle, before a held sync"];
+    case 101: return [function() { return one.prefs.value("openOn") === "today" && !store.busy && store.signedIn && store.loaded; }, 15000, "Open on: Today again, signed in and idle, before a held sync"];
     case 102: return [function() { return store.current !== null && store.current.command === "sync" && shell.held("sync"); }, 15000, "the sync is held"];
     case 103: return [function() { return store.current !== null && store.current.command === "token-clear" && shell.held("token-clear"); }, 15000, "the old sync's reply came, the sign-out is held"];
     case 104: return [function() { return store.account === "signed_out" && !store.busy; }, 15000, "signed out"];
@@ -2770,8 +2812,12 @@ ShellRoot {
       break;
     case 100:
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
-      one.close();
-      one.prefs.save("openOn", "today");
+      view.settingsRequested();
+      shell.refusedPicks(view, function() {
+        view.settingsClosed();
+        one.close();
+        one.prefs.save("openOn", "today");
+      });
       break;
     case 101:
       // A sync still running when the user signs out: its reply is for the

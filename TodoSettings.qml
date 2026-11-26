@@ -10,6 +10,10 @@ import "Preferences.js" as Schema
 FoamySettingsPage {
   id: page
   property var preferences: ({})
+  // The Panel's FoamyPrefsQueue. Each choice is linked to it and its key,
+  // so a pick the queue refuses (no bar entry) shows the saved value again
+  // at once instead of staying on show beside the error.
+  property FoamyPrefsQueue prefs: null
   // The sections' width, centred on the page: Wide's page is the popup's
   // 880 but keeps the settings width (TodoView sets it).
   property real columnWidth: width
@@ -172,6 +176,8 @@ FoamySettingsPage {
       label: FoamyI18n.t("Size")
       value: page.pref("panelWidth")
       enabled: !page.saving
+      queue: page.prefs
+      queueKey: "panelWidth"
       options: [
         {
           value: "standard",
@@ -193,6 +199,8 @@ FoamySettingsPage {
       label: FoamyI18n.t("After adding a task")
       value: page.pref("afterAdd")
       enabled: !page.saving
+      queue: page.prefs
+      queueKey: "afterAdd"
       options: [
         {
           value: "close",
@@ -214,6 +222,8 @@ FoamySettingsPage {
       label: FoamyI18n.t("Open on")
       value: page.pref("openOn")
       enabled: !page.saving
+      queue: page.prefs
+      queueKey: "openOn"
       options: [
         {
           value: "today",
@@ -243,6 +253,8 @@ FoamySettingsPage {
       label: FoamyI18n.t("Tasks assigned to others")
       value: page.pref("othersTasks")
       enabled: !page.saving
+      queue: page.prefs
+      queueKey: "othersTasks"
       options: [
         {
           value: "hide",
@@ -285,6 +297,8 @@ FoamySettingsPage {
       label: FoamyI18n.t("Show in the bar")
       value: page.pref("barCount")
       enabled: !page.saving
+      queue: page.prefs
+      queueKey: "barCount"
       options: [
         {
           value: "today",
@@ -306,6 +320,8 @@ FoamySettingsPage {
       label: FoamyI18n.t("Refresh every")
       value: String(page.pref("refreshSeconds"))
       enabled: !page.saving
+      queue: page.prefs
+      queueKey: "refreshSeconds"
       options: Schema.refreshChoices.map(function (seconds) {
         return {
           value: String(seconds),

@@ -50,6 +50,8 @@ PanelKeyCatcher {
   property bool editingSettings: false
   property bool addOnOpen: false
   property var preferences: ({})
+  // The Panel's FoamyPrefsQueue, for the settings page's choices.
+  property FoamyPrefsQueue prefs: null
   property bool saving: false
   property string settingsError: ""
   property bool retryable: false
@@ -1884,6 +1886,7 @@ PanelKeyCatcher {
     // Wide's page is 880, its column the settings width (the kit's wide one).
     columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width
     preferences: root.preferences
+    prefs: root.prefs
     saving: root.saving
     error: root.settingsError
     retryable: root.retryable
