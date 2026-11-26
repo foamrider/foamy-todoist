@@ -472,7 +472,7 @@ impl State {
             Some(CACHE_VERSION) => {}
             // Written before labels, collaborators, assignees, deadlines or
             // time zones: only the user is kept; a full sync follows.
-            Some(1..=5) => {
+            Some(1..CACHE_VERSION) => {
                 let mut state = State::empty();
                 state.user = value.get("user").and_then(normalize_user);
                 return Some(state);
@@ -504,9 +504,8 @@ impl State {
     }
 
     pub fn to_cache(&self) -> Vec<u8> {
-        let mut value = self.snapshot();
-        // The tasks as kept, with their zones (an older helper ignores them).
-        value["tasks"] = json!(self.listed_tasks().collect::<Vec<_>>());
+        // The tasks as kept, with their zones.
+        let mut value = self.document(json!(self.listed_tasks().collect::<Vec<_>>()));
         value["version"] = json!(CACHE_VERSION);
         value["memberships"] = json!(self.memberships.values().collect::<Vec<_>>());
         value["sync_token"] = json!(self.sync_token);
@@ -643,7 +642,12 @@ impl State {
     /// What the panel gets. Tasks of projects it doesn't have (archived,
     /// left, or cut by the bound) are left out with them.
     pub fn snapshot(&self) -> Value {
-        let tasks: Vec<Value> = self.listed_tasks().map(panel_task).collect();
+        self.document(Value::Array(self.listed_tasks().map(panel_task).collect()))
+    }
+
+    /// The snapshot's shape around `tasks` (the panel's, or the cache's
+    /// with their zones).
+    fn document(&self, tasks: Value) -> Value {
         let mut out = Map::new();
         out.insert("user".into(), self.user.clone().unwrap_or(Value::Null));
         out.insert(
@@ -654,7 +658,7 @@ impl State {
             "sections".into(),
             json!(self.sections.values().collect::<Vec<_>>()),
         );
-        out.insert("tasks".into(), json!(tasks));
+        out.insert("tasks".into(), tasks);
         out.insert(
             "labels".into(),
             json!(self.labels.values().collect::<Vec<_>>()),
@@ -1181,10 +1185,11 @@ mod tests {
 
     #[test]
     fn an_older_cache_keeps_only_the_user_and_syncs_in_full() {
-        // 1-5: written before labels, collaborators, assignees, deadlines
-        // and time zones (a task cached without its zone would lose it at
-        // its next move, and an incremental sync never sends it again).
-        for version in 1..=5 {
+        // Every older version: written before labels, collaborators,
+        // assignees, deadlines or time zones (a task cached without its
+        // zone would lose it at its next move, and an incremental sync
+        // never sends it again).
+        for version in 1..CACHE_VERSION {
             let old = json!({"version": version, "sync_token": "OLD", "user": {"id": "1", "full_name": "Ada"},
                 "projects": [{"id": "P1", "name": "Inbox"}], "tasks": [task("T1", "one")], "sections": [],
                 "labels": [], "collaborators": [], "memberships": []});

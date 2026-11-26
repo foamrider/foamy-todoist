@@ -147,8 +147,9 @@
 //! `~/.cache/foamy-todoist/`), directory 0700, file 0600, written
 //! atomically: the sync token and the snapshot (labels included), never the
 //! API token. A corrupt or oversized cache is dropped and a full sync done.
-//! A cache from before labels, collaborators or assignees (format versions
-//! 1 to 3) keeps only its user: the next sync is a full one.
+//! A cache in an older format (from before labels, collaborators,
+//! assignees, deadlines or time zones) keeps only its user: the next sync is
+//! a full one.
 //!
 //! `FOAMY_TODOIST_BASE_URL` (a loopback `http://` URL only, else refused)
 //! replaces the API base in tests.
