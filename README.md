@@ -120,9 +120,10 @@ button across the band (the band keeps its height, and nothing moves under
 it). Its placeholder says where the task goes: "Add a task to the Inbox…",
 "for today…", for Upcoming's day, or to the project you are looking at;
 that date or project applies when the text gives none. In the Week view
-the task goes to the day of the column the cursor is in when the field
-opens: today from Overdue and Today, tomorrow from Tomorrow, the card's day
-from Later, and today with the cursor off the board. The Quick Add parts
+the task goes to the day of the column the cursor was last in: today from
+Overdue and Today, tomorrow from Tomorrow, the card's day from Later, and
+today until the cursor has been on the board (the placeholder names the
+day). The Quick Add parts
 show in colour as you type: `#project`, `/section` and `+person` in the
 accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
 the urgent colour, `{deadline}` and ` // description` muted; dates are left

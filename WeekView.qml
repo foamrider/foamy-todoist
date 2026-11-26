@@ -176,7 +176,7 @@ Item {
           anchors.bottomMargin: FoamyStyle.gapTiny
           x: FoamyStyle.rowPadding
           width: parent.width - x * 2
-          text: !entryItem.isDay ? "" : week.narrow ? week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("ddd d MMM")) : Model.capitalized(week.formatDate(Model.dayDate(entryItem.modelData.dayKey), "dddd")) + " " + week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("d MMMM"))
+          text: !entryItem.isDay ? "" : week.narrow ? Model.capitalized(week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("ddd d MMM"))) : Model.capitalized(week.formatDate(Model.dayDate(entryItem.modelData.dayKey), "dddd")) + " " + week.formatDate(Model.dayDate(entryItem.modelData.dayKey), week.translate("d MMMM"))
           wrapMode: Text.NoWrap
           elide: Text.ElideRight
           font.pixelSize: FoamyStyle.font.caption

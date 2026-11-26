@@ -1377,7 +1377,8 @@ function trailingDay(row, format, t) {
   if (!row || !row.trail || !row.dueDay)
     return ""
   var day = dayDate(row.dueDay)
-  return format(day, row.trail === "weekday" ? "ddd" : t("ddd d"))
+  // It stands alone in the row's trailing slot: a capital, as the row's date.
+  return capitalized(format(day, row.trail === "weekday" ? "ddd" : t("ddd d")))
 }
 
 // ---- the open command ------------------------------------------------------------

@@ -275,6 +275,7 @@ PanelKeyCatcher {
       railCursor = railIndexOfView()
     if (stop === firstRowStop && weekShown && !weekCurrent())
       weekHome()
+    noteWeekDay()
     reveal()
     followPane()
   }
@@ -292,6 +293,7 @@ PanelKeyCatcher {
   function clearSelection() {
     viewCursor.index = -1
     upcomingDay = ""
+    weekAddDay = ""
     paneTask = ""
     weekPaneOpen = false
   }
@@ -309,8 +311,6 @@ PanelKeyCatcher {
       closeTask()
     if (searching)
       leaveSearch()
-    if (weekShown)
-      weekAddDay = weekCursorDay()
     fieldOpen = true
     viewCursor.index = -1
     addField.focusInput()
@@ -399,6 +399,9 @@ PanelKeyCatcher {
     if (text === "" || searchDraft !== "")
       return
     leaveSearch()
+    // The text hides the placeholder that would name a remembered Week
+    // day: the view's own day (today) then.
+    weekAddDay = ""
     openAdd()
     addField.text = text
     addField.cursorPosition = text.length
@@ -442,6 +445,12 @@ PanelKeyCatcher {
   readonly property string nextWeekDay: Model.addDays(Model.weekEndOf(store.today, weekStart), 1)
   // Today's Overdue heading: each of its tasks to today. A repeating task
   // stays (the error line says why).
+  // A row under Today's Overdue heading: its task's own date is past, also
+  // while a move shows it with a new day.
+  function overdueRow(row) {
+    var task = store.model.byId[row.id]
+    return !!task && !!task.due && task.due.day < store.today
+  }
   function moveOverdueToToday() {
     store.moveAll(rows.filter(function (row) {
       return row.kind === "task" && row.overdue && !row.struck && !row.moved
@@ -500,13 +509,25 @@ PanelKeyCatcher {
   // id alone, which is all a key needs there.
   function keyTarget() {
     var row = cursorRow()
-    if (!paneShown || viewCursor.byKeys || !row || row.kind !== "task" || row.id === paneTask)
+    // A completion on its way is no task to act on: the cursor's row then.
+    if (!paneShown || viewCursor.byKeys || !row || row.kind !== "task" || row.id === paneTask || Model.has(store.sending, paneTask))
       return row
     var stop = stopOf(paneTask)
     return stop >= 0 ? rows[stops[stop - firstRowStop]] : {
       kind: "task",
       id: paneTask
     }
+  }
+  // `d` for a task whose row isn't the cursor's (the pane's): the list
+  // brings that row into view first, so the menu has its date action to
+  // open on (a row out of view isn't built). Space and `t` need no row:
+  // the pane shows what they did.
+  function showTarget(row) {
+    var stop = row && row.kind === "task" && !weekShown ? stopOf(row.id) : -1
+    if (stop < 0 || stop === viewCursor.index)
+      return
+    taskList.positionViewAtIndex(stops[stop - firstRowStop], ListView.Contain)
+    taskList.forceLayout()
   }
   function reveal() {
     if (weekShown) {
@@ -582,6 +603,7 @@ PanelKeyCatcher {
     weekCard = card
     var current = weekCurrent()
     weekTask = current ? current.id : ""
+    noteWeekDay()
   }
   // The first card of the first column that has one.
   function weekHome() {
@@ -849,18 +871,18 @@ PanelKeyCatcher {
   readonly property string addError: store.addError
   readonly property bool addBusy: store.addPending
   readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : view === "week" ? (weekAddDay || store.today) : ""
-  // The Week view's add date, fixed as the field opens (openAdd): the
-  // cursor leaves the board for the field, as Upcoming keeps its day.
+  // The Week view's add date: the day of the column the cursor was last
+  // on (Overdue and Today today, Tomorrow tomorrow, Later the card's own
+  // day, a pending move's). It stays when the cursor leaves the board for
+  // + or the field, as Upcoming keeps its day; "" (today) until the cursor
+  // has been on the board, and once the selection is cleared.
   property string weekAddDay: ""
-  // The day the Week cursor's column stands for: Overdue and Today today,
-  // Tomorrow tomorrow, Later the card's own day (a pending move's); today
-  // without the cursor on the board.
-  function weekCursorDay() {
+  function noteWeekDay() {
     var card = weekShown && on(firstRowStop) ? weekCurrent() : null
     if (!card)
-      return store.today
+      return
     var key = weekColumns[weekColumn].key
-    return key === "tomorrow" ? Model.addDays(store.today, 1) : key === "later" ? card.dueDay : store.today
+    weekAddDay = key === "tomorrow" ? Model.addDays(store.today, 1) : key === "later" ? card.dueDay : store.today
   }
   readonly property string closeAfterAdd: pref("afterAdd")
   // Enter (alternate false) does what "After adding a task" says,
@@ -879,9 +901,15 @@ PanelKeyCatcher {
     var close = (closeAfterAdd === "close") !== !!alternate
     if (!store.addFromField(text, addDay, view === "project" ? projectId : ""))
       return
+    sentKept = true
     if (close)
       root.closeView()
   }
+  // This view's field still starts with the text it sent (every edit
+  // since kept it in front): only then is the rest "typed after it" when
+  // the add is done. A replaced draft that happens to start the same
+  // ("Buy milk" sent, then "Buy milkshakes" typed afresh) stays whole.
+  property bool sentKept: false
   Connections {
     target: root.store
     // Added: what was added leaves the field, also after the popup closed
@@ -889,12 +917,23 @@ PanelKeyCatcher {
     // way (the field stays open for the next task) stays, without the
     // spaces before it; text that no longer starts with it stays whole.
     function onFieldAdded(sent) {
-      var rest = Model.typedAfter(root.field.text, sent)
-      if (!root.searching && rest !== root.field.text) {
-        root.field.text = rest
-        root.field.cursorPosition = rest.length
+      var after = function (text) {
+        return root.sentKept ? Model.typedAfter(text, sent) : text === sent ? "" : text
       }
-      root.searchDraft = Model.typedAfter(root.searchDraft, sent)
+      var text = root.field.text
+      var rest = after(text)
+      if (!root.searching && rest !== text) {
+        // The caret keeps its place in what stays.
+        const caret = root.field.cursorPosition
+        root.field.text = rest
+        root.field.cursorPosition = Math.max(0, caret - (text.length - rest.length))
+      }
+      root.searchDraft = after(root.searchDraft)
+    }
+    // After the store's own handler (and its fieldAdded): the next add
+    // starts afresh, also when this one failed.
+    function onAddFinished() {
+      root.sentKept = false
     }
   }
   // The Quick Add tokens' colours (Model.quickAddRuns), on the band.
@@ -963,6 +1002,15 @@ PanelKeyCatcher {
   }
   onMoveRequested: function (dx, dy) {
     viewCursor.byKeys = true
+    var from = viewCursor.index
+    arrow(dx, dy)
+    // An arrow with nowhere to go (→ on a task, ↓ on the last row) still
+    // gives the keys the cursor the pointer left there: the pane shows that
+    // row, as after any arrow.
+    if (viewCursor.index === from)
+      followPane()
+  }
+  function arrow(dx, dy) {
     if (dy === 0 && on(switchStop)) {
       views.moveCursor(dx)
       return
@@ -1027,9 +1075,10 @@ PanelKeyCatcher {
       openTask(row.id, true)
     else if (text === "t" && row && row.kind === "task")
       store.moveToTomorrow(row.id)
-    else if (text === "d" && row && row.kind === "task" && !weekShown)
+    else if (text === "d" && row && row.kind === "task" && !weekShown) {
+      showTarget(row)
       openDateMenu(row.id, null, true)
-    else if (text === "T" && (modifiers & Qt.ShiftModifier) && row && row.kind === "task" && row.overdue && view === "today" && !searchActive)
+    } else if (text === "T" && (modifiers & Qt.ShiftModifier) && row && row.kind === "task" && overdueRow(row) && view === "today" && !searchActive)
       // Shift+t, not Caps Lock's "T" (a plain `t` there is no key, as the others).
       moveOverdueToToday()
   }
@@ -1379,6 +1428,8 @@ PanelKeyCatcher {
       Accessible.name: fieldBox.placeholder
       onTextEdited: {
         root.store.addError = ""
+        if (root.sentKept && !root.searching && !text.startsWith(root.store.pendingAddText))
+          root.sentKept = false
         if (root.searching)
           root.query = text
         root.suggestDismissed = false
@@ -2143,20 +2194,27 @@ PanelKeyCatcher {
       spacing: FoamyStyle.gapLarge
       readonly property bool closing: root.closeAfterAdd === "close"
       readonly property string enterText: closing ? FoamyI18n.t("add and close") : FoamyI18n.t("add, keep typing")
-      readonly property var hints: root.suggestOpen ? [
-        {
-          key: "↵",
-          text: root.suggestTyped ? enterText : FoamyI18n.t("insert")
-        },
-        {
-          key: "Tab",
-          text: FoamyI18n.t("insert")
-        },
+      readonly property var hints: root.suggestOpen ? (root.suggestTyped ? [
+          {
+            key: "↵",
+            text: enterText
+          },
+          {
+            key: "Tab",
+            text: FoamyI18n.t("insert")
+          }
+        ] : [
+          {
+            key: "↵",
+            also: "Tab",
+            text: FoamyI18n.t("insert")
+          }
+        ]).concat([
         {
           key: "Esc",
           text: FoamyI18n.t("close the list")
         }
-      ] : [
+      ]) : [
         {
           key: "↵",
           text: enterText
@@ -2182,6 +2240,12 @@ PanelKeyCatcher {
           KeyCap {
             anchors.verticalCenter: parent.verticalCenter
             text: hint.modelData.key
+          }
+          // A second key that does the same.
+          KeyCap {
+            visible: text !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            text: hint.modelData.also || ""
           }
           PlainText {
             anchors.verticalCenter: parent.verticalCenter
