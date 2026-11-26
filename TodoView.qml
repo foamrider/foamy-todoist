@@ -1029,7 +1029,8 @@ PanelKeyCatcher {
       store.moveToTomorrow(row.id)
     else if (text === "d" && row && row.kind === "task" && !weekShown)
       openDateMenu(row.id, null, true)
-    else if (text === "T" && row && row.kind === "task" && row.overdue && view === "today" && !searchActive)
+    else if (text === "T" && (modifiers & Qt.ShiftModifier) && row && row.kind === "task" && row.overdue && view === "today" && !searchActive)
+      // Shift+t, not Caps Lock's "T" (a plain `t` there is no key, as the others).
       moveOverdueToToday()
   }
   // ---- autocomplete (#project, @label) in the add field ---------------------------------------

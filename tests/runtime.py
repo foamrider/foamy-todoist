@@ -1858,6 +1858,8 @@ ShellRoot {
       view.cursor.emitTextKey(view, "T", Qt.ShiftModifier);
       if (!check(Object.keys(store.moves).length === 0, "T on a row due today does nothing (" + JSON.stringify(store.moves) + ")")) return;
       view.goTo(view.stopOf("t2"));
+      view.cursor.emitTextKey(view, "T");
+      if (!check(Object.keys(store.moves).length === 0, "T without Shift (Caps Lock) does nothing (" + JSON.stringify(store.moves) + ")")) return;
       view.cursor.emitTextKey(view, "T", Qt.ShiftModifier);
       if (!check(store.moves.t1 === shell.today && store.moves.t2 === shell.today && Object.keys(store.moves).length === 2, "T on an Overdue row: both overdue tasks (" + JSON.stringify(store.moves) + ")")) return;
       store.undo("t1");
