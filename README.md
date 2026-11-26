@@ -13,7 +13,8 @@ of tasks left today (overdue plus due today), like Foamy Zendesk's count.
 Nothing left today, or **Show in the bar: Icon only**, leaves just the mark;
 signed out, the mark stands alone. The tooltip says how many are left and how
 many of them are overdue. When a task you added with the panel closed
-wasn't added, a dot in the bar's urgent colour sits on the mark's corner
+was refused, or Todoist gave no answer, a dot in the bar's urgent colour
+sits on the mark's corner
 (the button keeps its width) and the tooltip says so, until the panel opens
 on any monitor and shows the text with why.
 

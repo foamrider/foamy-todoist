@@ -246,7 +246,7 @@
   "Todoist sent an unexpected reply.": "Todoist sendte et uventet svar.",
   "Todoist: %1, %2": "Todoist: %1, %2",
   "Todoist: not signed in": "Todoist: ikke logget inn",
-  "Todoist: your last task wasn't added. Open the panel to see why.": "Todoist: den siste oppgaven ble ikke lagt til. Åpne panelet for å se hvorfor.",
+  "Todoist: your last task may not have been added. Open the panel to see why.": "Todoist: den siste oppgaven ble kanskje ikke lagt til. Åpne panelet for å se hvorfor.",
   "Tomorrow": "I morgen",
   "Tomorrow · %1 tasks": {
     "one": "I morgen · %1 oppgave",

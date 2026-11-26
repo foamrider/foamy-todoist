@@ -18,6 +18,9 @@ Item {
   property bool hasCursor: false
   // The keys moved the cursor here: its accent border (FoamyCursor.byKeys).
   property bool byKeys: false
+  // The letter keys act on this row when it has the cursor (in Wide they
+  // can be the pane's task's instead): its actions' tooltips name them then.
+  property bool keysHere: true
   // Search: the title cut into runs, the query's matches bold (Model.matchRuns).
   // Runs sit in a Row, which lays them out in the layout's direction: only
   // for a left-to-right title in a left-to-right panel (else plain).
@@ -589,7 +592,7 @@ Item {
           objectName: "tomorrowAction"
           iconName: "sun"
           foreground: FoamyPalette.secondaryText
-          tooltipText: FoamyI18n.t("Tomorrow") + " (t)"
+          tooltipText: FoamyI18n.t("Tomorrow") + (row.keysHere ? " (t)" : "")
           onHoveredChanged: if (hovered)
             row.hovered()
           onClicked: row.tomorrowRequested()
@@ -599,7 +602,7 @@ Item {
           objectName: "dateAction"
           iconName: "calendar"
           foreground: FoamyPalette.secondaryText
-          tooltipText: FoamyI18n.t("Date") + " (d)"
+          tooltipText: FoamyI18n.t("Date") + (row.keysHere ? " (d)" : "")
           onHoveredChanged: if (hovered)
             row.hovered()
           onClicked: row.dateMenuRequested()

@@ -1821,6 +1821,9 @@ PanelKeyCatcher {
           height: root.heightOf(modelData)
           hasCursor: root.stopOfRow[index] >= 0 && viewCursor.index === root.stopOfRow[index]
           byKeys: viewCursor.byKeys
+          // As keyTarget(): the pointer's cursor beside another task in the
+          // pane leaves the keys with the pane's task.
+          keysHere: !root.paneShown || viewCursor.byKeys || root.paneTask === modelData.id || Model.has(root.store.sending, root.paneTask)
           selected: root.paneShown && modelData.kind === "task" && root.paneTask === modelData.id
           onHovered: if (!root.fieldFocused && root.stopOfRow[index] >= 0)
             viewCursor.hover(root.stopOfRow[index])

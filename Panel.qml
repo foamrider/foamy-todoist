@@ -107,7 +107,7 @@ Ui.Panel {
     labelVisible: false
     hasVisualContent: true
     fixedWidth: root.bar && root.bar.vertical ? -1 : Math.max(Style.bar.iconSlot, barContent.implicitWidth + Style.bar.iconSlot - Style.bar.iconCanvas)
-    tooltipText: !TodoStore.signedIn ? FoamyI18n.t("Todoist: not signed in") : TodoStore.addUnseen ? FoamyI18n.t("Todoist: your last task wasn't added. Open the panel to see why.") : !TodoStore.loaded ? "Todoist" : FoamyI18n.t("Todoist: %1, %2", [FoamyI18n.tn("%1 left today", TodoStore.counts.today), FoamyI18n.tn("%1 overdue", TodoStore.counts.overdue)])
+    tooltipText: !TodoStore.signedIn ? FoamyI18n.t("Todoist: not signed in") : TodoStore.addUnseen ? FoamyI18n.t("Todoist: your last task may not have been added. Open the panel to see why.") : !TodoStore.loaded ? "Todoist" : FoamyI18n.t("Todoist: %1, %2", [FoamyI18n.tn("%1 left today", TodoStore.counts.today), FoamyI18n.tn("%1 overdue", TodoStore.counts.overdue)])
     onPressed: function (pressedButton) {
       if (pressedButton === Qt.RightButton)
         settingsState.show()

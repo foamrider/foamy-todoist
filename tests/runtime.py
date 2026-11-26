@@ -712,7 +712,7 @@ ShellRoot {
   function barButtons() {
     return [one, two].map(function(panel) { return panel.children.find(function(item) { return item.objectName === "todoistButton"; }); });
   }
-  readonly property string unseenText: "Todoist: your last task wasn't added. Open the panel to see why."
+  readonly property string unseenText: "Todoist: your last task may not have been added. Open the panel to see why."
   // "" when no bar button shows the unseen add (its mark or its tooltip);
   // else which do.
   function unseenShown() {
@@ -1105,6 +1105,9 @@ ShellRoot {
     var surfaceB = shell.find(rowB, "taskSurface");
     ev.mouseMove(surfaceB, surfaceB.width * 0.4, surfaceB.height / 2, -1, Qt.NoButton, Qt.NoModifier);
     if (!check(view.cursor.index === bStop && !view.cursor.byKeys && view.paneTask === a.id, "the pointer on " + b.id + ": the cursor there, the pane on " + a.id + " (" + JSON.stringify([view.cursor.index, view.cursor.byKeys, view.paneTask]) + ")")) return;
+    // The pointed row's actions don't name keys that act on another task.
+    var tips = function(row) { return [shell.find(row, "tomorrowAction").tooltipText, shell.find(row, "dateAction").tooltipText]; };
+    if (!check(shell.find(rowB, "rowActions").visible && JSON.stringify(tips(rowB)) === JSON.stringify(["Tomorrow", "Date"]), "the pointed row's actions name no keys (" + JSON.stringify(tips(rowB)) + ")")) return;
     ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
     if (!check(store.struck[a.id] === true && !Model.has(store.struck, b.id), "Space completed the pane's task, not the pointed row (" + JSON.stringify(store.struck) + ")")) return;
     ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
@@ -1130,6 +1133,8 @@ ShellRoot {
         shell.put("reply-task.json", JSON.stringify({ ok: true, task: { id: c.id, description: "", truncated: false } }));
         ev.keyClick(Qt.Key_Down, Qt.NoModifier, -1);
         if (!check(view.cursorRow().id === c.id && view.paneTask === c.id && view.cursor.byKeys, "↓ from the pointed row: the next row, in the pane (" + view.paneTask + ")")) return;
+        var rowC = shell.builtRows(view).find(function(r) { return r.entry.id === c.id; });
+        if (!check(JSON.stringify(tips(rowC)) === JSON.stringify(["Tomorrow (t)", "Date (d)"]), "the keys' row: its actions name their keys (" + JSON.stringify(tips(rowC)) + ")")) return;
         ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
         if (!check(store.struck[c.id] === true && !Model.has(store.struck, a.id) && !Model.has(store.struck, b.id), "after ↓, Space completed the cursor's row (" + JSON.stringify(store.struck) + ")")) return;
         ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
