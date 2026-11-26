@@ -191,7 +191,7 @@ PanelKeyCatcher {
     projectId = next === "project" ? project : ""
     overdueOpen = false
     upcomingDay = ""
-    weekAddDay = ""
+    weekAddColumn = ""
     weekPaneOpen = false
     store.addError = ""
     store.lastView = next
@@ -293,7 +293,7 @@ PanelKeyCatcher {
   function clearSelection() {
     viewCursor.index = -1
     upcomingDay = ""
-    weekAddDay = ""
+    weekAddColumn = ""
     paneTask = ""
     weekPaneOpen = false
   }
@@ -401,8 +401,10 @@ PanelKeyCatcher {
     leaveSearch()
     // The text hides the placeholder that would name a remembered Week
     // day: the view's own day (today) then.
-    weekAddDay = ""
+    weekAddColumn = ""
     openAdd()
+    // Put in by the view, not typed after a sent text.
+    sentKept = false
     addField.text = text
     addField.cursorPosition = text.length
   }
@@ -443,14 +445,14 @@ PanelKeyCatcher {
     store.move(dateMenuTask, day)
   }
   readonly property string nextWeekDay: Model.addDays(Model.weekEndOf(store.today, weekStart), 1)
-  // Today's Overdue heading: each of its tasks to today. A repeating task
-  // stays (the error line says why).
   // A row under Today's Overdue heading: its task's own date is past, also
   // while a move shows it with a new day.
   function overdueRow(row) {
     var task = store.model.byId[row.id]
     return !!task && !!task.due && task.due.day < store.today
   }
+  // Today's Overdue heading: each of its tasks to today. A repeating task
+  // stays (the error line says why).
   function moveOverdueToToday() {
     store.moveAll(rows.filter(function (row) {
       return row.kind === "task" && row.overdue && !row.struck && !row.moved
@@ -506,7 +508,7 @@ PanelKeyCatcher {
   // on another one (hover lights a row, the pane stays): then the pane's,
   // the task being read. The arrow keys still move from the cursor. The
   // pane's task is its list row, else (the Week view, or not listed) its
-  // id alone, which is all a key needs there.
+  // id alone (see paneTarget for `d`).
   function keyTarget() {
     var row = cursorRow()
     // A completion on its way is no task to act on: the cursor's row then.
@@ -518,16 +520,12 @@ PanelKeyCatcher {
       id: paneTask
     }
   }
-  // `d` for a task whose row isn't the cursor's (the pane's): the list
-  // brings that row into view first, so the menu has its date action to
-  // open on (a row out of view isn't built). Space and `t` need no row:
-  // the pane shows what they did.
-  function showTarget(row) {
-    var stop = row && row.kind === "task" && !weekShown ? stopOf(row.id) : -1
-    if (stop < 0 || stop === viewCursor.index)
-      return
-    taskList.positionViewAtIndex(stops[stop - firstRowStop], ListView.Contain)
-    taskList.forceLayout()
+  // A key's task is the pane's, not the cursor's row. `d` then opens the
+  // pane's own Date menu: its row may be out of view (not built) or not in
+  // this list at all, and the pane is where that task is read.
+  function paneTarget(row) {
+    var at = cursorRow()
+    return !!row && paneShown && row.id === paneTask && (!at || at.id !== row.id)
   }
   function reveal() {
     if (weekShown) {
@@ -623,6 +621,9 @@ PanelKeyCatcher {
         if (col.entries[col.cards[j]].id === weekTask) {
           weekColumn = i
           weekCard = j
+          // The cursor's card moved (Ctrl+←/→, a typed date, a sync): the
+          // add day is its new column's.
+          noteWeekDay()
           return
         }
     }
@@ -870,19 +871,26 @@ PanelKeyCatcher {
   // a popup opened on another monitor before the reply shows it too.
   readonly property string addError: store.addError
   readonly property bool addBusy: store.addPending
-  readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : view === "week" ? (weekAddDay || store.today) : ""
+  readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : view === "week" ? weekAddDay : ""
   // The Week view's add date: the day of the column the cursor was last
   // on (Overdue and Today today, Tomorrow tomorrow, Later the card's own
   // day, a pending move's). It stays when the cursor leaves the board for
-  // + or the field, as Upcoming keeps its day; "" (today) until the cursor
-  // has been on the board, and once the selection is cleared.
-  property string weekAddDay: ""
+  // + or the field, as Upcoming keeps its day; today until the cursor has
+  // been on the board, and once the selection is cleared. Kept as the
+  // column (and Later's day), so "tomorrow" is right after midnight too.
+  property string weekAddColumn: ""
+  property string weekAddLater: ""
+  readonly property string weekAddDay: weekAddColumn === "tomorrow" ? Model.addDays(store.today, 1) : weekAddColumn === "later" ? weekAddLater : store.today
   function noteWeekDay() {
+    // A draft keeps the day it was started for: its text hides the
+    // placeholder that would name another.
+    if (adding && addField.text !== "")
+      return
     var card = weekShown && on(firstRowStop) ? weekCurrent() : null
     if (!card)
       return
-    var key = weekColumns[weekColumn].key
-    weekAddDay = key === "tomorrow" ? Model.addDays(store.today, 1) : key === "later" ? card.dueDay : store.today
+    weekAddColumn = weekColumns[weekColumn].key
+    weekAddLater = weekAddColumn === "later" ? card.dueDay : ""
   }
   readonly property string closeAfterAdd: pref("afterAdd")
   // Enter (alternate false) does what "After adding a task" says,
@@ -1076,8 +1084,10 @@ PanelKeyCatcher {
     else if (text === "t" && row && row.kind === "task")
       store.moveToTomorrow(row.id)
     else if (text === "d" && row && row.kind === "task" && !weekShown) {
-      showTarget(row)
-      openDateMenu(row.id, null, true)
+      if (paneTarget(row))
+        taskEditor.openDateMenu(true)
+      else
+        openDateMenu(row.id, null, true)
     } else if (text === "T" && (modifiers & Qt.ShiftModifier) && row && row.kind === "task" && overdueRow(row) && view === "today" && !searchActive)
       // Shift+t, not Caps Lock's "T" (a plain `t` there is no key, as the others).
       moveOverdueToToday()
@@ -1160,6 +1170,7 @@ PanelKeyCatcher {
       // Text: cleared. Empty: the field closes (search ends too).
       if (addField.text !== "") {
         addField.text = ""
+        sentKept = false
         query = ""
         store.addError = ""
         if (!searching)

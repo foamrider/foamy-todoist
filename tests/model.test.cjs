@@ -254,6 +254,10 @@ test('upcoming headings and trailing text, in English and Norwegian', () => {
   const trail = (id, lang) => Model.trailingDay(rows.find((row) => row.id === id), formatter(lang), catalog(lang));
   assert.deepEqual(['tue', 'wed', 'nw', 'nw2', 'dec', 'jan'].map((id) => trail(id, 'nb')), ['', '', 'Man.', 'Tor.', 'Tir. 1.', 'Tir. 5.']);
   assert.deepEqual(['nw', 'dec'].map((id) => trail(id, 'en')), ['Mon', 'Tue 1']);
+  // The Week view's Later heading: a capital too, wide and narrow.
+  assert.equal(Model.weekDayHeading('2026-11-23', false, formatter('nb'), catalog('nb')), 'Mandag 23. november');
+  assert.equal(Model.weekDayHeading('2026-11-23', true, formatter('nb'), catalog('nb')), 'Man. 23. nov.');
+  assert.equal(Model.weekDayHeading('2026-11-23', true, formatter('en'), catalog('en')), 'Mon 23 Nov');
   assert.equal(rows.find((row) => row.id === 'nw').dueTime, '09:00');
   assert.equal(rows.find((row) => row.id === 'nw2').dueTime, '');
 });

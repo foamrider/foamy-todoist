@@ -1381,6 +1381,14 @@ function trailingDay(row, format, t) {
   return capitalized(format(day, row.trail === "weekday" ? "ddd" : t("ddd d")))
 }
 
+// A Later day's heading in the Week view: the weekday and the date, short
+// where the columns are narrow (the pane is open). It stands alone, so it
+// starts with a capital.
+function weekDayHeading(dayKey, narrow, format, t) {
+  var day = dayDate(dayKey)
+  return capitalized(narrow ? format(day, t("ddd d MMM")) : format(day, "dddd") + " " + format(day, t("d MMMM")))
+}
+
 // ---- the open command ------------------------------------------------------------
 
 // The argv that opens `url`: xdg-open without a command; else the command
@@ -1593,7 +1601,7 @@ if (typeof module !== "undefined")
   module.exports = {
     WEB, webUrl, validId, validDate, colorRole, priorityRole, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
-    TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion, suggestionTyped, typedAfter,
+    TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion, suggestionTyped, typedAfter, weekDayHeading,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
     MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
     weekEndOf, searchWords, matchRuns, movedDue, movedDate, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText

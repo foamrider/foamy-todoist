@@ -866,8 +866,8 @@ ShellRoot {
     if (!check(store.moves[a.id] === Model.addDays(shell.today, 1) && Object.keys(store.moves).length === 1, "t moved the pane's task to tomorrow (" + JSON.stringify(store.moves) + ")")) return;
     store.undo(a.id);
     view.cursor.emitTextKey(view, "d");
-    if (!check(view.dateMenuItem.opened && view.dateMenuTask === a.id, "d opened the pane's task's menu of days (" + view.dateMenuTask + ")")) return;
-    view.dateMenuItem.close();
+    if (!check(editor.menu.opened && editor.taskId === a.id && !view.dateMenuItem.opened, "d opened the pane's own Date menu, on its task (" + JSON.stringify([editor.menu.opened, editor.taskId, view.dateMenuItem.opened]) + ")")) return;
+    editor.menu.close();
     view.focusList();
     view.cursor.emitTextKey(view, "e");
     shell.afterFrame(view, function() {
@@ -902,9 +902,9 @@ ShellRoot {
   // The Week view with its pane open on t4, the pointer on t6: Space and
   // Ctrl+→ act on t4. Then `done`, the pane closed and nothing changed.
   // The pane's task far down a long list, its row not built, the pointer
-  // on the first row: d and Space act on the pane's task; for d the list
-  // brings its row into view first (the menu of days opens on it). While
-  // its completion is on its way the keys act on the
+  // on the first row: d and Space act on the pane's task (d opens the
+  // pane's own Date menu: there is no row to open one on). While its
+  // completion is on its way the keys act on the
   // cursor's row. → on the pointed row has nowhere to go: the keys have the
   // cursor then, and the pane shows that row. Then `done`, the fixture's
   // list back.
@@ -935,11 +935,11 @@ ShellRoot {
         var first = pointAtFirst();
         if (!check(!built("far39") && view.cursor.index === view.firstRowStop && !view.cursor.byKeys && view.paneTask === "far39", "the pointer on the first row, far39's row not built, the pane on far39 (" + JSON.stringify([!!built("far39"), view.cursor.index, view.cursor.byKeys, view.paneTask]) + ")")) return;
         view.cursor.emitTextKey(view, "d");
-        if (!check(view.dateMenuItem.opened && view.dateMenuTask === "far39", "d: the far row came into view and its menu of days opened (" + JSON.stringify([view.dateMenuItem.opened, view.dateMenuTask]) + ")")) return;
-        view.dateMenuItem.close();
+        if (!check(view.editor.menu.opened && view.editor.taskId === "far39" && !view.dateMenuItem.opened && !built("far39"), "d with far39's row not built: the pane's own Date menu (" + JSON.stringify([view.editor.menu.opened, view.editor.taskId, view.dateMenuItem.opened]) + ")")) return;
+        view.editor.menu.close();
         view.focusList();
         pointAtFirst();
-        if (!check(!built("far39") && view.paneTask === "far39" && !view.cursor.byKeys, "back at the top, far39's row not built")) return;
+        if (!check(!built("far39") && view.paneTask === "far39" && !view.cursor.byKeys, "the pointer on the first row again")) return;
         ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
         if (!check(store.struck.far39 === true && Object.keys(store.struck).length === 1, "Space: far39 struck, no other row (" + JSON.stringify(store.struck) + ")")) return;
         ev.keyClick(Qt.Key_Space, Qt.NoModifier, -1);
@@ -3306,6 +3306,30 @@ ShellRoot {
           ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
           ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
           if (!check(!big4.fieldOpen, "Esc twice: the field closed")) return;
+          // The cursor's card moved a day (Ctrl+→): the add is for its new
+          // column's day.
+          big4.focusList();
+          big4.weekPlace(1, 1);
+          big4.goTo(big4.firstRowStop);
+          var moving = big4.cursorRow().id;
+          ev.keyClick(Qt.Key_Right, Qt.ControlModifier, -1);
+          if (!check(big4.cursorRow() && big4.cursorRow().id === moving && big4.weekColumns[big4.weekColumn].key === "tomorrow" && store.moves[moving] === tomorrow, "Ctrl+→: the card and the cursor in Tomorrow (" + JSON.stringify([big4.weekColumn, store.moves]) + ")")) return;
+          big4.cursor.emitTextKey(big4, "a");
+          if (!check(big4.fieldFocused && big4.field.placeholderText === "Add a task for Thursday 19 November…", "a after Ctrl+→: the add is for tomorrow (" + big4.field.placeholderText + ")")) return;
+          // A draft keeps the day it was started for: a click on a Later
+          // card (the field stays open, its text hides the placeholder)
+          // doesn't change it.
+          for (var w of "Draft") ev.keyClickChar(w, Qt.NoModifier, -1);
+          var laterCard = shell.find(big4.week, "card-" + big4.weekColumns[3].entries[big4.weekColumns[3].cards[0]].id);
+          ev.mouseClick(laterCard, laterCard.width / 2, laterCard.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+          if (!check(big4.fieldOpen && big4.field.text === "Draft" && big4.weekColumns[big4.weekColumn].key === "later" && big4.addDay === tomorrow, "a click on a Later card with a draft: the draft's day stays (" + JSON.stringify([big4.fieldOpen, big4.weekColumn, big4.addDay]) + ")")) return;
+          big4.field.focusInput();
+          ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+          ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+          big4.clearSelection();
+          big4.focusList();
+          store.undo(moving);
+          if (!check(!big4.fieldOpen && !big4.weekPaneOpen && !Model.has(store.moves, moving), "the field and the pane closed, the move undone")) return;
           store.undo("t11");
           store.holdUndo(false);
           ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);

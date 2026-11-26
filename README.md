@@ -230,8 +230,9 @@ the details pane on the right (the left in right-to-left languages), which
 shows the selected task (the one the keys or a click moved to; pointing at
 a row doesn't change it). While it shows a task, the task keys (Space,
 Enter, `e`, `t`, `d`, `T`, Ctrl+O, and Ctrl+←/→ in the Week view) act on
-it, also with the pointer on another row; after an arrow key they act on
-the cursor's row, which the pane then shows. Its header row shows the task's project (and
+it, also with the pointer on another row (`d` then opens the pane's own
+Date menu); after an arrow key they act on the cursor's row, which the pane
+then shows. Its header row shows the task's project (and
 section), **Open in Todoist** and **Close** (as Esc in the list). `e` or a
 click on a part puts the caret there, Tab moves through the parts (the
 header's two buttons last), and Esc gives the keys back to the list.
