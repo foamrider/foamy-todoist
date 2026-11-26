@@ -12,9 +12,9 @@ How the lists are made:
 
 ## `foamy-todoist-helper`
 
-- `bin/aarch64/foamy-todoist-helper`: sha256 `79e4285afb2d0aceec9d21012526e6d8fb54cc9264e7050f66f6b5878aea2793`
-- `bin/x86_64/foamy-todoist-helper`: sha256 `9841f246b766f62bc828dd84563166f69c24cbddb8492a2139d9a355dd803ca9`
-- `native/native.pin`: source `9fd461133361ce26715a55ed8b33d0036b6d2d2ad0d5ab9aae50340bdcc3cd49`, toolchain 1.99.1
+- `bin/aarch64/foamy-todoist-helper`: sha256 `08ef8cbd783fc03e6a378379fff1b814c6d6f1d036c8b64b719f309e5418c283`
+- `bin/x86_64/foamy-todoist-helper`: sha256 `8ff8241f806dc94f9aa452d19590baa6b0dffeafd619c523411ec451899fd677`
+- `native/native.pin`: source `fe114afa89b4f14c1c7bb0c1553a8ad5ef9200e2158331304112cea0393cbbc1`, toolchain 1.99.1
 
 ### Crates linked into `foamy-todoist-helper`
 
