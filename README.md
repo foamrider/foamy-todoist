@@ -129,9 +129,10 @@ button across the band (the band keeps its height, and nothing moves under
 it). Its placeholder says where the task goes: "Add a task to the Inbox…",
 "for today…", for Upcoming's day, or to the project you are looking at;
 that date or project applies when the text gives none. In the Week view
-the task goes to the day of the column the cursor is in when the field
-opens: today from Overdue and Today, tomorrow from Tomorrow, the card's day
-from Later, and today with the cursor off the board. The Quick Add parts
+the task goes to the day of the column the cursor was last in: today from
+Overdue and Today, tomorrow from Tomorrow, the card's day from Later, and
+today until the cursor has been on the board (the placeholder names the
+day). The Quick Add parts
 show in colour as you type: `#project`, `/section` and `+person` in the
 accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
 the urgent colour, `{deadline}` and ` // description` muted; dates are left
@@ -238,8 +239,9 @@ the details pane on the right (the left in right-to-left languages), which
 shows the selected task (the one the keys or a click moved to; pointing at
 a row doesn't change it). While it shows a task, the task keys (Space,
 Enter, `e`, `t`, `d`, `T`, Ctrl+O, and Ctrl+←/→ in the Week view) act on
-it, also with the pointer on another row; after an arrow key they act on
-the cursor's row, which the pane then shows. Its header row shows the task's project (and
+it, also with the pointer on another row (`d` then opens the pane's own
+Date menu); after an arrow key they act on the cursor's row, which the pane
+then shows. Its header row shows the task's project (and
 section), **Open in Todoist** and **Close** (as Esc in the list). `e` or a
 click on a part puts the caret there, Tab moves through the parts (the
 header's two buttons last), and Esc gives the keys back to the list.
