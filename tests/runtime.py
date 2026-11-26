@@ -626,6 +626,41 @@ ShellRoot {
     // The page is laid out by the next frame: click what is drawn.
     shell.afterFrame(page, function() { next(0); });
   }
+  // The keys once Settings hides (the page has them): Esc on Settings goes
+  // back to the list, and the next Esc closes the popup. Then Settings
+  // again (s), the popup closes on it and opens again on the list: the
+  // first Esc closes it. Then done(), the popup closed.
+  function keysAfterSettings(view, done) {
+    ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+    if (!check(!view.editingSettings && one.opened, "Esc on Settings went back to the list")) return;
+    // The keys move in a deferred call: one drawn frame later.
+    shell.afterFrame(view, function() {
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(!one.opened, "after going back from Settings, Esc closed the popup")) return;
+      shell.afterClose(function() {
+        one.open();
+        wait.waitFor(function() { return one.opened && view.active; }, 5000, function(opened) {
+          if (!check(opened, "the popup opened again")) return;
+          view.cursor.emitTextKey(view, "s");
+          wait.waitFor(function() { return view.editingSettings && view.settingsPage.activeFocus; }, 5000, function(shown) {
+            if (!check(shown, "s opened Settings, with the keys")) return;
+            one.close();
+            shell.afterClose(function() {
+              one.open();
+              wait.waitFor(function() { return one.opened && view.active && !view.editingSettings; }, 5000, function(again) {
+                if (!check(again, "the popup closed on Settings opened again on the list")) return;
+                shell.afterFrame(view, function() {
+                  ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+                  if (!check(!one.opened, "closed on Settings and opened again, the first Esc closed the popup")) return;
+                  shell.afterClose(done);
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  }
   function check(ok, message) {
     if (!ok && !shell.finished) { shell.finished = true; console.log("FOAMY FAIL " + message); Qt.quit(); }
     return ok;
@@ -2814,9 +2849,7 @@ ShellRoot {
       if (!check(view.view === "today" && view.size === "standard", "the Week view fell back to Today (" + view.view + ")")) return;
       view.settingsRequested();
       shell.refusedPicks(view, function() {
-        view.settingsClosed();
-        one.close();
-        one.prefs.save("openOn", "today");
+        shell.keysAfterSettings(view, function() { one.prefs.save("openOn", "today"); });
       });
       break;
     case 101:

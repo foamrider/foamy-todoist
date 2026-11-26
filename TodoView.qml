@@ -1020,14 +1020,15 @@ PanelKeyCatcher {
   // The popup builds this view on its first open with `active` already true.
   Component.onCompleted: if (active)
     prepare()
+  // When Settings hides (Back, or the reset as the popup closes), FoamyPopup
+  // gives the keys the page had to foamyKeyHome (keyFocus), as focusList().
   onEditingSettingsChanged: {
     if (editingSettings) {
       heroBand.closeMenu()
       viewCursor.reset()
       settingsView.resetScroll()
       Qt.callLater(settingsView.focusBack)
-    } else
-      Qt.callLater(focusList)
+    }
   }
   blocked: editingSettings || pageShown || heroBand.menuOpen || fieldFocused || taskEditor.activeFocus || taskEditor.menuOpen || overviewPane.activeFocus
   // A minute tick for "Updated …" while the popup is open.
