@@ -626,6 +626,37 @@ ShellRoot {
     // The page is laid out by the next frame: click what is drawn.
     shell.afterFrame(page, function() { next(0); });
   }
+  // A right-click on the empty add field opens its menu, which takes the
+  // keys. That isn't the end of the edit: the field stays open, the menu's
+  // Paste lands in it (the stand-in clipboard reads "folder"), and Esc
+  // clears it with the keys still in the field. Then done().
+  function emptyFieldMenu(view, done) {
+    var field = view.field;
+    var editor = field.editorItem;
+    var menu = editor.Controls.ContextMenu.menu;
+    var adds = shell.calls("add").length;
+    // Grown all the way, so the click lands on the drawn field.
+    wait.waitFor(function() { return view.band.fieldProgress === 1; }, 5000, function(grown) {
+      if (!check(grown && view.adding && field.text === "", "the empty add field is open")) return;
+      shell.afterFrame(field, function() {
+        ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.RightButton, Qt.NoModifier, -1);
+        wait.waitFor(function() { return menu.opened; }, 5000, function(opened) {
+          if (!check(opened && !field.inputActiveFocus && view.adding && field.visible, "the empty add field stays open while its menu has the keys (" + JSON.stringify([opened, field.inputActiveFocus, view.fieldOpen]) + ")")) return;
+          var paste = null;
+          for (var i = 0; i < menu.count; i++)
+            if (menu.itemAt(i) && menu.itemAt(i).text === "Paste") paste = menu.itemAt(i);
+          if (!check(paste && paste.enabled, "the add field's menu has Paste")) return;
+          ev.mouseClick(paste, paste.width / 2, paste.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+          wait.waitFor(function() { return !menu.visible && !field.pasteRunning && field.text !== ""; }, 10000, function(pasted) {
+            if (!check(pasted && field.text === "folder" && view.adding && view.fieldFocused && shell.calls("add").length === adds, "the menu's Paste landed in the open add field, nothing added (" + JSON.stringify([field.text, field.pasteError, view.fieldOpen, view.fieldFocused]) + ")")) return;
+            ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+            if (!check(field.text === "" && view.adding && view.fieldFocused, "Esc cleared the paste, the empty field keeps the keys")) return;
+            done();
+          });
+        });
+      });
+    });
+  }
   // The keys once Settings hides (the page has them): Esc on Settings goes
   // back to the list, and the next Esc closes the popup. Then Settings
   // again (s), the popup closes on it and opens again on the list: the
@@ -1166,7 +1197,7 @@ ShellRoot {
     case 39: return [function() { return store.launchError === "" && shell.opened().length === 5 && !store.launchRunning; }, 15000, "the next launch worked"];
     case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 10000, "the standard popup again, the completion sent"];
     case 41: return [function() { return view.fieldFocused; }, 10000, "the empty field, to click away from"];
-    case 42: return [function() { return view.fieldFocused; }, 10000, "the empty field again"];
+    case 42: return [function() { return view.view === "inbox" && view.fieldFocused; }, 10000, "the empty field again, in the Inbox"];
     case 43: return [function() { return view.fieldFocused; }, 10000, "the field for search and drafts"];
     case 44: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.fieldFocused; }, 10000, "the reopened popup with the draft"];
     case 45: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the reopened popup after Esc"];
@@ -1844,12 +1875,16 @@ ShellRoot {
       view.openAdd();
       break;
     case 41:
-      // A click on a tab while the empty field has the keys: it closes, the view switches.
+      // The empty field's own right-click menu keeps it open. Then a click
+      // on a tab while the empty field has the keys: it closes, the view
+      // switches, and + doesn't get the cursor.
       view.setView("today");
-      var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
-      ev.mouseClick(tab, tab.width / 2, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
-      if (!check(view.view === "inbox" && !view.fieldOpen && !view.fieldFocused, "a tab click closed the empty field (" + view.view + ", " + view.fieldOpen + ")")) return;
-      view.openAdd();
+      shell.emptyFieldMenu(view, function() {
+        var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
+        ev.mouseClick(tab, tab.width / 2, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+        if (!check(view.view === "inbox" && !view.fieldOpen && !view.fieldFocused && view.cursor.index !== view.addStop, "a tab click closed the empty field (" + view.view + ", " + view.fieldOpen + ", cursor " + view.cursor.index + ")")) return;
+        view.openAdd();
+      });
       break;
     case 42:
       // A click on a ring: the field closes too.
