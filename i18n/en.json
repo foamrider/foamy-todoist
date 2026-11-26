@@ -256,7 +256,7 @@
   "Todoist sent an unexpected reply.": "Todoist sent an unexpected reply.",
   "Todoist: %1, %2": "Todoist: %1, %2",
   "Todoist: not signed in": "Todoist: not signed in",
-  "Todoist: your last task wasn't added. Open the panel to see why.": "Todoist: your last task wasn't added. Open the panel to see why.",
+  "Todoist: your last task may not have been added. Open the panel to see why.": "Todoist: your last task may not have been added. Open the panel to see why.",
   "Tomorrow": "Tomorrow",
   "tomorrow": "tomorrow",
   "Tomorrow · %1 tasks": {

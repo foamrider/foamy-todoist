@@ -404,7 +404,7 @@ PanelKeyCatcher {
     weekAddColumn = ""
     openAdd()
     // Put in by the view, not typed after a sent text.
-    sentKept = false
+    store.sentKept = false
     addField.text = text
     addField.cursorPosition = text.length
   }
@@ -451,6 +451,13 @@ PanelKeyCatcher {
     var task = store.model.byId[row.id]
     return !!task && !!task.due && task.due.day < store.today
   }
+  // Shift+T moves Today's Overdue tasks when the key's task (keyTarget) is
+  // one of them, not in search. The key and Move to today's tooltip both
+  // ask here.
+  function moveAllKeyActs(row) {
+    return !!row && row.kind === "task" && view === "today" && !searchActive && overdueRow(row)
+  }
+  readonly property bool moveAllKeyHere: moveAllKeyActs(keyTarget())
   // Today's Overdue heading: each of its tasks to today. A repeating task
   // stays (the error line says why).
   function moveOverdueToToday() {
@@ -870,6 +877,21 @@ PanelKeyCatcher {
   // The add in flight and its outcome are the store's (once per shell):
   // a popup opened on another monitor before the reply shows it too.
   readonly property string addError: store.addError
+  // This view shows the add field with why its last add failed (the
+  // list's error line): the bar buttons' mark goes. Not on Settings or
+  // Small's editor page, where the line is out of sight.
+  readonly property bool addErrorShown: active && store.signedIn && !editingSettings && !pageShown && fieldOpen && !searching && addError !== ""
+  // Checked a call later, once the change has settled: a popup closing
+  // from Settings hides the page before `active` follows, which would
+  // show the line for that moment.
+  function noteAddErrorSeen() {
+    Qt.callLater(function () {
+      if (root.addErrorShown && root.store.addUnseen)
+        root.store.addUnseen = false
+    })
+  }
+  onAddErrorShownChanged: if (addErrorShown)
+    noteAddErrorSeen()
   readonly property bool addBusy: store.addPending
   readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : view === "week" ? weekAddDay : ""
   // The Week view's add date: the day of the column the cursor was last
@@ -909,39 +931,31 @@ PanelKeyCatcher {
     var close = (closeAfterAdd === "close") !== !!alternate
     if (!store.addFromField(text, addDay, view === "project" ? projectId : ""))
       return
-    sentKept = true
     if (close)
       root.closeView()
   }
-  // This view's field still starts with the text it sent (every edit
-  // since kept it in front): only then is the rest "typed after it" when
-  // the add is done. A replaced draft that happens to start the same
-  // ("Buy milk" sent, then "Buy milkshakes" typed afresh) stays whole.
-  property bool sentKept: false
   Connections {
     target: root.store
+    // A failure that arrives while this view shows the line is seen.
+    function onAddUnseenChanged() {
+      if (root.store.addUnseen)
+        root.noteAddErrorSeen()
+    }
     // Added: what was added leaves the field, also after the popup closed
     // or a search started. Text typed after it while the add was on its
     // way (the field stays open for the next task) stays, without the
-    // spaces before it; text that no longer starts with it stays whole.
-    function onFieldAdded(sent) {
-      var after = function (text) {
-        return root.sentKept ? Model.typedAfter(text, sent) : text === sent ? "" : text
-      }
+    // spaces before it; text that no longer starts with it stays whole
+    // (TodoStore.sentKept, per shell: the field may be another monitor's).
+    function onFieldAdded(sent, kept) {
       var text = root.field.text
-      var rest = after(text)
+      var rest = root.store.afterAdd(text, sent, kept)
       if (!root.searching && rest !== text) {
         // The caret keeps its place in what stays.
         const caret = root.field.cursorPosition
         root.field.text = rest
         root.field.cursorPosition = Math.max(0, caret - (text.length - rest.length))
       }
-      root.searchDraft = after(root.searchDraft)
-    }
-    // After the store's own handler (and its fieldAdded): the next add
-    // starts afresh, also when this one failed.
-    function onAddFinished() {
-      root.sentKept = false
+      root.searchDraft = root.store.afterAdd(root.searchDraft, sent, kept)
     }
   }
   // The Quick Add tokens' colours (Model.quickAddRuns), on the band.
@@ -1088,7 +1102,7 @@ PanelKeyCatcher {
         taskEditor.openDateMenu(true)
       else
         openDateMenu(row.id, null, true)
-    } else if (text === "T" && (modifiers & Qt.ShiftModifier) && row && row.kind === "task" && overdueRow(row) && view === "today" && !searchActive)
+    } else if (text === "T" && (modifiers & Qt.ShiftModifier) && moveAllKeyActs(row))
       // Shift+t, not Caps Lock's "T" (a plain `t` there is no key, as the others).
       moveOverdueToToday()
   }
@@ -1170,7 +1184,7 @@ PanelKeyCatcher {
       // Text: cleared. Empty: the field closes (search ends too).
       if (addField.text !== "") {
         addField.text = ""
-        sentKept = false
+        store.sentKept = false
         query = ""
         store.addError = ""
         if (!searching)
@@ -1202,8 +1216,6 @@ PanelKeyCatcher {
     // The draft comes back with why its add failed (the reply may have
     // come after the popup closed); setView clears the error otherwise.
     var draftError = store.addDraft !== "" ? store.addError : ""
-    // Shown now: the bar buttons' mark goes.
-    store.addUnseen = false
     editingTask = ""
     paneTask = ""
     setView(next, store.lastProject)
@@ -1241,8 +1253,11 @@ PanelKeyCatcher {
     editingTask = ""
     paneTask = ""
     weekPaneOpen = false
-    if (store.addDraft === "" && !store.addPending)
+    if (store.addDraft === "" && !store.addPending) {
       store.addError = ""
+      // No draft for the reason to come back with: nothing to see.
+      store.addUnseen = false
+    }
     viewCursor.reset()
     heroBand.closeMenu()
   }
@@ -1442,8 +1457,8 @@ PanelKeyCatcher {
       Accessible.name: fieldBox.placeholder
       onTextEdited: {
         root.store.addError = ""
-        if (root.sentKept && !root.searching && !text.startsWith(root.store.pendingAddText))
-          root.sentKept = false
+        if (root.store.sentKept && !root.searching && !text.startsWith(root.store.pendingAddText))
+          root.store.sentKept = false
         if (root.searching)
           root.query = text
         root.suggestDismissed = false
@@ -1821,6 +1836,10 @@ PanelKeyCatcher {
           height: root.heightOf(modelData)
           hasCursor: root.stopOfRow[index] >= 0 && viewCursor.index === root.stopOfRow[index]
           byKeys: viewCursor.byKeys
+          // As keyTarget(): the pointer's cursor beside another task in the
+          // pane leaves the keys with the pane's task.
+          keysHere: !root.paneShown || viewCursor.byKeys || root.paneTask === modelData.id || Model.has(root.store.sending, root.paneTask)
+          moveAllKey: root.moveAllKeyHere
           selected: root.paneShown && modelData.kind === "task" && root.paneTask === modelData.id
           onHovered: if (!root.fieldFocused && root.stopOfRow[index] >= 0)
             viewCursor.hover(root.stopOfRow[index])

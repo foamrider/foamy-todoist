@@ -500,15 +500,23 @@ QtObject {
   // every view drops the text where it is unchanged (fieldAdded).
   property int pendingAdd: -1
   property string pendingAddText: ""
+  // Every view's field (and the draft) still starts with the text on its
+  // way: only then is the rest "typed after it" once added. An edit that
+  // breaks the prefix in any view clears it (TodoView writes it), so a
+  // draft typed afresh that starts the same ("Buy milk" sent, then "Buy
+  // milkshakes") stays whole on every monitor. Read once per reply.
+  property bool sentKept: false
   readonly property bool addPending: pendingAdd >= 0
   // Why the field's last add failed, or its warning ("" when it worked):
   // it stays with the draft, also when the reply came after closing.
   property string addError: ""
-  // A failed add's draft and reason wait in a closed popup (none was open
-  // when the reply came): the bar buttons say so until a popup opens and
-  // shows them (TodoView.prepare clears it).
+  // A failed add's draft and reason have not been seen: the bar buttons
+  // say so until a view shows the add field with its error line (each
+  // view reports that: TodoView.addErrorShown), or the reason goes with
+  // the draft (TodoView.closed).
   property bool addUnseen: false
-  signal fieldAdded(string text)
+  // `kept`: sentKept as the reply came (what stays: afterAdd).
+  signal fieldAdded(string text, bool kept)
   function addFromField(text, dueDate, projectId) {
     if (addPending)
       return false
@@ -519,23 +527,34 @@ QtObject {
       return false
     pendingAdd = request
     pendingAddText = text
+    sentKept = true
     return true
+  }
+  // A field's or the draft's text once `sent` was added: what was typed
+  // after it (Model.typedAfter) while every edit kept it in front, else
+  // the text, cleared only where it still is the sent one.
+  function afterAdd(text, sent, kept) {
+    return kept ? Model.typedAfter(text, sent) : text === sent ? "" : text
   }
   onAddFinished: function (request, ok, message) {
     if (request !== pendingAdd)
       return
     var sent = pendingAddText
+    var kept = sentKept
     pendingAdd = -1
     pendingAddText = ""
+    sentKept = false
+    // Set before the reason: a view that shows the error line as it
+    // comes clears it at once. With every popup closed, the draft is the
+    // store's; an open one's is in its field.
+    addUnseen = !ok && message !== "" && (addDraft !== "" || FoamyShared.demandCount("todoist") > 0)
     addError = message
-    // A popup open on any monitor shows the reply (its demand is up).
-    addUnseen = !ok && addDraft !== "" && FoamyShared.demandCount("todoist") === 0
     if (!ok)
       return
     // What was added leaves the draft; text typed after it stays (as in
-    // the field: Model.typedAfter).
-    addDraft = Model.typedAfter(addDraft, sent)
-    fieldAdded(sent)
+    // the field).
+    addDraft = afterAdd(addDraft, sent, kept)
+    fieldAdded(sent, kept)
   }
 
   // ---- the helper queue ---------------------------------------------------------
