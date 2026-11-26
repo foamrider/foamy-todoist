@@ -1401,6 +1401,12 @@ ShellRoot {
       if (!check(open.visible && open.text === "Open settings", "signed out: Open settings")) return;
       if (!check(!view.field.visible && !view.footer.visible, "no field or footer while signed out")) return;
       if (!check(!view.band.menuButton.visible, "signed out: no ⋯ menu (nothing to open in Todoist)")) return;
+      // The gear in its place is the same stop: Enter opens Settings.
+      view.goTo(view.menuStop);
+      view.activate(false);
+      if (!check(view.editingSettings, "signed out: Enter on the gear opens Settings")) return;
+      view.settingsClosed();
+      if (!check(!view.editingSettings, "Back from Settings")) return;
       one.close();
       shell.put("reply-status.json", JSON.stringify({ ok: true, state: "signed_in", user: shell.snapshot().user }));
       shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
@@ -3314,6 +3320,17 @@ ShellRoot {
       shell.put("reply-apply.json", JSON.stringify({ ok: false, code: "NETWORK", error: "Can't reach Todoist. Check your connection." }));
       wv.setView("today");
       wv.selectTask("t4");
+      // A typed date still on its way: a move of the same task waits for it
+      // when the undo window ends (built later from Todoist's new date).
+      shell.hold("apply");
+      wv.editor.openField("due");
+      for (var td of " friday") ev.keyClickChar(td, Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      store.move("t4", tomorrowDay);
+      store.flushCompletions();
+      if (!check(store.current && store.current.extra.update === "t4" && store.moves.t4 === tomorrowDay && !Model.has(store.movesSent, "t4") && store.undoWindow.running, "a move waits for the typed date on its way")) return;
+      store.undo("t4");
+      shell.release("apply");
       // A refused typed date, then Tomorrow from the Date menu: the pick
       // wins (the draft gave way), and the undo window waits while a menu
       // is open.
@@ -3363,6 +3380,12 @@ ShellRoot {
     case 120:
       var t1Row = one.popup.bodyItem.rows.find(function(r) { return r.id === "t1"; });
       if (!check(t1Row && !t1Row.moved && store.model.byId.t1.due.day !== shell.today && store.error === "Can't reach Todoist. Check your connection." && store.moveErrors.t1 === store.error, "a failed move: the row back, the reason on the line and for its editor, a sync (" + store.error + ")")) return;
+      // Its editor says why under Date, without Retry (nothing to retry there).
+      var failedView = one.popup.bodyItem;
+      failedView.selectTask("t1");
+      var dueLine = shell.find(shell.find(failedView.editor, "section-due"), "fieldErrorText");
+      if (!check(dueLine.visible && dueLine.text === store.error && !shell.find(shell.find(failedView.editor, "section-due"), "fieldRetry").visible, "the editor's Date says why the move failed (" + dueLine.text + ")")) return;
+      failedView.clearSelection();
       shell.release("sync");
       store.error = "";
       one.close();

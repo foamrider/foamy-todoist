@@ -328,7 +328,7 @@ accent tint and a bar at its start.
 | Esc | the field | clear the text; when empty close the field (and leave search) |
 | ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list |
 | ↑ ↓ j k | the list | move; ↑ on the first row goes to the tabs (the rail), ↑ from there to ⋯, Search and + |
-| Space | a row | complete (again: undo) |
+| Space | a row | complete (again, or on a moved row: undo) |
 | Enter, e | a row | open the task in the editor (Wide: the caret in the details pane) |
 | Ctrl+O | a row | open the task in Todoist |
 | t | a row | move to tomorrow, keeping the time (not for recurring tasks) |

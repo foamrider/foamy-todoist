@@ -354,6 +354,7 @@ FocusScope {
   onTaskIdChanged: show()
   Component.onCompleted: show()
   Component.onDestruction: {
+    store.holdUndo(false)
     store.releaseSaves(Object.keys(pending).map(Number))
     if (shownId !== "")
       store.dropDescription()
@@ -1276,7 +1277,9 @@ FocusScope {
   function openDateMenu(keyboard) {
     if (!task)
       return
-    if (task.due && task.due.recurring)
+    // A repeating task, or one that can't take a move now (completed,
+    // sending): Todoist's words in the field.
+    if ((task.due && task.due.recurring) || !store.canMove(taskId))
       return openField("due")
     // Its day as it stands (a pending move's): checked, so the keys start there.
     var current = Model.has(store.shownMoves, taskId) ? store.shownMoves[taskId] : task.due ? task.due.day : ""
@@ -1286,8 +1289,10 @@ FocusScope {
         iconName: iconName,
         checked: value === current,
         pick: function () {
-          // A typed draft (say a refused one) gives way to the pick.
-          editor.revert("due")
+          // A typed draft (say a refused one) gives way to a pick that is
+          // taken.
+          if (editor.store.canMove(editor.taskId))
+            editor.revert("due")
           editor.store.move(editor.taskId, value)
         }
       }

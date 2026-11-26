@@ -416,7 +416,7 @@ PanelKeyCatcher {
   }
   function openDateMenu(id, anchor, keyboard) {
     var task = store.model.byId[id]
-    if (!task || Model.has(store.struck, id) || Model.has(store.sending, id) || Model.has(store.unconfirmed, id) || Model.has(store.movesSent, id))
+    if (!task || !store.canMove(id))
       return
     // A repeating task: why at once, not after a pick.
     var refusal = store.moveRefusal(id)
@@ -882,8 +882,9 @@ PanelKeyCatcher {
       return openAdd()
     if (at === searchStop)
       return searching ? leaveSearch() : startSearch()
+    // The stop is ⋯, or the gear alone while signed out (no menu entries).
     if (at === menuStop)
-      return heroBand.openMenu(true)
+      return heroBand.menuButton.visible ? heroBand.openMenu(true) : root.settingsRequested()
     if (on(switchStop))
       return views.activateCursor()
     if (on(railStop))
@@ -1149,6 +1150,8 @@ PanelKeyCatcher {
     releaseHeight()
   }
   // The popup builds this view on its first open with `active` already true.
+  // A menu of days open as the view goes: its undo hold goes too.
+  Component.onDestruction: store.holdUndo(false)
   Component.onCompleted: if (active) {
     prepare()
     releaseHeight()

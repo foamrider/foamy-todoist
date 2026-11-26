@@ -165,20 +165,38 @@ QtObject {
   function flushCompletions() {
     undoWindow.stop()
     var closing = Object.keys(struck)
-    var moved = moves
-    // A task that left the snapshot meanwhile has nothing to move.
+    var waiting = [current].concat(queue)
+    // A task that left the snapshot meanwhile has nothing to move. One
+    // whose typed date is still on its way waits for it (its move is built
+    // from the date Todoist then has, so the typed time isn't lost).
+    var held = ({})
+    var moved = ({})
+    Object.keys(moves).forEach(function (id) {
+      var saving = waiting.some(function (job) {
+        return !!job && job.extra.update === id
+      })
+      if (saving)
+        held[id] = moves[id]
+      else
+        moved[id] = moves[id]
+    })
     var movedIds = Object.keys(moved).filter(function (id) {
       return !!model.byId[id]
     })
-    if (!closing.length && !Object.keys(moved).length)
+    if (!closing.length && !Object.keys(moved).length) {
+      if (Object.keys(held).length)
+        undoWindow.restart()
       return
+    }
     var hiding = Object.assign({}, sending)
     closing.forEach(function (id) {
       hiding[id] = true
     })
     struck = ({})
     sending = hiding
-    moves = ({})
+    moves = held
+    if (Object.keys(held).length)
+      undoWindow.restart()
     var sent = Object.assign({}, movesSent)
     movedIds.forEach(function (id) {
       sent[id] = moved[id]
@@ -225,9 +243,14 @@ QtObject {
   // The time stays (Model.movedDate). A repeating task isn't moved: one
   // occurrence's date isn't something the API describes; the error line
   // says so. Returns whether the move was taken.
+  // Whether a task can take a move now (not completed, sending, unknown,
+  // or moving already; a repeating one is refused with a reason, in move).
+  function canMove(id) {
+    return signedIn && !!model.byId[id] && !Model.has(struck, id) && !Model.has(sending, id) && !Model.has(unconfirmed, id) && !Model.has(movesSent, id)
+  }
   function move(id, day) {
     var task = model.byId[id]
-    if (!signedIn || !task || Model.has(struck, id) || Model.has(sending, id) || Model.has(unconfirmed, id) || Model.has(movesSent, id))
+    if (!canMove(id))
       return false
     var refusal = moveRefusal(id)
     if (refusal !== "") {
@@ -835,6 +858,9 @@ QtObject {
     var fresh = Model.freshSnapshot(reply)
     if (fresh)
       unconfirmed = ({})
+    // A fresh read says where every task is: an old move's reason goes.
+    if (fresh)
+      moveErrors = ({})
     var at = Date.parse(reply.synced_at)
     syncedAt = isNaN(at) ? Date.now() : at
     if (reply.user)
