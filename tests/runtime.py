@@ -100,6 +100,9 @@ ShellRoot {
   // Wide's list before the pane opened: its width and x in the view.
   property var listBox: []
   property bool othersChecked: false
+  // Set when step 41's clicks away from the empty add field are done: on
+  // the way, the view and the field pass through what gate 42 waits for.
+  property bool clickedAway: false
   // The store's wall clock: moved by setting `clock.at`, which (like a real
   // clock) notifies nothing, so only the store's own checks see it.
   property var clock: ({ at: new Date(2026, 10, 18, 12, 0, 0) })
@@ -646,7 +649,10 @@ ShellRoot {
   // A right-click on the empty add field opens its menu, which takes the
   // keys. That isn't the end of the edit: the field stays open, the menu's
   // Paste lands in it (the stand-in clipboard reads "folder"), and Esc
-  // clears it with the keys still in the field. Then done().
+  // clears it with the keys still in the field. The menu again, and a
+  // click on the Inbox tab beside it: the menu and the empty field close,
+  // the view switches, + doesn't get the cursor. Then the field opens
+  // again, with the keys, and done().
   function emptyFieldMenu(view, done) {
     var field = view.field;
     var editor = field.editorItem;
@@ -668,7 +674,23 @@ ShellRoot {
             if (!check(pasted && field.text === "folder" && view.adding && view.fieldFocused && shell.calls("add").length === adds, "the menu's Paste landed in the open add field, nothing added (" + JSON.stringify([field.text, field.pasteError, view.fieldOpen, view.fieldFocused]) + ")")) return;
             ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
             if (!check(field.text === "" && view.adding && view.fieldFocused, "Esc cleared the paste, the empty field keeps the keys")) return;
-            done();
+            ev.mouseClick(editor, editor.width / 2, editor.height / 2, Qt.RightButton, Qt.NoModifier, -1);
+            wait.waitFor(function() { return menu.opened; }, 5000, function(again) {
+              if (!check(again && !field.inputActiveFocus && view.adding && view.view === "today", "the menu is open again over the empty field, in Today")) return;
+              var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
+              // Beside the menu: its left edge, in the tab's coordinates.
+              var x = Math.min(tab.width / 2, menu.contentItem.mapToItem(tab, 0, 0).x - 4);
+              if (!check(x > 0, "the Inbox tab shows beside the menu (" + x + ")")) return;
+              ev.mouseClick(tab, x, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+              wait.waitFor(function() { return !menu.visible && !view.fieldOpen && view.view === "inbox"; }, 5000, function(left) {
+                if (!check(left && !view.fieldFocused && view.cursor.index !== view.addStop, "a click on a tab beside the open menu closed the menu and the empty field and switched the view (" + JSON.stringify([menu.visible, view.fieldOpen, view.view, view.fieldFocused, view.cursor.index]) + ")")) return;
+                view.openAdd();
+                wait.waitFor(function() { return view.fieldFocused && view.band.fieldProgress === 1; }, 5000, function(reopened) {
+                  if (!check(reopened, "the add field open again, with the keys")) return;
+                  done();
+                });
+              });
+            });
           });
         });
       });
@@ -1214,7 +1236,7 @@ ShellRoot {
     case 39: return [function() { return store.launchError === "" && shell.opened().length === 5 && !store.launchRunning; }, 15000, "the next launch worked"];
     case 40: return [function() { return store.openCommand === "" && one.wide === false && view && view.active && !view.wide && shell.calls("apply").length === shell.callsBefore + 1 && !store.busy; }, 10000, "the standard popup again, the completion sent"];
     case 41: return [function() { return view.fieldFocused; }, 10000, "the empty field, to click away from"];
-    case 42: return [function() { return view.view === "inbox" && view.fieldFocused; }, 10000, "the empty field again, in the Inbox"];
+    case 42: return [function() { return shell.clickedAway && view.view === "inbox" && view.fieldFocused; }, 10000, "the empty field again, in the Inbox"];
     case 43: return [function() { return view.fieldFocused; }, 10000, "the field for search and drafts"];
     case 44: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active && v.fieldFocused; }, 10000, "the reopened popup with the draft"];
     case 45: return [function() { var v = one.popup.bodyItem; return one.opened && v && v.active; }, 10000, "the reopened popup after Esc"];
@@ -1892,15 +1914,18 @@ ShellRoot {
       view.openAdd();
       break;
     case 41:
-      // The empty field's own right-click menu keeps it open. Then a click
-      // on a tab while the empty field has the keys: it closes, the view
-      // switches, and + doesn't get the cursor.
+      // The empty field's own right-click menu keeps it open; a click on a
+      // tab beside the open menu closes both. Then a click on a tab while
+      // the empty field has the keys: it closes, the view switches, and +
+      // doesn't get the cursor.
       view.setView("today");
       shell.emptyFieldMenu(view, function() {
+        view.setView("today");
         var tab = shell.find(shell.find(view, "viewSwitch"), "foamyTab0");
         ev.mouseClick(tab, tab.width / 2, tab.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
         if (!check(view.view === "inbox" && !view.fieldOpen && !view.fieldFocused && view.cursor.index !== view.addStop, "a tab click closed the empty field (" + view.view + ", " + view.fieldOpen + ", cursor " + view.cursor.index + ")")) return;
         view.openAdd();
+        shell.clickedAway = true;
       });
       break;
     case 42:

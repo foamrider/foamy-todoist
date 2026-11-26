@@ -296,7 +296,9 @@ PanelKeyCatcher {
     addField.focusInput()
   }
   // A click outside the field (a tab, a ring, the rail, a button) takes
-  // the keys back first, so an empty field closes as it does on any blur.
+  // the keys back first, which ends the field's edit: an empty field
+  // closes (onEditingFinished). With the field's own menu open, the press
+  // closes the menu and the keys come back to the field before the click.
   // Suggestions never call it: the field keeps the keys there.
   function leaveField() {
     if (fieldFocused)
