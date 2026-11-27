@@ -3217,10 +3217,14 @@ ShellRoot {
         // in text typed after the sent one.
         view.field.selectAll();
         for (var k7 of "Buy milk") ev.keyClickChar(k7, Qt.NoModifier, -1);
+        // Held: each synthetic key runs the event loop, so a quick reply
+        // could come while the next text is typed.
+        shell.hold("add");
         ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
         view.field.selectAll();
         for (var k8 of "Buy milkshakes") ev.keyClickChar(k8, Qt.NoModifier, -1);
         if (!check(view.addBusy && store.pendingAddText === "Buy milk", "a draft typed afresh while the add is on its way")) return;
+        shell.release("add");
         wait.waitFor(function() { return !view.addBusy && !store.busy; }, 15000, function(afresh) {
           if (!check(afresh && view.field.text === "Buy milkshakes", "a draft typed afresh stays whole (" + JSON.stringify(view.field.text) + ")")) return;
           view.field.selectAll();
