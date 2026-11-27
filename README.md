@@ -12,7 +12,11 @@ The bar shows the Todoist mark and, in the bar's urgent colour, the number
 of tasks left today (overdue plus due today), like Foamy Zendesk's count.
 Nothing left today, or **Show in the bar: Icon only**, leaves just the mark;
 signed out, the mark stands alone. The tooltip says how many are left and how
-many of them are overdue.
+many of them are overdue. When a task you added was refused, or Todoist
+gave no answer, and the panel didn't show why (it was closed, or on
+Settings or a task's page), a dot in the bar's urgent colour sits on the
+mark's corner (the button keeps its width) and the tooltip says so, until
+the panel shows the add field with the text and why on any monitor.
 
 ## The panel
 
@@ -62,19 +66,30 @@ is last). Nothing has the cursor when the panel opens.
   section.
 - **Week** (Wide): four columns, **Overdue**, **Today**, **Tomorrow** and
   **Later** (the seven days after tomorrow, each day under a small
-  heading). A card shows the task, its time and its project. ↑/↓ move in a
-  column, ←/→ across (← from the first column goes to the rail), Space
-  completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move it a
-  day earlier or later (never before today; recurring tasks stay, as with
-  `t`). A moved card goes to its new column at once; the move is sent as
-  a move in a list is (see "Moving"), and moving it back to its day
-  cancels it. Enter, `e` or a click opens the details beside the board,
+  heading). A card has a list row's parts: the priority ring, the task,
+  and a line with the date (overdue: in red with the warning mark), the
+  time, the repeat mark and the project (which is shortened first). ↑/↓
+  move in a column, ←/→ across (← from the first column goes to the rail),
+  Space completes, `t` moves the task to tomorrow, Ctrl+← and Ctrl+→ move
+  it a day earlier or later (never before today; recurring tasks stay, as
+  with `t`). The card under the cursor (the pointer's or the keys') shows
+  small buttons that do the same for that card: ‹ a day earlier (only on a
+  card due after today) and › a day later (**Move to today** on an overdue
+  card); their tooltips name the keys while the keys act on that card. They
+  don't show beside the open details pane, nor on a card whose date and
+  time leave them no room (the pane's Date menu and the keys move it
+  then). While the board has the keys, the footer names them (`t`, Ctrl+←
+  →, Space, Enter). A moved card goes to its new column at once; the move
+  is sent as a move in a list is (see "Moving"), and moving it back to its
+  day cancels it. Enter, `e` or a click opens the details beside the board,
   which keeps its four columns, narrower (titles on up to three lines); Esc
   or the pane's Close closes them. Small shows Today instead, and so does
   **Open on: Last view**.
 
 Each row has a ring in the priority's colour (p1 red, p2 orange, p3 accent,
-p4 grey), the task (Markdown links show their text), and a line with what
+p4 grey) that also differs in weight, so it doesn't rest on colour alone: p1
+thicker and filled, p2 and p3 lightly filled, p4 thin and empty (the same
+in the editor and on the Week cards). Then the task (Markdown links show their text), and a line with what
 the view doesn't already say, in this order: the date ("Yesterday", a
 weekday within the coming week, else "Mon 23 Nov" in your language, so
 last Friday never reads like next Friday; an overdue date is red with a
@@ -87,7 +102,10 @@ whole; the project and then the labels are cut with "…" when the line is
 full. A due time shows on the right: today, a time that has passed is red
 and the next one ahead is bright. The ring and the time stand on the
 task's first line. A heading's count stands beside its word (after a date
-range, at the row's end).
+range, at the row's end); a heading too long for its row ends with "…" and
+shows whole on hover, wrapped to the row's width. **Move to today** on
+Today's Overdue heading names its key (T) on hover while the key would act
+(the cursor on one of its tasks).
 
 In Small the band's line leaves the view's name to the tabs: Today says the
 date first ("Thu 26 Nov · 6 left · 2 overdue"), the Inbox and Upcoming
@@ -99,27 +117,35 @@ pending one is sent to Todoist in one request (at once when the panel
 closes). Undo only takes it back here, so nothing is sent. If Todoist
 refuses a completion the task comes back and the line under the band says
 why. When the request fails as a whole (no answer, the network), Todoist may
-or may not have done it, so those tasks show dimmed and can't be completed
-or moved again until the next refresh, which starts at once. A recurring
+or may not have done it, so those tasks show with a plain ring, the title in
+a softer tone and a refresh mark ("Checking with Todoist…") in the time's
+place, and can't be completed or moved again until the next refresh, which
+starts at once. A recurring
 task moves to its next date, as in Todoist.
 
 **Moving** to another day: the row under the cursor shows two buttons in
 its time's place: **Tomorrow** (`t`) and a calendar (`d`) with **Today**,
 **Tomorrow**, **Next week** (the first day of your locale's next week) and
 **No date**. Today's **Overdue** heading has **Move to today** for all its
-tasks. A moved task keeps its time (a 14:00 task moved to tomorrow is due
-tomorrow at 14:00). Like a completion, the row stays where it is, dimmed,
-with its new day in the accent colour and **Undo**; the move is sent with
-the completions four seconds after the last change (at once when the panel
-closes), and a refusal brings the task back with the reason on the line
-under the band. A recurring task isn't moved: its rule decides its dates,
+tasks (`T` on an overdue row). A moved task keeps its time as your clock
+shows it (a 14:00 task moved to tomorrow is due tomorrow at 14:00) and,
+when its time is fixed to a time zone, that zone. Like a completion, the
+row stays where it is, dimmed, with its new day in the accent colour and
+**Undo**; the move is sent with the completions four seconds after the last
+change (at once when the panel closes), and a refusal brings the task back
+with the reason on the line under the band. A recurring task isn't moved:
+its rule decides its dates,
 so the line says to open it and change the date there (in its own words).
 
 **Adding**: click **+** or press `a` anywhere: a field grows out of the
 button across the band (the band keeps its height, and nothing moves under
 it). Its placeholder says where the task goes: "Add a task to the Inbox…",
 "for today…", for Upcoming's day, or to the project you are looking at;
-that date or project applies when the text gives none. The Quick Add parts
+that date or project applies when the text gives none. In the Week view
+the task goes to the day of the column the cursor was last in: today from
+Overdue and Today, tomorrow from Tomorrow, the card's day from Later, and
+today until the cursor has been on the board (the placeholder names the
+day). The Quick Add parts
 show in colour as you type: `#project`, `/section` and `+person` in the
 accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
 the urgent colour, `{deadline}` and ` // description` muted; dates are left
@@ -129,7 +155,8 @@ shows its keys:
 - **Enter** does what **After adding a task** says. **Close the panel**
   (the default) sends the task and closes the field and the panel. **Keep
   the field open** sends it and keeps the caret in the field, which empties
-  once Todoist has the task.
+  once Todoist has the task. You can type the next task meanwhile: when
+  Todoist answers, only the sent text leaves the field.
 - **Shift+Enter** does the other one.
 - **Esc** clears the text, and on an empty field closes it (the field
   shrinks back into **+**).
@@ -147,7 +174,9 @@ from an empty field goes to the next panel), and when the panel closes, also
 after Enter closed it before Todoist answered, the draft is kept for this
 session and comes back, with the caret at its end and the error if the add
 failed, the next time the panel opens. Adding the task or clearing it with
-Esc ends the draft. A suggestion that would make the text longer than 500
+Esc ends the draft; text typed after the sent text stays the draft (in
+every panel, on every monitor), while text typed afresh in its place stays
+whole. A suggestion that would make the text longer than 500
 characters isn't put in (the line under the band says so). A paste the
 field can't take (over 16 KiB, not plain text, or no answer from the
 clipboard within two seconds) changes nothing, and the line says why. At
@@ -168,7 +197,10 @@ them, `/` and `+` suggest nothing; `+` neither in a project only you are in.
 The Quick Add docs say how to write project names with spaces (`\ `), not
 labels, sections or people; the plugin escapes them the same way, which is
 not verified against Todoist yet. Esc closes only the list. With the list
-closed, Enter adds the task as before. Search never shows suggestions.
+closed, Enter adds the task as before; so does Enter when the word is already
+the highlighted entry in full (`#home` for Home), while Tab still puts it
+in. The footer shows the list's keys while it is open. Search never shows
+suggestions.
 
 **Search** (the button, or `/`): the same field grows out of **Search** and
 searches every open task by text, project name and labels; a word that
@@ -189,15 +221,21 @@ view. Parts with nothing to show are left out (a zero, **When** for an
 empty list); a click on a part (or Tab to it and Enter) acts on it. An
 empty list's line stands in the middle of the list.
 
-- **Today**: the date, how many tasks are left today and how many are
-  overdue (only when any are). With nothing left or overdue, **Tomorrow**
-  with its count and its first task instead (a click selects it). **Next** (the next task with a time still ahead today, and how
-  far ahead), and **Today's times**: the hours from 08 to 18 (wider when a
-  task is outside them), each task with a time as a block at its time, and
-  a red line at now; under it, how many tasks have no time. Tasks at the
-  same time share the width, three side by side at most: the rest show
-  as one "+N more" block. A block or Next selects that task ("+N more"
-  the first of its tasks, in the list beside the others).
+- **Today**: the date as the title, then one line with how many tasks are
+  due today and how many are overdue ("4 due today · 2 overdue"; a zero is
+  left out); together they are the band's "left". With nothing left or
+  overdue, **Tomorrow** with its count and its first task instead (a click
+  selects it). **Next** (the next task with a time still ahead today, and
+  how far ahead), and **Today's times**: the hours from the first task's
+  (or now's, when that is earlier) to the end of the last one, each task
+  with a time as a block at its time, and a thin line at now with its time
+  ("11:50") beside it; under it, how many tasks have no time. Two or more
+  empty hours before 08 or after 18 fold into one dashed row ("18–22"). A
+  task keeps its full look until it is completed, also after its time.
+  Tasks at the same time share the width (without their time), three side
+  by side at most: the rest show as one "+N more" block. A block or Next
+  selects that task ("+N more" the first of its tasks, in the list beside
+  the others).
 - **A project**: **Sections** with their task counts ("(No section)" for
   the tasks without one) and its sub-projects: a section scrolls the list
   to it, a sub-project opens it. **When**: one bar of overdue, today, this
@@ -206,8 +244,8 @@ empty list's line stands in the middle of the list.
   label searches for it (`@label`). A long label's name is shortened with
   "…" (in full when you point at it).
 - **Inbox** and **search**: When and Labels, as for a project.
-- **Upcoming**: the next seven days as columns, a bar each by its number
-  of tasks; the day a new task goes to is lit (tomorrow, or the day you
+- **Upcoming**: the next seven days as columns (the day's short name with
+  a capital), a bar each by its number of tasks; the day a new task goes to is lit (tomorrow, or the day you
   picked). A day scrolls the list to it. **Next deadline**: the nearest
   deadline from today on (selects its task), then how many tasks have no
   date (Upcoming doesn't list them).
@@ -220,7 +258,11 @@ Small the editor takes the panel's place, like the settings page:
 cursor. Its band says "Saving…" while a change is sent. In Wide it is
 the details pane on the right (the left in right-to-left languages), which
 shows the selected task (the one the keys or a click moved to; pointing at
-a row doesn't change it). Its header row shows the task's project (and
+a row doesn't change it). While it shows a task, the task keys (Space,
+Enter, `e`, `t`, `d`, `T`, Ctrl+O, and Ctrl+←/→ in the Week view) act on
+it, also with the pointer on another row (`d` then opens the pane's own
+Date menu); after an arrow key they act on the cursor's row, which the pane
+then shows. Its header row shows the task's project (and
 section), **Open in Todoist** and **Close** (as Esc in the list). `e` or a
 click on a part puts the caret there, Tab moves through the parts (the
 header's two buttons last), and Esc gives the keys back to the list.
@@ -278,7 +320,15 @@ anywhere in it, or Enter on it (one Tab stop each), changes it.
 - A task with more labels than the panel keeps (50) has its labels shown,
   not edited.
 - The **ring** beside the title completes the task. **Open in Todoist** is
-  an icon in the page's band, or in Wide in the pane's header.
+  an icon in the page's band, or in Wide in the pane's header. While a
+  completion can be undone the ring shows it completed, the title is
+  struck through, and **Undo** is in the page's band, or in Wide in the
+  pane's header after "Completed"; the ring undoes too (Undo with the keys
+  gives them to the ring). Once the completion is sent it still shows
+  completed, without Undo; if Todoist didn't answer, the ring is plain and
+  the pane's header says "Checking with Todoist…" until the next refresh.
+  Then the ring does nothing. In Small the ring completes and goes back to
+  the list, where the row has its Undo.
   Completing the task (here, or with its row's ring or Space) saves what
   you typed first. A task completed or deleted elsewhere meanwhile: the
   page says it is no longer in Todoist.
@@ -326,18 +376,19 @@ accent tint and a bar at its start.
 | Enter | the search field | go to the results |
 | ↓ | the field | the first row |
 | Esc | the field | clear the text; when empty close the field (and leave search) |
-| ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list |
+| ↓ ↑, Enter or Tab, Esc | the suggestion list | pick, put it in, close the list (Enter on a word that already is the entry: add the task) |
 | ↑ ↓ j k | the list | move; ↑ on the first row goes to the tabs (the rail), ↑ from there to ⋯, Search and + |
 | Space | a row | complete (again, or on a moved row: undo) |
 | Enter, e | a row | open the task in the editor (Wide: the caret in the details pane) |
 | Ctrl+O | a row | open the task in Todoist |
 | t | a row | move to tomorrow, keeping the time (not for recurring tasks) |
 | d | a row | the menu of days: Today, Tomorrow, Next week, No date |
+| T | an Overdue row in Today | move all of Overdue to today, as **Move to today** |
 | / | the list | search |
 | ← → | the tabs | pick a view (Enter or Space shows it) |
 | ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |
 | ↑ ↓ ← → | the Week view | move in a column, across columns |
-| Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later |
+| Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later (also the card's ‹ and › buttons) |
 | Enter, Space | a value in the editor | change it (a menu, or the date field) |
 | Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
 | Tab, Shift+Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts); with neither, the next or previous panel |
@@ -352,42 +403,53 @@ accent tint and a bar at its start.
 Open them from the ⋯ menu (signed out: the gear in its place), with `s`,
 or by right-clicking the bar icon.
 
+The page has five sections: **Panel**, **Open command**, **Bar**,
+**Refresh** and **Account** last; signed out, **Account** comes first.
+
+- **Panel**:
+  - **Size**: Small (default) or Wide (see "The panel"). A **Large** saved
+    by an earlier version opens as Wide.
+  - **After adding a task**: Close the panel (default) or Keep the field
+    open: what Enter in the add field does; Shift+Enter does the other.
+  - **Open on**: Today, Inbox, Upcoming or Last view (kept until the shell
+    restarts).
+  - **Tasks assigned to others**: Hide (default) or Show. A task is someone
+    else's when it is assigned to a person other than you (unassigned tasks
+    are yours). Hidden, they stay out of Today, Upcoming, Week and the
+    Inbox, the bar number and its tooltip, and the Inbox/Today/Upcoming
+    counts (the line under the setting says so). A project view, search
+    and the projects' counts in the rail always show every task.
+- **Open command**: what opens Todoist links (the footer button, Ctrl+O on
+  a task, **Open in Todoist**); the (i) beside the title explains it.
+  Empty (**Browser (default)**) uses `xdg-open`. Otherwise, for example
+  `omarchy-launch-or-focus-webapp Todoist {url}`: the command is split on
+  spaces and run without a shell (quotes and pipes aren't supported),
+  `{url}` is replaced with the link, and without it the link is added at
+  the end. It must start with a command name or an absolute path, at most
+  300 characters. It runs in its own session, so what it opens stays when
+  the shell restarts. Only `https://app.todoist.com/` links are ever
+  opened.
+- **Bar**: **Show in the bar**: Tasks left today or Icon only.
+- **Refresh**: **Refresh every**: 1 to 30 minutes (5 by default). The
+  panel also refreshes when it opens and the data is older than 30
+  seconds. After a failure the wait doubles, up to 30 minutes, and never
+  ends before Todoist's own retry time when it asks to slow down.
 - **Account**: signed out, the section says where the API token is in
   Todoist (Settings → Integrations → Developer; **Open Todoist settings**
   beside the field's label goes there); paste it in the field and press
-  **Save token** beside it. The token is checked with Todoist before
-  it is stored. Signed in, the page shows who, and **Sign out**. When the
-  stored token can't be used (for example the keyring holds a value that
-  isn't a token), the page shows why, the token field and **Sign out**. A
-  stored token that Todoist refuses keeps the page signed in; the list says
-  why. While the list has no tasks to show, it offers **Open settings**
-  when Todoist refuses the token or the keyring holds a value that isn't
-  one, and **Retry** for other failures, such as a locked keyring.
-- **Size**: Small (default) or Wide (see "The panel"). A **Large** saved by
-  an earlier version opens as Wide.
-- **After adding a task**: Close the panel (default) or Keep the field
-  open: what Enter in the add field does; Shift+Enter does the other.
-- **Open on**: Today, Inbox, Upcoming or Last view (kept until the shell
-  restarts).
-- **Tasks assigned to others**: Hide (default) or Show. A task is someone
-  else's when it is assigned to a person other than you (unassigned tasks are
-  yours). Hidden, they stay out of Today, Upcoming and the Inbox, the bar
-  number and its tooltip, and the Inbox/Today/Upcoming counts. A project
-  view, search and the projects' counts in the rail always show every task.
-- **Open command**: what opens Todoist links (the footer button, Ctrl+O on
-  a task, **Open in Todoist**). Empty (**Browser (default)**) uses
-  `xdg-open`. Otherwise, for example `omarchy-launch-or-focus-webapp
-  Todoist {url}`: the command is split on spaces and run without a shell
-  (quotes and pipes aren't supported), `{url}` is replaced with the link,
-  and without it the link is added at the end. It must start with a command
-  name or an absolute path, at most 300 characters. It runs in its own
-  session, so what it opens stays when the shell restarts. Only
-  `https://app.todoist.com/` links are ever opened.
-- **Show in the bar**: Tasks left today or Icon only.
-- **Refresh every**: 1 to 30 minutes (5 by default). The panel also
-  refreshes when it opens and the data is older than 30 seconds. After a
-  failure the wait doubles, up to 30 minutes, and never ends before
-  Todoist's own retry time when it asks to slow down.
+  **Save token** beside it. The token is checked with Todoist before it is
+  stored. Signed in, the page shows who, and **Sign out**, which asks
+  first: "Sign out of Ada Lovelace?" with **Sign out** and, where the first
+  button stood, **Cancel** (so a double-click doesn't sign you out; Cancel,
+  Esc, leaving the page or closing the panel keep you signed in).
+  While completions, moves, adds or changes haven't been sent to Todoist
+  yet, the question says they will be lost. When the stored token can't
+  be used (for example the keyring holds a value that isn't a token), the
+  page shows why, the token field and **Sign out**. A stored token that
+  Todoist refuses keeps the page signed in; the list says why. While the
+  list has no tasks to show, it offers **Open settings** when Todoist
+  refuses the token or the keyring holds a value that isn't one, and
+  **Retry** for other failures, such as a locked keyring.
 
 IPC (`omarchy-shell foamy.todoist <function>`): `toggle` (the panel),
 `add` (opens the panel with the add field open and the caret in it) and

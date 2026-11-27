@@ -1,4 +1,4 @@
-// foamy-kit 0.15.0 b9f28f4e02f44f9aef21977b6289fa89f78b0f42348a3e4815527c0a166ebe3d — do not edit; change foamy-kit and run sync
+// foamy-kit 0.15.1 d7f1aa2f6b43aa170f5792de7e7648cdf75b7f8adf654e96d10558769bed6a43 — do not edit; change foamy-kit and run sync
 import QtQuick
 import qs.Commons as Commons
 import qs.Ui
@@ -80,7 +80,10 @@ Rectangle {
       visible: root.iconName !== ""
       width: root.iconSize
       height: width
-      color: root.destructive && (root.hasCursor || mouse.containsMouse) ? Commons.Color.urgent : root.foreground
+      // Readable on the destructive tint it sits on under the cursor, with
+      // the popup surface under the tint. (In a band or on a selected row
+      // the fill under it differs: it is measured as on the popup surface.)
+      color: root.destructive && (root.hasCursor || mouse.containsMouse) ? FoamyPalette.onSurface(Commons.Color.urgent, Qt.tint(FoamyPalette.background, Qt.alpha(Commons.Color.urgent, 0.14))) : root.foreground
       name: root.iconName
       anchors.verticalCenter: parent.verticalCenter
       // Only the glyph turns; the surface stays put. Off under reduced motion.

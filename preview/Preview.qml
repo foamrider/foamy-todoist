@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-week", "wide-week-pane", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -63,6 +63,13 @@ Item {
         due: Fixtures.due(Model.dayKey(new Date()) + "T23:59:00")
       }))
     }
+    // A section name too long for its heading row (it ends with "…").
+    if (previewState === "wide-long-heading")
+      data.sections = data.sections.map(function (section) {
+        return section.id === "s-review" ? Object.assign({}, section, {
+          name: "Review everything the release needs before Friday's launch meeting"
+        }) : section
+      })
     if (previewState === "wide-long-label")
       data.tasks.push(Fixtures.task("long", "Plan the move", "inbox", {
         labels: ["waiting-for-the-landlord-to-confirm-the-moving-date-in-march"]
@@ -71,8 +78,14 @@ Item {
     store.fixtureDescriptions = Fixtures.descriptions
     // The fixtures assign one task to someone else: show it, as an example.
     store.othersTasks = "show"
-    if (previewState === "unconfirmed")
+    // A completion whose outcome is unknown: the list's row, a Week card, the pane.
+    if (previewState === "unconfirmed" || previewState === "wide-week-unconfirmed" || previewState === "wide-task-unconfirmed")
       store.unconfirmed = {
+        "t4": true
+      }
+    // Its completion sent, the reply not in yet.
+    if (previewState === "wide-task-sent")
+      store.sending = {
         "t4": true
       }
     view.editingSettings = previewState.indexOf("settings") >= 0
@@ -81,7 +94,7 @@ Item {
     } : ({})
     store.launchError = previewState === "footer-error" ? FoamyI18n.t("Can't open Todoist") : ""
     view.prepare()
-    var next = previewState === "inbox" || previewState === "wide-inbox" || previewState === "wide-long-label" || previewState === "wide-inbox-empty" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
+    var next = previewState === "inbox" || previewState === "wide-inbox" || previewState === "wide-long-label" || previewState === "wide-inbox-empty" ? "inbox" : previewState === "upcoming" || previewState === "wide-upcoming" ? "upcoming" : previewState === "wide-project" || previewState === "wide-long-heading" ? "project" : previewState.indexOf("wide-week") === 0 ? "week" : "today"
     view.setView(next, "work")
     if (previewState === "error")
       store.error = FoamyI18n.t("Can't reach Todoist. Check your connection.")
@@ -117,8 +130,13 @@ Item {
         view.field.cursorPosition = view.field.text.length
         view.field.textEdited()
       })
-    if (previewState === "completed")
+    // Sign out's question, with a completion still in its undo window.
+    if (previewState === "completed" || previewState === "editor-completed" || previewState === "wide-task-completed" || previewState === "settings-sign-out")
       store.complete("t4")
+    if (previewState === "settings-sign-out")
+      Qt.callLater(function () {
+        view.settingsPage.askSignOut()
+      })
     if (previewState === "row-cursor" || previewState === "completed")
       Qt.callLater(function () {
         view.goTo(view.firstRowStop + 2)
@@ -137,6 +155,13 @@ Item {
     // The editor: the page (Small), the pane (Wide); the Date field open,
     // a refused save under the date, the keys on the empty Deadline section
     // (its fill as on hover, and the keys' ring; the renderer can't hover).
+    // A completed task, its Undo time running: the page (Small) and the
+    // pane (Wide) show it completed, with Undo; sent, without; unconfirmed,
+    // a plain ring and "Checking with Todoist…".
+    if (previewState === "editor-completed" || previewState === "wide-task-completed" || previewState === "wide-task-sent" || previewState === "wide-task-unconfirmed")
+      Qt.callLater(function () {
+        view.openTask("t4", false)
+      })
     if (previewState === "editor" || previewState === "editor-error" || previewState === "editor-date-open" || previewState === "editor-section-cursor")
       Qt.callLater(function () {
         view.openTask("t4", false)

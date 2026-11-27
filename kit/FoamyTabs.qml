@@ -1,5 +1,5 @@
 pragma ComponentBehavior: Bound
-// foamy-kit 0.15.0 d56eb3b359dffe3451b3f4e77b4565aca6a7a5e6b330c209081b33988138cbf6 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.15.1 efd3333a1fe9adb4d5a2ef6c7bec6a6a2e5163bf957022c0d51e56c657732f14 — do not edit; change foamy-kit and run sync
 import QtQuick
 
 // A tab row: a full-width row of underline tabs at the top of a popup body,
@@ -238,8 +238,10 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         text: tab.countText
         textFormat: Text.PlainText
-        // bodySmall and secondaryText: a count is read, not decoration.
-        color: tab.entryData.countUrgent === true ? FoamyPalette.onSurface(FoamyPalette.error) : (tab.selected ? FoamyPalette.accent : FoamyPalette.secondaryText)
+        // bodySmall and secondaryText: a count is read, not decoration. An
+        // urgent count reads on the cursor's fill, its strongest surface, so
+        // it keeps one colour with and without the cursor.
+        color: tab.entryData.countUrgent === true ? FoamyPalette.onSurface(FoamyPalette.error, Qt.tint(FoamyPalette.background, FoamyPalette.hoverFill)) : (tab.selected ? FoamyPalette.accent : FoamyPalette.secondaryText)
         font.family: FoamyStyle.monoFamily
         font.pixelSize: FoamyStyle.font.bodySmall
       }

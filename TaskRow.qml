@@ -1,19 +1,29 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import qs.Ui as Ui
 import "kit"
+import "Model.js" as Model
 
 // One row of the list (Model.rows): a task, a section or day header, or
 // Upcoming's folded Overdue row. A task row: the priority ring (complete),
 // the content, a detail line (date, project, labels, recurring) and the
 // due time on the trailing end, or Undo while its completion or its move
 // to another day can be undone. A moved row stays where it is, dimmed,
-// its new date in the accent colour.
+// its new date in the accent colour. A row whose completion is
+// unconfirmed reads whole: its title in the secondary tone, a plain ring
+// and a refresh mark in the time's place.
 Item {
   id: row
   required property var entry
   property bool hasCursor: false
   // The keys moved the cursor here: its accent border (FoamyCursor.byKeys).
   property bool byKeys: false
+  // The letter keys act on this row when it has the cursor (in Wide they
+  // can be the pane's task's instead): its actions' tooltips name them then.
+  property bool keysHere: true
+  // Shift+T would move Today's Overdue tasks now (the view's
+  // moveAllKeyActs): Move to today's tooltip names the key then.
+  property bool moveAllKey: false
   // Search: the title cut into runs, the query's matches bold (Model.matchRuns).
   // Runs sit in a Row, which lays them out in the layout's direction: only
   // for a left-to-right title in a left-to-right panel (else plain).
@@ -26,6 +36,7 @@ Item {
   readonly property bool isTask: kind === "task"
   readonly property bool struck: isTask && entry.struck === true
   readonly property bool moved: isTask && entry.moved === true
+  readonly property bool unconfirmed: isTask && entry.unconfirmed === true
   // Its completion or move is still in the undo window (the view says).
   property bool undoable: false
   // The cursor row's actions in the time's place: Tomorrow, and a menu of
@@ -115,13 +126,22 @@ Item {
     height: headerTitle.implicitHeight
     readonly property bool countAtEnd: headerSub.text !== ""
     Row {
+      id: headerLine
       anchors.left: parent.left
       anchors.right: moveAll.visible ? moveAll.left : headerCount.visible ? headerCount.left : parent.right
       anchors.rightMargin: FoamyStyle.gap
       anchors.verticalCenter: parent.verticalCenter
       spacing: FoamyStyle.gap
       clip: true
+      // The title takes what its mark, its count and its sub text leave,
+      // and elides there (they show whole). Their widths, not implicit
+      // ones: an icon's implicit width is its 2x source.
+      readonly property real titleRoom: Math.max(0, width - [headerMark, headerCountInline, headerSub].reduce(function (sum, part) {
+        return sum + (part.visible ? part.width + spacing : 0)
+      }, 0))
       FoamyIcon {
+        id: headerMark
+        objectName: "headerMark"
         visible: row.kind === "header" && !!row.entry.projectRole
         anchors.verticalCenter: parent.verticalCenter
         width: FoamyStyle.iconSize - 2
@@ -132,14 +152,38 @@ Item {
       PlainText {
         id: headerTitle
         objectName: "headerTitle"
+        width: Math.min(implicitWidth, headerLine.titleRoom)
         text: row.title
         wrapMode: Text.NoWrap
+        elide: Text.ElideRight
+        maximumLineCount: 1
         font.pixelSize: FoamyStyle.font.bodySmall
         font.weight: Font.DemiBold
         color: row.entry && row.entry.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : row.isGroup ? FoamyPalette.text : FoamyPalette.secondaryText
+        HoverHandler {
+          id: headerTitleHover
+        }
+        // Cut: the whole heading on hover, at most as wide as the row
+        // (a name can be 200 characters).
+        Ui.PanelToolTip {
+          id: headerTitleTip
+          objectName: "headerTitleTip"
+          visible: headerTitleHover.hovered && headerTitle.truncated
+          text: row.title
+          implicitWidth: Math.min(implicitContentWidth + leftPadding + rightPadding, row.width)
+          // The host's tooltip wraps at word boundaries only; a name typed
+          // without spaces may break anywhere.
+          Binding {
+            target: headerTitleTip.contentItem
+            property: "wrapMode"
+            value: Text.WrapAtWordBoundaryOrAnywhere
+            when: headerTitleTip.contentItem !== null
+          }
+        }
       }
       // The count beside its word; after a date range it stays at the end.
       PlainText {
+        id: headerCountInline
         objectName: "headerCountInline"
         visible: !headerRow.countAtEnd && text !== ""
         anchors.baseline: headerTitle.baseline
@@ -173,6 +217,14 @@ Item {
       onClicked: row.moveAllRequested()
       Accessible.role: Accessible.Button
       Accessible.name: moveAllLabel.text
+      HoverHandler {
+        id: moveAllHover
+      }
+      Ui.PanelToolTip {
+        objectName: "moveAllTip"
+        visible: moveAllHover.hovered
+        text: FoamyI18n.t("Move to today") + (row.moveAllKey ? " (T)" : "")
+      }
       PlainText {
         id: moveAllLabel
         anchors.centerIn: parent
@@ -193,7 +245,8 @@ Item {
       wrapMode: Text.NoWrap
       font.family: FoamyStyle.monoFamily
       font.pixelSize: FoamyStyle.font.caption
-      color: row.entry && row.entry.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.mutedText
+      // secondaryText: mutedText measures under 4.5:1 on the list (dark theme).
+      color: row.entry && row.entry.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.secondaryText
     }
   }
 
@@ -245,8 +298,6 @@ Item {
     id: taskSurface
     objectName: "taskSurface"
     visible: row.isTask
-    // Dimmed while its completion's outcome is unknown (it can't be acted on).
-    opacity: row.isTask && row.entry.unconfirmed ? FoamyStyle.disabledOpacity : 1
     // Anchored, not placed by x, so RTL mirrors it (the indent on the right).
     anchors.left: parent.left
     anchors.leftMargin: FoamyStyle.gapLarge + row.indent
@@ -264,7 +315,15 @@ Item {
     Accessible.role: Accessible.ListItem
     Accessible.name: row.isTask ? row.entry.text : ""
 
-    readonly property color ringColor: row.isTask ? row.roleColor(row.entry.priorityRole) : FoamyPalette.mutedText
+    // Unconfirmed: a plain ring (it can't be completed until Todoist says).
+    // Completed without a priority: the secondary tone (mutedText reads
+    // under 4.5:1 on the background, and so would the check on it).
+    readonly property color ringColor: !row.isTask || row.unconfirmed ? FoamyPalette.mutedText : row.struck && row.entry.priorityRole === "muted" ? FoamyPalette.secondaryText : row.roleColor(row.entry.priorityRole)
+    readonly property var ringLook: row.unconfirmed ? ({
+        border: 1,
+        fill: 0
+      }) : Model.ringLook(row.isTask ? row.entry.priority : 0)
+    readonly property bool ringLit: ringArea.containsMouse && !row.unconfirmed
     // The ring completes; it is a larger target than it looks.
     MouseArea {
       id: ringArea
@@ -273,7 +332,8 @@ Item {
       anchors.leftMargin: FoamyStyle.rowPadding - FoamyStyle.gapSmall
       width: FoamyStyle.iconSize + 1 + FoamyStyle.gap
       height: parent.height
-      cursorShape: Qt.PointingHandCursor
+      // Unconfirmed, it can't complete: no pointing hand.
+      cursorShape: row.unconfirmed ? Qt.ArrowCursor : Qt.PointingHandCursor
       hoverEnabled: true
       onEntered: row.hovered()
       onClicked: row.completeRequested()
@@ -290,17 +350,20 @@ Item {
         width: 16
         height: 16
         radius: 8
-        border.width: 1.5
+        border.width: taskSurface.ringLook.border
         border.color: taskSurface.ringColor
         opacity: row.moved ? FoamyStyle.disabledOpacity : 1
-        color: Qt.alpha(taskSurface.ringColor, row.struck ? 0.9 : ringArea.containsMouse ? 0.28 : 0.12)
+        color: Qt.alpha(taskSurface.ringColor, row.struck ? Model.RING_DONE : taskSurface.ringLook.fill + (taskSurface.ringLit ? Model.RING_HOVER : 0))
         FoamyIcon {
-          visible: row.struck || ringArea.containsMouse
+          objectName: "ringCheck"
+          visible: row.struck || taskSurface.ringLit
           anchors.centerIn: parent
           width: 11
           height: 11
           name: "check"
-          color: row.struck ? FoamyPalette.onSurface(FoamyPalette.background) : taskSurface.ringColor
+          // On the completed fill (the ring's colour): the background's
+          // colour reads as the ring's own does on the background.
+          color: row.struck ? FoamyPalette.background : taskSurface.ringColor
         }
       }
     }
@@ -324,7 +387,7 @@ Item {
         elide: Text.ElideRight
         maximumLineCount: 1
         font.strikeout: row.struck
-        color: row.struck || row.moved ? FoamyPalette.mutedText : FoamyPalette.text
+        color: row.struck || row.moved ? FoamyPalette.mutedText : row.unconfirmed ? FoamyPalette.secondaryText : FoamyPalette.text
       }
       // The same title in runs, the matched parts DemiBold; the run that
       // reaches the line's end is cut there.
@@ -344,7 +407,7 @@ Item {
             maximumLineCount: 1
             font.weight: modelData.bold ? Font.DemiBold : Font.Normal
             font.strikeout: row.struck
-            color: row.struck ? FoamyPalette.mutedText : FoamyPalette.text
+            color: row.struck ? FoamyPalette.mutedText : row.unconfirmed ? FoamyPalette.secondaryText : FoamyPalette.text
           }
         }
       }
@@ -492,6 +555,24 @@ Item {
         visible: !row.undoable && !row.showActions
         anchors.verticalCenter: parent.verticalCenter
         spacing: FoamyStyle.gap
+        // Its completion was sent, the outcome unknown until the next sync.
+        FoamyIcon {
+          objectName: "taskChecking"
+          visible: row.unconfirmed
+          anchors.verticalCenter: parent.verticalCenter
+          width: FoamyStyle.font.bodySmall
+          height: width
+          name: "refresh-cw"
+          color: FoamyPalette.secondaryText
+          HoverHandler {
+            id: checkingHover
+          }
+          Ui.PanelToolTip {
+            objectName: "taskCheckingTip"
+            visible: checkingHover.hovered
+            text: FoamyI18n.t("Checking with Todoist…")
+          }
+        }
         PlainText {
           objectName: "taskTrailDay"
           visible: text !== ""
@@ -525,7 +606,7 @@ Item {
           objectName: "tomorrowAction"
           iconName: "sun"
           foreground: FoamyPalette.secondaryText
-          tooltipText: FoamyI18n.t("Tomorrow") + " (t)"
+          tooltipText: FoamyI18n.t("Tomorrow") + (row.keysHere ? " (t)" : "")
           onHoveredChanged: if (hovered)
             row.hovered()
           onClicked: row.tomorrowRequested()
@@ -535,7 +616,7 @@ Item {
           objectName: "dateAction"
           iconName: "calendar"
           foreground: FoamyPalette.secondaryText
-          tooltipText: FoamyI18n.t("Date") + " (d)"
+          tooltipText: FoamyI18n.t("Date") + (row.keysHere ? " (d)" : "")
           onHoveredChanged: if (hovered)
             row.hovered()
           onClicked: row.dateMenuRequested()

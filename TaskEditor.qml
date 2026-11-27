@@ -55,6 +55,17 @@ FocusScope {
   readonly property var base: task ? Edit.pending(task, inFlight) : null
   // The task went from the snapshot (completed or deleted elsewhere).
   readonly property bool gone: taskId !== "" && task === null
+  // Its completion, as the store has it: "struck" while its Undo time
+  // runs (the header offers Undo; the ring undoes too), "sending" once it
+  // was sent, "unconfirmed" when that send failed as a whole (Todoist may
+  // have done it: TodoStore.unconfirmed), else "". The task stays in the
+  // snapshot until the reply, so the editor shows each one.
+  readonly property string completion: taskId === "" ? "" : Model.has(store.struck, taskId) ? "struck" : Model.has(store.sending, taskId) ? "sending" : Model.has(store.unconfirmed, taskId) ? "unconfirmed" : ""
+  readonly property bool struck: completion === "struck"
+  // The ring and the title show it completed.
+  readonly property bool completedLook: struck || completion === "sending"
+  // Sent or unconfirmed: the ring can neither complete nor undo it.
+  readonly property bool ringInert: completion === "sending" || completion === "unconfirmed"
   readonly property var desc: store.description.id === taskId && taskId !== "" ? store.description : null
   readonly property bool saving: Object.keys(pending).length > 0
   // A save of the shown task just worked: "Saved" in the panel's footer
@@ -411,10 +422,23 @@ FocusScope {
   // so they reach the queue ahead of the completion.
   function completeTask() {
     var id = shownId
+    if (struck) {
+      store.undo(id)
+      return
+    }
+    if (ringInert)
+      return
     commit()
     store.complete(id)
     if (!pane)
       back()
+  }
+  // Undo hides once used: when it had the keys, the ring takes them, so a
+  // control still shows the focus.
+  function undoCompletion(hadKeys) {
+    completeTask()
+    if (hadKeys)
+      ringBox.forceActiveFocus()
   }
   // The caret in the first field (`e`, Enter on a row in Wide).
   function focusFirst() {
@@ -562,6 +586,15 @@ FocusScope {
     onBack: editor.back()
     compactTrailing: [
       FoamyAction {
+        objectName: "pageUndo"
+        visible: editor.struck
+        focusable: true
+        iconName: ""
+        label: FoamyI18n.t("Undo")
+        foreground: FoamyPalette.onSurface(FoamyPalette.accent)
+        onClicked: editor.undoCompletion(activeFocus)
+      },
+      FoamyAction {
         id: pageOpen
         objectName: "editOpen"
         visible: editor.task !== null
@@ -671,15 +704,26 @@ FocusScope {
           Item {
             id: ringBox
             objectName: "editRing"
-            readonly property color tone: editor.base ? editor.roleColor(Model.priorityRole(editor.base.priority)) : FoamyPalette.mutedText
-            readonly property bool lit: ringMouse.containsMouse || activeFocus
+            // As the list's ring: unconfirmed, a plain one; completed
+            // without a priority, the secondary tone.
+            readonly property string role: editor.base ? Model.priorityRole(editor.base.priority) : "muted"
+            readonly property bool plain: editor.completion === "unconfirmed"
+            readonly property color tone: plain ? FoamyPalette.mutedText : editor.completedLook && role === "muted" ? FoamyPalette.secondaryText : editor.roleColor(role)
+            readonly property bool lit: (ringMouse.containsMouse || activeFocus) && !editor.ringInert
+            // Its look by priority; completed, filled with its tone, which
+            // reads 4.5:1 on the background, so the background's colour
+            // reads as well on it (the check's ink).
+            readonly property var look: plain ? ({
+                border: 1,
+                fill: 0
+              }) : Model.ringLook(editor.base ? editor.base.priority : 0)
             // As tall as the title's first line, so the ring centres on it.
             Layout.preferredWidth: editor.gutter
             Layout.preferredHeight: contentInput.topPadding + contentInput.bottomPadding + titleLine.height
             Layout.alignment: Qt.AlignTop
             activeFocusOnTab: true
             Accessible.role: Accessible.CheckBox
-            Accessible.checked: false
+            Accessible.checked: editor.completedLook
             Accessible.name: FoamyI18n.t("Complete")
             Accessible.onPressAction: editor.completeTask()
             Keys.onPressed: function (event) {
@@ -698,16 +742,17 @@ FocusScope {
               width: editor.ringSize
               height: width
               radius: width / 2
-              border.width: 1.5
+              border.width: ringBox.look.border
               border.color: ringBox.tone
-              color: Qt.alpha(ringBox.tone, ringBox.lit ? 0.28 : 0.12)
+              color: Qt.alpha(ringBox.tone, editor.completedLook ? Model.RING_DONE : ringBox.look.fill + (ringBox.lit ? Model.RING_HOVER : 0))
               FoamyIcon {
-                visible: ringBox.lit
+                objectName: "editRingCheck"
+                visible: ringBox.lit || editor.completedLook
                 anchors.centerIn: parent
                 width: FoamyStyle.font.bodySmall
                 height: width
                 name: "check"
-                color: ringBox.tone
+                color: editor.completedLook ? FoamyPalette.background : ringBox.tone
               }
             }
             // The keys' ring around it.
@@ -725,7 +770,7 @@ FocusScope {
               id: ringMouse
               anchors.fill: parent
               hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
+              cursorShape: editor.ringInert ? Qt.ArrowCursor : Qt.PointingHandCursor
               onClicked: editor.completeTask()
             }
           }
@@ -745,7 +790,7 @@ FocusScope {
               // a click (the caret where it lands in the raw text) and Tab
               // reach the field as before.
               height: editor.titleRendered ? Math.min(maximumHeight, titleText.implicitHeight) : implicitHeight
-              color: editor.titleRendered ? "transparent" : contentInput.foreground
+              color: editor.titleRendered ? "transparent" : editor.completedLook ? FoamyPalette.mutedText : contentInput.foreground
               selectedTextColor: editor.titleRendered ? "transparent" : contentInput.foreground
               selectionColor: editor.titleRendered ? "transparent" : contentInput.selectionTint
               quiet: true
@@ -754,6 +799,7 @@ FocusScope {
               // The pane is narrow: its title in the band's size.
               font.pixelSize: editor.pane ? FoamyStyle.font.title : FoamyStyle.font.heading
               font.weight: Font.DemiBold
+              font.strikeout: editor.completedLook
               maximumLength: 1000
               translate: FoamyI18n.t
               Accessible.name: FoamyI18n.t("Task")
@@ -789,7 +835,8 @@ FocusScope {
               font.family: contentInput.font.family
               font.pixelSize: contentInput.font.pixelSize
               font.weight: contentInput.font.weight
-              color: contentInput.foreground
+              font.strikeout: contentInput.font.strikeout
+              color: editor.completedLook ? FoamyPalette.mutedText : contentInput.foreground
               maximumLineCount: Math.max(1, Math.floor((contentInput.maximumHeight - contentInput.topPadding - contentInput.bottomPadding) / titleLine.height))
               elide: Text.ElideRight
               Accessible.ignored: true
@@ -1198,6 +1245,32 @@ FocusScope {
       anchors.right: parent.right
       anchors.rightMargin: FoamyStyle.padding - FoamyStyle.gap
       y: FoamyStyle.gapSmall
+      // Completed (Undo beside it while its time runs), or its outcome
+      // unknown: said here, so the card keeps its height (the place elides
+      // to make room).
+      Item {
+        visible: editor.completedLook || editor.completion === "unconfirmed"
+        width: completedLabel.implicitWidth + FoamyStyle.gapSmall
+        height: paneOpen.height
+        PlainText {
+          id: completedLabel
+          objectName: "paneCompleted"
+          anchors.verticalCenter: parent.verticalCenter
+          text: editor.completion === "unconfirmed" ? FoamyI18n.t("Checking with Todoist…") : FoamyI18n.t("Completed")
+          wrapMode: Text.NoWrap
+          font.pixelSize: FoamyStyle.font.bodySmall
+          color: FoamyPalette.secondaryText
+        }
+      }
+      FoamyAction {
+        objectName: "paneUndo"
+        visible: editor.struck
+        focusable: true
+        iconName: ""
+        label: FoamyI18n.t("Undo")
+        foreground: FoamyPalette.onSurface(FoamyPalette.accent)
+        onClicked: editor.undoCompletion(activeFocus)
+      }
       FoamyAction {
         id: paneOpen
         objectName: "paneOpen"
@@ -1566,7 +1639,7 @@ FocusScope {
       Layout.fillWidth: true
       text: line.shown
       font.pixelSize: FoamyStyle.font.caption
-      color: Commons.Color.urgent
+      color: FoamyPalette.onSurface(FoamyPalette.error)
       Accessible.role: Accessible.AlertMessage
     }
     FoamyButton {

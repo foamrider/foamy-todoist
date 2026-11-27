@@ -9,7 +9,8 @@ import "Model.js" as Model
 
 // Wide's details pane while no task is selected: a summary of the current
 // view (Model.overview, `summary`), in the editor's look (captioned parts,
-// no help text). Today: the date, what is left and overdue, the next timed
+// no help text). Today: the date as the title, what is due today and
+// overdue (one line; together they are the band's "left"), the next timed
 // task and the day's timeline. A project, the Inbox and search: the
 // sections and sub-projects (a project), when the tasks are due, the
 // labels. Upcoming: the next seven days, the next deadline, the tasks
@@ -125,27 +126,65 @@ FocusScope {
       spacing: FoamyStyle.sectionGap
 
       // ---- Today ----
-      Caption {
+      // The pane's title, as the editor's task title.
+      PlainText {
         objectName: "overviewDate"
         visible: overview.kind === "today"
+        Layout.fillWidth: true
+        Layout.leftMargin: FoamyStyle.gap
         text: overview.kind === "today" && overview.format ? Model.capitalized(overview.format(Model.dayDate(overview.today), "dddd")) + " " + overview.format(Model.dayDate(overview.today), overview.translate("d MMMM")) : ""
+        wrapMode: Text.NoWrap
+        elide: Text.ElideRight
+        font.pixelSize: FoamyStyle.font.title
+        font.weight: Font.DemiBold
       }
-      RowLayout {
+      // "4 due today · 2 overdue": a zero figure is left out. The numbers
+      // larger, every part on the first number's baseline.
+      Row {
+        id: figures
         objectName: "overviewFigures"
+        readonly property int due: overview.kind === "today" ? overview.summary.left : 0
+        readonly property int overdue: overview.kind === "today" ? overview.summary.overdue : 0
         visible: overview.kind === "today" && !overview.dayClear
         Layout.leftMargin: FoamyStyle.gap
-        spacing: FoamyStyle.padding
-        Figure {
-          objectName: "figureLeft"
-          value: overview.kind === "today" ? overview.summary.left : 0
-          label: FoamyI18n.t("left today")
+        Layout.topMargin: -FoamyStyle.gapSmall
+        spacing: FoamyStyle.gapSmall
+        PlainText {
+          id: dueValue
+          objectName: "figureDue"
+          visible: figures.due > 0
+          text: FoamyI18n.number(figures.due)
+          wrapMode: Text.NoWrap
+          font.pixelSize: FoamyStyle.font.heading
+          font.weight: Font.DemiBold
         }
-        Figure {
+        FigureWords {
+          visible: figures.due > 0
+          anchors.baseline: dueValue.baseline
+          text: FoamyI18n.t("due today")
+        }
+        FigureWords {
+          visible: figures.due > 0 && figures.overdue > 0
+          anchors.baseline: dueValue.baseline
+          leftPadding: FoamyStyle.gapSmall
+          rightPadding: FoamyStyle.gapSmall
+          text: "·"
+          color: FoamyPalette.mutedText
+        }
+        PlainText {
           objectName: "figureOverdue"
-          visible: value > 0
-          value: overview.kind === "today" ? overview.summary.overdue : 0
-          label: FoamyI18n.t("overdue")
-          tone: FoamyPalette.onSurface(FoamyPalette.error)
+          visible: figures.overdue > 0
+          anchors.baseline: dueValue.baseline
+          text: FoamyI18n.number(figures.overdue)
+          wrapMode: Text.NoWrap
+          font.pixelSize: FoamyStyle.font.heading
+          font.weight: Font.DemiBold
+          color: FoamyPalette.onSurface(FoamyPalette.error)
+        }
+        FigureWords {
+          visible: figures.overdue > 0
+          anchors.baseline: dueValue.baseline
+          text: FoamyI18n.t("overdue")
         }
       }
       // Nothing left or overdue: tomorrow's count and its first task.
@@ -444,7 +483,9 @@ FocusScope {
                 PlainText {
                   id: dayLabel
                   anchors.horizontalCenter: parent.horizontalCenter
-                  text: overview.format ? overview.format(Model.dayDate(dayColumn.modelData.day), "ddd") : ""
+                  // It stands alone: a capital, also where the locale
+                  // writes the day in lower case ("ons.").
+                  text: overview.format ? Model.capitalized(overview.format(Model.dayDate(dayColumn.modelData.day), "ddd")) : ""
                   wrapMode: Text.NoWrap
                   font.pixelSize: FoamyStyle.font.caption
                   font.weight: dayColumn.lit ? Font.DemiBold : Font.Normal
@@ -527,25 +568,11 @@ FocusScope {
       spacing: part.spacing
     }
   }
-  // A big number and what it counts.
-  component Figure: Column {
-    property int value: 0
-    property string label: ""
-    property color tone: FoamyPalette.text
-    spacing: FoamyStyle.gapTiny
-    PlainText {
-      text: FoamyI18n.number(parent.value)
-      wrapMode: Text.NoWrap
-      font.pixelSize: FoamyStyle.font.display
-      font.weight: Font.DemiBold
-      color: parent.tone
-    }
-    PlainText {
-      text: parent.label
-      wrapMode: Text.NoWrap
-      font.pixelSize: FoamyStyle.font.caption
-      color: FoamyPalette.secondaryText
-    }
+  // What a figure counts, beside its number.
+  component FigureWords: PlainText {
+    wrapMode: Text.NoWrap
+    font.pixelSize: FoamyStyle.font.bodySmall
+    color: FoamyPalette.secondaryText
   }
   // One click target and Tab stop (the editor's section box): the hover
   // fill (the current fill when `current`), the keys' accent ring.
@@ -627,57 +654,123 @@ FocusScope {
       }
     }
   }
-  // Today's hours, a line each, the timed tasks as blocks at their time
-  // (overlapping ones side by side), and a line at now while it is inside.
+  // Today's hours (Model's `rows`: an hour each, or a dashed fold of empty
+  // hours), a line each, the timed tasks as blocks at their time
+  // (overlapping ones side by side, without their time), and a line at now
+  // under the blocks, its time in the hours' column, while it is inside.
   component Timeline: Item {
     id: timeline
     property var summary: null
+    readonly property var rows: summary ? summary.rows : []
     readonly property real hourHeight: FoamyStyle.controlHeight * 0.75
-    readonly property real labelWidth: FoamyStyle.controlHeight
+    // The hours' column fits "00:00" (now's time, a fold's "18–22").
+    readonly property real labelWidth: FoamyStyle.gap + labelMetrics.implicitWidth + FoamyStyle.gapSmall
     readonly property real lanesWidth: width - labelWidth - FoamyStyle.gap
     // A block stays this big to click and read, however short its time (a
     // task late in the day is cut at midnight) or narrow its lane (the
     // model keeps the lanes to Model.MAX_LANES).
     readonly property real minBlockHeight: FoamyStyle.iconSize + FoamyStyle.gapSmall
     readonly property real minBlockWidth: FoamyStyle.controlHeight
-    readonly property int start: summary ? summary.start : 0
-    readonly property real rangeHeight: summary ? (summary.end - summary.start) * hourHeight : 0
+    readonly property real rangeHeight: rows.length * hourHeight
+    readonly property bool nowShown: summary !== null && summary.now
+    readonly property real nowY: nowShown ? yOf(summary.nowMinutes) : 0
     function blockHeight(block) {
       return Math.max(minBlockHeight, block.length / 60 * hourHeight - 2)
     }
     function yOf(minutes) {
-      return (minutes - start * 60) / 60 * hourHeight
+      return Model.timelineAt(rows, minutes) * hourHeight
+    }
+    function clock(minutes) {
+      return Model.pad(Math.floor(minutes / 60)) + ":" + Model.pad(minutes % 60)
     }
     objectName: "timeline"
     // Room below the range for a block that its least height takes past midnight.
     implicitHeight: summary ? summary.blocks.reduce(function (bottom, block) {
       return Math.max(bottom, timeline.yOf(block.minutes) + 1 + timeline.blockHeight(block))
     }, rangeHeight) + FoamyStyle.gapSmall : 0
+    PlainText {
+      id: labelMetrics
+      visible: false
+      text: "00:00"
+      font.family: FoamyStyle.monoFamily
+      font.pixelSize: FoamyStyle.font.caption
+    }
     Repeater {
-      model: timeline.summary ? timeline.summary.end - timeline.summary.start : 0
+      model: timeline.rows
       Item {
         id: hourRow
+        required property var modelData
         required property int index
+        readonly property bool fold: modelData.fold
+        objectName: (fold ? "fold-" : "hour-") + modelData.from
         y: index * timeline.hourHeight
         width: timeline.width
         height: timeline.hourHeight
         PlainText {
+          objectName: "hourLabel"
           anchors.left: parent.left
           anchors.leftMargin: FoamyStyle.gap
           y: -height / 2
-          text: (timeline.start + hourRow.index < 10 ? "0" : "") + (timeline.start + hourRow.index)
+          // Now's time takes the place of an hour it would cover.
+          visible: !timeline.nowShown || Math.abs(hourRow.y - timeline.nowY) >= height
+          text: hourRow.fold ? Model.pad(hourRow.modelData.from) + "–" + Model.pad(hourRow.modelData.to - 1) : Model.pad(hourRow.modelData.from)
           wrapMode: Text.NoWrap
           font.family: FoamyStyle.monoFamily
           font.pixelSize: FoamyStyle.font.caption
           color: FoamyPalette.mutedText
         }
         Rectangle {
+          visible: !hourRow.fold
           anchors.left: parent.left
           anchors.leftMargin: timeline.labelWidth
           anchors.right: parent.right
           height: 1
           color: FoamyPalette.divider
         }
+        // A fold: a dashed line.
+        Row {
+          visible: hourRow.fold
+          anchors.left: parent.left
+          anchors.leftMargin: timeline.labelWidth
+          anchors.right: parent.right
+          spacing: FoamyStyle.gapSmall
+          clip: true
+          Repeater {
+            model: hourRow.fold ? Math.ceil((timeline.width - timeline.labelWidth) / (FoamyStyle.gapSmall * 2)) : 0
+            Rectangle {
+              width: FoamyStyle.gapSmall
+              height: 1
+              color: FoamyPalette.divider
+            }
+          }
+        }
+      }
+    }
+    // Now: under the blocks, so it never crosses a task's text.
+    Item {
+      objectName: "nowLine"
+      visible: timeline.nowShown
+      anchors.left: parent.left
+      anchors.right: parent.right
+      y: timeline.nowY
+      height: 1
+      PlainText {
+        objectName: "nowLabel"
+        anchors.left: parent.left
+        anchors.leftMargin: FoamyStyle.gap
+        anchors.verticalCenter: parent.verticalCenter
+        text: timeline.summary ? timeline.clock(timeline.summary.nowMinutes) : ""
+        wrapMode: Text.NoWrap
+        font.family: FoamyStyle.monoFamily
+        font.pixelSize: FoamyStyle.font.caption
+      }
+      Rectangle {
+        objectName: "nowRule"
+        anchors.left: parent.left
+        anchors.leftMargin: timeline.labelWidth
+        anchors.right: parent.right
+        height: 1
+        color: FoamyPalette.text
       }
     }
     Repeater {
@@ -689,7 +782,8 @@ FocusScope {
         // a click selects the first of them (the list scrolls to it, the
         // rest follow it there).
         readonly property bool summed: modelData.more > 0
-        readonly property string label: summed ? FoamyI18n.tn("+%1 more", modelData.more) : modelData.time + " " + modelData.text
+        // A block that shares its row's width keeps its title only.
+        readonly property string label: summed ? FoamyI18n.tn("+%1 more", modelData.more) : modelData.lanes > 1 ? modelData.text : modelData.time + " " + modelData.text
         objectName: (summed ? "more-" : "block-") + modelData.id
         readonly property real laneWidth: timeline.lanesWidth / modelData.lanes
         // Anchored with a margin, so RTL mirrors the lanes too.
@@ -699,18 +793,22 @@ FocusScope {
         width: Math.max(timeline.minBlockWidth, laneWidth - FoamyStyle.gapTiny)
         height: timeline.blockHeight(modelData)
         radius: FoamyStyle.radiusSmall
-        // Opaque, over the hour lines; a past block is faded.
-        rest: Qt.tint(FoamyPalette.background, modelData.past ? Qt.alpha(FoamyPalette.accent, 0.08) : FoamyPalette.selectedFill)
-        Accessible.name: summed ? modelData.time + " " + label : label
+        // Opaque, over the hour lines and now. An open task keeps its full
+        // strength, also once its time has passed; a completed one (still
+        // undoable) is faded.
+        rest: Qt.tint(FoamyPalette.background, modelData.struck ? Qt.alpha(FoamyPalette.accent, 0.08) : FoamyPalette.selectedFill)
+        Accessible.name: summed ? modelData.time + " " + label : modelData.time + " " + modelData.text
         onActivated: overview.taskPicked(modelData.id)
         Rectangle {
+          objectName: "blockBar"
           anchors.left: parent.left
           width: 3
           height: parent.height
           radius: 1.5
-          color: block.modelData.past ? Qt.alpha(FoamyPalette.accent, 0.5) : FoamyPalette.accent
+          color: block.modelData.struck ? Qt.alpha(FoamyPalette.accent, 0.5) : FoamyPalette.accent
         }
         PlainText {
+          objectName: "blockText"
           anchors.left: parent.left
           anchors.leftMargin: FoamyStyle.gap
           anchors.right: parent.right
@@ -720,31 +818,9 @@ FocusScope {
           wrapMode: Text.NoWrap
           elide: Text.ElideRight
           font.pixelSize: FoamyStyle.font.caption
-          color: block.modelData.past ? FoamyPalette.secondaryText : FoamyPalette.text
+          color: block.modelData.struck ? FoamyPalette.secondaryText : FoamyPalette.text
           font.strikeout: block.modelData.struck
         }
-      }
-    }
-    Item {
-      objectName: "nowLine"
-      visible: timeline.summary !== null && timeline.summary.now
-      anchors.left: parent.left
-      anchors.leftMargin: timeline.labelWidth - FoamyStyle.gapSmall
-      anchors.right: parent.right
-      y: timeline.summary ? timeline.yOf(timeline.summary.nowMinutes) - 1 : 0
-      height: 2
-      z: 2
-      Rectangle {
-        anchors.fill: parent
-        color: FoamyPalette.onSurface(FoamyPalette.error)
-      }
-      Rectangle {
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        width: FoamyStyle.gap
-        height: width
-        radius: width / 2
-        color: FoamyPalette.onSurface(FoamyPalette.error)
       }
     }
   }

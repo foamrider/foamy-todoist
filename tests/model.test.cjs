@@ -252,8 +252,12 @@ test('upcoming headings and trailing text, in English and Norwegian', () => {
   assert.equal(Model.upcomingHeading(crossing[0], formatter('nb'), catalog('nb')).sub, '30. nov.–6. des.');
   assert.equal(Model.upcomingHeading(crossing[0], formatter('en'), catalog('en')).sub, '30 Nov–6 Dec');
   const trail = (id, lang) => Model.trailingDay(rows.find((row) => row.id === id), formatter(lang), catalog(lang));
-  assert.deepEqual(['tue', 'wed', 'nw', 'nw2', 'dec', 'jan'].map((id) => trail(id, 'nb')), ['', '', 'man.', 'tor.', 'tir. 1.', 'tir. 5.']);
+  assert.deepEqual(['tue', 'wed', 'nw', 'nw2', 'dec', 'jan'].map((id) => trail(id, 'nb')), ['', '', 'Man.', 'Tor.', 'Tir. 1.', 'Tir. 5.']);
   assert.deepEqual(['nw', 'dec'].map((id) => trail(id, 'en')), ['Mon', 'Tue 1']);
+  // The Week view's Later heading: a capital too, wide and narrow.
+  assert.equal(Model.weekDayHeading('2026-11-23', false, formatter('nb'), catalog('nb')), 'Mandag 23. november');
+  assert.equal(Model.weekDayHeading('2026-11-23', true, formatter('nb'), catalog('nb')), 'Man. 23. nov.');
+  assert.equal(Model.weekDayHeading('2026-11-23', true, formatter('en'), catalog('en')), 'Mon 23 Nov');
   assert.equal(rows.find((row) => row.id === 'nw').dueTime, '09:00');
   assert.equal(rows.find((row) => row.id === 'nw2').dueTime, '');
 });
@@ -528,6 +532,42 @@ test('applying a suggestion: the word replaced, spaces escaped, one space, caret
   assert.equal(Model.suggestions(suggestModel(), after.text, after.caret), null);
 });
 
+test('a word typed in full is its suggestion already (Enter adds): case aside, escapes and all', () => {
+  const m = suggestModel();
+  const typed = (text, caret, index) => {
+    const suggest = Model.suggestions(m, text, caret);
+    return Model.suggestionTyped(text, suggest, suggest.items[index || 0]);
+  };
+  const table = [
+    ['Buy #Work', 9, true],
+    ['Buy #work', 9, true],
+    ['Buy #Wor', 8, false],
+    // The caret inside the word: the whole word counts.
+    ['Buy #Work', 6, true],
+    ['Pay @waiting\\ on', 16, true],
+    ['Pay @waiting', 12, false],
+  ];
+  for (const [text, caret, expected] of table) assert.equal(typed(text, caret), expected, text);
+  // Another entry highlighted than the one typed: Enter inserts it.
+  assert.deepEqual(names(Model.suggestions(m, '@o', 2)), ['office', 'code', 'Waiting on']);
+  assert.equal(typed('@office', 7, 0), true);
+  assert.equal(typed('@office', 7, 1), false);
+  assert.equal(Model.suggestionTyped('#Work', null, null), false);
+});
+
+test('added while typing on: the next task stays in the field, the added text and its spaces go', () => {
+  const table = [
+    ['Buy milk', 'Buy milk', ''],
+    ['Buy milkCall mum', 'Buy milk', 'Call mum'],
+    ['Buy milk  Call mum', 'Buy milk', 'Call mum'],
+    // Edited before the reply: not what was added, so it stays whole.
+    ['Buy oat milk', 'Buy milk', 'Buy oat milk'],
+    ['', 'Buy milk', ''],
+    ['Buy', '', 'Buy'],
+  ];
+  for (const [text, sent, expected] of table) assert.equal(Model.typedAfter(text, sent), expected, JSON.stringify([text, sent]));
+});
+
 // ---- sections and assignees -------------------------------------------------------
 const peopleModel = () => {
   const base = Fixtures.snapshot(TODAY);
@@ -715,18 +755,21 @@ test('detail parts: no project in its own view, in the Inbox or in search; Upcom
   assert.deepEqual(partsOf('search', { query: 'ting' }).mine, ['date:today', 'labels:hjem', 'assignee:Bo', 'recurring'], 'search heads each project');
 });
 
-test('detail dates: relative words, the weekday within a week, else "man. 23. nov." (the year when not this one)', () => {
+test('detail dates: relative words, the weekday within a week, else "Man. 23. nov." (the year when not this one), with a capital as I dag has', () => {
   const row = (day) => ({ kind: 'task', dueDay: day, dateKind: Model.dayKind(day, '2026-11-02') });
   const nb = (day) => Model.detailDate(row(day), formatter('nb'), catalog('nb'), '2026-11-02');
   const en = (day) => Model.detailDate(row(day), formatter('en'), catalog('en'), '2026-11-02');
   assert.equal(nb('2026-11-02'), 'I dag');
   assert.equal(nb('2026-11-01'), 'I går');
   assert.equal(nb('2026-11-03'), 'I morgen');
-  assert.equal(nb('2026-11-06'), 'fredag');
-  assert.equal(nb('2026-11-23'), 'man. 23. nov.');
+  assert.equal(nb('2026-11-06'), 'Fredag');
+  assert.equal(nb('2026-11-23'), 'Man. 23. nov.');
   assert.equal(en('2026-11-23'), 'Mon 23 Nov');
-  assert.equal(nb('2027-01-05'), 'tir. 5. jan. 2027');
-  assert.equal(nb('2026-10-01'), 'tor. 1. okt.');
+  assert.equal(nb('2027-01-05'), 'Tir. 5. jan. 2027');
+  assert.equal(nb('2026-10-01'), 'Tor. 1. okt.');
+  // The editor's Date and a deadline use the same words.
+  assert.equal(Model.dayWords('2026-11-06', formatter('nb'), catalog('nb'), '2026-11-02'), 'Fredag');
+  assert.equal(Model.dueWords({ due: { day: '2026-11-23', time: '09:00' } }, formatter('nb'), catalog('nb'), '2026-11-02'), 'Man. 23. nov. 09:00');
   assert.equal(Model.detailDate({ kind: 'task', dueDay: '', dateKind: '' }, formatter('nb'), catalog('nb'), '2026-11-02'), '');
 });
 
@@ -832,8 +875,6 @@ test('the add placeholder says where the task goes', () => {
   assert.equal(Model.addPlaceholder('today', TODAY, TODAY, '', format, t), 'Add a task for today…');
   assert.equal(Model.addPlaceholder('upcoming', '2026-11-19', TODAY, '', format, t), 'Add a task for Thursday 19 November…');
   assert.equal(Model.addPlaceholder('project', '', TODAY, 'Work', format, t), 'Add a task to Work…');
-  // Search and the Week view add like the Inbox (no default).
-  assert.equal(Model.addPlaceholder('week', '', TODAY, '', format, t), 'Add a task to the Inbox…');
 });
 
 test('the editor date in the panel words', () => {
@@ -985,18 +1026,22 @@ test('overview, Today: the figures, the next timed task, the timeline and the ta
   // Today: t3 (09:30), t4 (14:00), t5, t6; overdue: t1, t2.
   assert.deepEqual([o.left, o.overdue, o.untimed], [4, 2, 2]);
   assert.deepEqual(o.next, { id: 't4', text: 'Review pull request #482', time: '14:00', inMinutes: 120 });
-  assert.deepEqual([o.start, o.end, o.now], [8, 18, true]);
+  // The hours from the first block's (09:30) to the end of the last (15:00).
+  assert.deepEqual([o.start, o.end, o.now], [9, 15, true]);
+  assert.deepEqual(o.rows.map((r) => r.from), [9, 10, 11, 12, 13, 14]);
   assert.deepEqual(
-    o.blocks.map((b) => [b.id, b.time, b.minutes, b.length, b.past, b.lane, b.lanes]),
-    [['t3', '09:30', 570, 60, true, 0, 1], ['t4', '14:00', 840, 60, false, 0, 1]],
+    o.blocks.map((b) => [b.id, b.time, b.minutes, b.length, b.lane, b.lanes]),
+    [['t3', '09:30', 570, 60, 0, 1], ['t4', '14:00', 840, 60, 0, 1]],
   );
   // Before every task: the first is next; after the last: none.
   assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(7 * 60)).next.id, 't3');
   assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(14 * 60)).next, null, 'a task at this minute is no longer ahead');
-  // "now" outside the range: no line.
-  assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(7 * 60 + 59)).now, false);
-  assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(8 * 60)).now, true);
-  assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(18 * 60 + 1)).now, false);
+  // "now" before the first block starts the hours; after the last: no line.
+  const early = Model.overview(m, 'today', TODAY, NOW_TODAY(7 * 60 + 59));
+  assert.deepEqual([early.start, early.end, early.now], [7, 15, true]);
+  assert.equal(Model.overview(m, 'today', TODAY, NOW_TODAY(15 * 60)).now, true);
+  const after = Model.overview(m, 'today', TODAY, NOW_TODAY(15 * 60 + 1));
+  assert.deepEqual([after.start, after.end, after.now], [9, 15, false]);
   // A struck task (completed, still undoable) is never next, and its block says so.
   const struck = Model.overview(m, 'today', TODAY, NOW_TODAY(7 * 60, { struck: { t3: true } }));
   assert.equal(struck.next.id, 't4');
@@ -1021,18 +1066,61 @@ test('overview, Today: tomorrow\'s count and first task (by time, untimed last),
   assert.deepEqual(none.tomorrow, { count: 0, first: null });
 });
 
-test('overview, Today: the range stretches to tasks outside 08–18; overlapping blocks share lanes', () => {
+test('overview, Today: the hours come from the blocks and now; overlapping blocks share lanes', () => {
   const at = (id, time) => task(id, id, 'p', { due: due(`${TODAY}T${time}:00`) });
   const m = model(snapshotWith([at('early', '06:15'), at('a', '10:00'), at('b', '10:30'), at('c', '10:45'), at('d', '12:00'), at('late', '17:30'), task('x', 'X', 'p', { due: due(TODAY) })]));
   const o = Model.overview(m, 'today', TODAY, NOW_TODAY(5 * 60));
-  assert.deepEqual([o.start, o.end, o.now, o.untimed], [6, 19, false, 1]);
+  // From now (05:00, before 06:15) to the end of 17:30's block (18:30).
+  assert.deepEqual([o.start, o.end, o.now, o.untimed], [5, 19, true, 1]);
+  // 08 and 09 are empty but day hours: they stay.
+  assert.deepEqual(o.rows.map((r) => [r.from, r.fold]), [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map((h) => [h, false]));
   assert.deepEqual(
     o.blocks.map((b) => `${b.id}:${b.lane}/${b.lanes}`),
     ['early:0/1', 'a:0/3', 'b:1/3', 'c:2/3', 'd:0/1', 'late:0/1'],
     'a, b and c overlap: three lanes; d starts after a run ends',
   );
   const night = Model.overview(model(snapshotWith([at('n', '23:30')])), 'today', TODAY, NOW_TODAY(0));
-  assert.deepEqual([night.start, night.end, night.blocks[0].length], [8, 24, 30], 'the block is cut at midnight');
+  assert.deepEqual([night.start, night.end, night.blocks[0].length], [0, 24, 30], 'the block is cut at midnight');
+});
+
+test('overview, Today: empty hours outside 08–18 fold into one row; where a time stands', () => {
+  const at = (id, time) => task(id, id, 'p', { due: due(`${TODAY}T${time}:00`) });
+  const rows = (o) => o.rows.map((r) => (r.fold ? `${r.from}-${r.to - 1}` : `${r.from}`));
+  // A late task: 18 to 22 fold, the day hours stay.
+  const late = Model.overview(model(snapshotWith([at('a', '09:30'), at('b', '14:00'), at('late', '23:59')])), 'today', TODAY, NOW_TODAY(11 * 60 + 50));
+  assert.deepEqual([late.start, late.end, late.now], [9, 24, true]);
+  assert.deepEqual(rows(late), ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18-22', '23']);
+  // A late task at night (now 00:00): 01 to 07 fold too; now's hour stays.
+  const night = Model.overview(model(snapshotWith([at('n', '23:30')])), 'today', TODAY, NOW_TODAY(0));
+  assert.deepEqual(rows(night), ['0', '1-7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18-22', '23']);
+  // Now inside an empty evening: its hour breaks the fold.
+  const evening = Model.overview(model(snapshotWith([at('a', '09:00'), at('late', '23:00')])), 'today', TODAY, NOW_TODAY(20 * 60 + 10));
+  assert.deepEqual(rows(evening), ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18-19', '20', '21-22', '23']);
+  // One empty hour alone stays an hour.
+  const one = Model.overview(model(snapshotWith([at('a', '18:00'), at('b', '20:00')])), 'today', TODAY, NOW_TODAY(19 * 60 + 30));
+  assert.deepEqual(rows(one), ['18', '19', '20']);
+  // Early tasks: the hours start at the first one's.
+  const morning = Model.overview(model(snapshotWith([at('a', '05:00'), at('b', '06:30')])), 'today', TODAY, NOW_TODAY(12 * 60));
+  assert.deepEqual([morning.start, morning.end, morning.now], [5, 8, false]);
+  assert.deepEqual(rows(morning), ['5', '6', '7']);
+  // No timed task: no hours.
+  const none = Model.overview(model(snapshotWith([task('x', 'X', 'p', { due: due(TODAY) })])), 'today', TODAY, NOW_TODAY(12 * 60));
+  assert.deepEqual([none.start, none.end, none.now, none.rows.length], [0, 0, false, 0]);
+  // Where a time stands, in rows: an hour's minutes on its row, a fold's
+  // over its hours, the end after the last row.
+  assert.equal(Model.timelineAt(late.rows, 9 * 60 + 30), 0.5);
+  assert.equal(Model.timelineAt(late.rows, 11 * 60 + 50), 2 + 50 / 60);
+  assert.equal(Model.timelineAt(late.rows, 20 * 60 + 30), 9 + 2.5 / 5);
+  assert.equal(Model.timelineAt(late.rows, 23 * 60 + 59), 10 + 59 / 60);
+  assert.equal(Model.timelineAt(late.rows, 24 * 60), 11);
+});
+
+test('overview, Today: due today and overdue add up to the band\'s count', () => {
+  const m = model();
+  const o = Model.overview(m, 'today', TODAY, NOW_TODAY(12 * 60));
+  const counts = Model.counts(m, TODAY, {});
+  assert.equal(o.left + o.overdue, counts.today);
+  assert.equal(o.overdue, counts.overdue);
 });
 
 test('overview, Today: a crowded run keeps MAX_LANES lanes and sums up the rest', () => {
@@ -1042,13 +1130,13 @@ test('overview, Today: a crowded run keeps MAX_LANES lanes and sums up the rest'
   const o = Model.overview(m, 'today', TODAY, NOW_TODAY(10 * 60 + 15));
   assert.equal(Model.MAX_LANES, 3);
   assert.deepEqual(
-    o.blocks.map((b) => [b.id, b.lane, b.lanes, b.more, b.minutes, b.length, b.past]),
+    o.blocks.map((b) => [b.id, b.lane, b.lanes, b.more, b.minutes, b.length]),
     [
-      ['a', 0, 3, 0, 600, 60, true],
-      ['b', 1, 3, 0, 600, 60, true],
-      // c, d, e (10:00) and f (10:30): one block from 10:00 to 11:30, f still ahead.
-      ['c', 2, 3, 4, 600, 90, false],
-      ['g', 0, 1, 0, 780, 60, false],
+      ['a', 0, 3, 0, 600, 60],
+      ['b', 1, 3, 0, 600, 60],
+      // c, d, e (10:00) and f (10:30): one block from 10:00 to 11:30.
+      ['c', 2, 3, 4, 600, 90],
+      ['g', 0, 1, 0, 780, 60],
     ],
   );
   assert.equal(o.blocks[2].text, '');

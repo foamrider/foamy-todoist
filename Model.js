@@ -65,6 +65,17 @@ function priorityRole(priority) {
   return priority === 4 ? "error" : priority === 3 ? "warning" : priority === 2 ? "accent" : "muted"
 }
 
+// The completion ring by priority, so the priority reads by more than its
+// hue: p1 a thicker, filled ring, p4 a thin, empty one ({border px, fill
+// alpha at rest}; hover adds RING_HOVER). Completed, the ring is filled
+// with its colour (RING_DONE): that colour reads 4.5:1 on the background,
+// so the background's colour, the check's ink, reads as well on the fill.
+var RING_HOVER = 0.16
+var RING_DONE = 1
+function ringLook(priority) {
+  return priority === 4 ? { border: 2, fill: 0.4 } : priority === 1 ? { border: 1, fill: 0 } : { border: 1.5, fill: 0.12 }
+}
+
 // ---- days -------------------------------------------------------------------
 
 function pad(n) {
@@ -415,10 +426,29 @@ function matchNames(pool, query) {
 // Add reads them), then one space (unless one follows already); the caret
 // after that space.
 function applySuggestion(text, start, end, item) {
-  var token = ({ project: "#", label: "@", section: "/", assignee: "+" })[item.kind] + item.name.replace(/ /g, "\\ ")
+  var token = suggestionToken(item)
   var rest = text.slice(end)
   var spaced = /^\s/.test(rest) ? rest : " " + rest
   return { text: text.slice(0, start) + token + spaced, caret: start + token.length + 1 }
+}
+
+// The text an entry puts in the field.
+function suggestionToken(item) {
+  return ({ project: "#", label: "@", section: "/", assignee: "+" })[item.kind] + item.name.replace(/ /g, "\\ ")
+}
+
+// Whether the word at the caret (`suggest`, as suggestions() gives it)
+// already is `item` as applySuggestion would put it, ignoring case: "#home"
+// typed in full for Home. Inserting it would only put it back, so Enter adds.
+function suggestionTyped(text, suggest, item) {
+  return !!suggest && !!item && text.slice(suggest.start, suggest.end).toLowerCase() === suggestionToken(item).toLowerCase()
+}
+
+// The add field's text once Todoist has `sent`: what was typed after it
+// (the field stays open for the next task), its leading spaces dropped;
+// text that no longer starts with `sent` is someone's edit and stays whole.
+function typedAfter(text, sent) {
+  return sent !== "" && text.startsWith(sent) ? text.slice(sent.length).replace(/^\s+/, "") : text
 }
 
 // ---- Quick Add tokens (the add field's colours) ---------------------------------
@@ -1006,10 +1036,12 @@ function movedDate(task, day) {
 // its list, each in one pass over the view's tasks. Built only while it
 // shows (TodoView).
 
-// Today's timeline covers these hours, stretched to any timed task outside
-// them; a task's block is BLOCK_MINUTES long (its time has no end in Todoist).
-var TIMELINE_START = 8
-var TIMELINE_END = 18
+// Today's timeline covers the hours its blocks and "now" need (todayOverview);
+// a task's block is BLOCK_MINUTES long (its time has no end in Todoist).
+// Empty hours outside the day hours (FOLD_BEFORE to FOLD_FROM) fold into one
+// row, so one late or early task doesn't stretch the timeline.
+var FOLD_BEFORE = 8
+var FOLD_FROM = 18
 var BLOCK_MINUTES = 60
 // At most this many blocks side by side: a timeline can't show thousands,
 // and a lane keeps room to click (the rest are summed up, todayOverview).
@@ -1018,17 +1050,21 @@ var MAX_LANES = 3
 // Today (the personal tasks due today or before): {kind: "today", left
 // (due today), overdue, untimed (due today without a time), next (the
 // first timed task after `options.nowMinutes` that isn't struck: {id,
-// text, time, inMinutes}, or null), start and end (the timeline's hours),
-// nowMinutes, now (whether nowMinutes is inside them), blocks}. Each block: {id, text,
-// time, minutes, length (minutes, cut at the range's end), past (started
-// before now), struck, lane, lanes}: blocks that overlap share their
-// width in lanes.
+// text, time, inMinutes}, or null), start and end (the timeline's hours:
+// from the first block's hour, or now's when it is earlier, to the hour the
+// last block ends in; both 0 without blocks), rows, nowMinutes, now
+// (whether nowMinutes is inside the hours), blocks}. `rows`: the
+// timeline's rows, [{from, to, fold}] (hours, `to` excluded): an hour each,
+// or a fold, two or more empty hours outside FOLD_BEFORE to FOLD_FROM. An
+// hour is empty when no block and not now is in it. Each block: {id, text,
+// time, minutes, length (minutes, cut at midnight), struck, lane, lanes}:
+// blocks that overlap share their width in lanes.
 function todayOverview(model, today, options) {
   options = Object.assign({}, options, { personalView: true })
   var now = Number(options.nowMinutes) || 0
   // `tomorrow`: how many tasks are due tomorrow and the first of them
   // ({id, text, time}), for a day with nothing left.
-  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: TIMELINE_START, end: TIMELINE_END, nowMinutes: now, now: false, blocks: [], tomorrow: { count: 0, first: null } }
+  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: 0, end: 0, rows: [], nowMinutes: now, now: false, blocks: [], tomorrow: { count: 0, first: null } }
   var timed = []
   var tomorrow = addDays(today, 1)
   var tomorrows = []
@@ -1053,15 +1089,23 @@ function todayOverview(model, today, options) {
     out.tomorrow.first = { id: tomorrows[0].id, text: tomorrows[0].text, time: tomorrows[0].due.time }
   timed.sort(byDay)
   var struck = options.struck
-  timed.forEach(function (task) {
+  // The hours a block is in ({hour: true}), for the fold.
+  var busy = dict()
+  timed.forEach(function (task, i) {
     var m = task.due.minutes
-    out.start = Math.min(out.start, Math.floor(m / 60))
+    if (i === 0)
+      out.start = Math.floor(Math.min(m, now) / 60)
     out.end = Math.max(out.end, Math.min(24, Math.ceil((m + BLOCK_MINUTES) / 60)))
+    for (var h = Math.floor(m / 60); h * 60 < Math.min(m + BLOCK_MINUTES, 24 * 60); h++)
+      busy[h] = true
     var done = has(struck, task.id) && !!struck[task.id]
     if (!out.next && !done && m > now)
       out.next = { id: task.id, text: task.text, time: task.due.time, inMinutes: m - now }
   })
-  out.now = now >= out.start * 60 && now <= out.end * 60
+  out.now = timed.length > 0 && now >= out.start * 60 && now <= out.end * 60
+  if (out.now)
+    busy[Math.floor(now / 60)] = true
+  out.rows = timelineRows(out.start, out.end, busy)
   // Lanes: a block takes the lowest lane free at its time; a run of blocks
   // that overlap one another splits the width by its number of lanes, at
   // most MAX_LANES. A run that needs more keeps MAX_LANES - 1 lanes of
@@ -1087,11 +1131,10 @@ function todayOverview(model, today, options) {
         return
       }
       if (!more) {
-        more = { id: block.id, text: "", time: block.time, minutes: block.minutes, length: 0, past: false, struck: false, lane: low, lanes: MAX_LANES, more: 0 }
+        more = { id: block.id, text: "", time: block.time, minutes: block.minutes, length: 0, struck: false, lane: low, lanes: MAX_LANES, more: 0 }
         out.blocks.push(more)
       }
       more.more++
-      more.past = block.past
       more.length = Math.max(more.length, block.minutes + block.length - more.minutes)
     })
     run = []
@@ -1129,7 +1172,6 @@ function todayOverview(model, today, options) {
       time: task.due.time,
       minutes: m,
       length: Math.min(BLOCK_MINUTES, out.end * 60 - m),
-      past: m < now,
       struck: has(struck, task.id) && !!struck[task.id],
       lane: lane,
       lanes: 1,
@@ -1138,6 +1180,42 @@ function todayOverview(model, today, options) {
   })
   close()
   return out
+}
+
+// The timeline's rows from `start` to `end` (todayOverview's `rows`): a
+// run of two or more empty hours outside FOLD_BEFORE to FOLD_FROM is one
+// fold row; `busy` holds the hours that aren't empty.
+function timelineRows(start, end, busy) {
+  var rows = []
+  var run = []
+  var flush = function () {
+    if (run.length > 1)
+      rows.push({ from: run[0], to: run[run.length - 1] + 1, fold: true })
+    else if (run.length)
+      rows.push({ from: run[0], to: run[0] + 1, fold: false })
+    run = []
+  }
+  for (var h = start; h < end; h++) {
+    if (!has(busy, h) && (h < FOLD_BEFORE || h >= FOLD_FROM)) {
+      run.push(h)
+      continue
+    }
+    flush()
+    rows.push({ from: h, to: h + 1, fold: false })
+  }
+  flush()
+  return rows
+}
+
+// Where `minutes` stands on the timeline, in rows from its top (a fold row
+// as tall as an hour's): the place of a block or of now.
+function timelineAt(rows, minutes) {
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i]
+    if (minutes < row.to * 60 || i === rows.length - 1)
+      return i + Math.max(0, minutes - row.from * 60) / ((row.to - row.from) * 60)
+  }
+  return 0
 }
 
 // When a list's tasks are due, in order: overdue, today, "week" (after
@@ -1304,7 +1382,10 @@ function upcomingHeading(row, format, t) {
 
 // A task row's date on its detail line: the words for yesterday, today
 // and tomorrow, the weekday within a week, else the short weekday, day and
-// month ("man. 23. nov."), with the year when it isn't this one.
+// month ("Man. 23. nov."), with the year when it isn't this one. It starts
+// a line or stands alone (a row's detail line, a Week card, the editor's
+// Date and deadline, the overview), so it starts with a capital letter,
+// beside "I dag", where the locale writes its names in lower case.
 var DETAIL_KEYS = ["Today", "Yesterday", "Tomorrow", "ddd d MMM", "ddd d MMM yyyy"]
 function detailDate(row, format, t, today) {
   if (!row || !row.dateKind || !row.dueDay)
@@ -1318,9 +1399,9 @@ function detailDate(row, format, t, today) {
   case "tomorrow":
     return t("Tomorrow")
   case "weekday":
-    return format(day, "dddd")
+    return capitalized(format(day, "dddd"))
   default:
-    return format(day, t(row.dueDay.slice(0, 4) === today.slice(0, 4) ? "ddd d MMM" : "ddd d MMM yyyy"))
+    return capitalized(format(day, t(row.dueDay.slice(0, 4) === today.slice(0, 4) ? "ddd d MMM" : "ddd d MMM yyyy")))
   }
 }
 
@@ -1355,7 +1436,16 @@ function trailingDay(row, format, t) {
   if (!row || !row.trail || !row.dueDay)
     return ""
   var day = dayDate(row.dueDay)
-  return format(day, row.trail === "weekday" ? "ddd" : t("ddd d"))
+  // It stands alone in the row's trailing slot: a capital, as the row's date.
+  return capitalized(format(day, row.trail === "weekday" ? "ddd" : t("ddd d")))
+}
+
+// A Later day's heading in the Week view: the weekday and the date, short
+// where the columns are narrow (the pane is open). It stands alone, so it
+// starts with a capital.
+function weekDayHeading(dayKey, narrow, format, t) {
+  var day = dayDate(dayKey)
+  return capitalized(narrow ? format(day, t("ddd d MMM")) : format(day, "dddd") + " " + format(day, t("d MMMM")))
 }
 
 // ---- the open command ------------------------------------------------------------
@@ -1568,10 +1658,10 @@ function msToMidnight(now) {
 
 if (typeof module !== "undefined")
   module.exports = {
-    WEB, webUrl, validId, validDate, colorRole, priorityRole, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
+    WEB, webUrl, validId, validDate, colorRole, priorityRole, ringLook, RING_HOVER, RING_DONE, dayKey, addDays, daysBetween, dueOf, dayKind, plainText,
     has, othersTask, index, treeOrder, counts, rows, railProjects, parseReply, messageParts, backoffSeconds, msToMidnight,
-    TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion,
+    TRUNCATED_TEXT, EMPTY_TEXTS, emptyText, suggestions, applySuggestion, suggestionTyped, typedAfter, weekDayHeading,
     upcomingGroup, upcomingHeading, trailingDay, UPCOMING_KEYS, detailDate, DETAIL_KEYS, openArgv, DEFAULT_RETRY_SECONDS, retryDelayMs, freshSnapshot,
     MAX_TEXT, quickAddTokens, quickAddRuns, PLACEHOLDER_KEYS, addPlaceholder, dueWords, dayWords, dayRole, weekColumns, shiftedDay, capitalized, dayDate,
-    weekEndOf, searchWords, matchRuns, movedDue, movedDate, TIMELINE_START, TIMELINE_END, BLOCK_MINUTES, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
+    weekEndOf, searchWords, matchRuns, movedDue, movedDate, FOLD_BEFORE, FOLD_FROM, BLOCK_MINUTES, timelineRows, timelineAt, MAX_LANES, WHEN_KEYS, todayOverview, listOverview, upcomingOverview, overview, AHEAD_KEYS, aheadText
   }
