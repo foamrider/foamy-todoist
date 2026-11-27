@@ -28,7 +28,9 @@ Two sizes (**Size** in Settings), both the popup under the bar:
   screen.
 - **Wide**: no tabs. A rail on the left lists the views (with **Week** after
   Upcoming), then **My projects** (sub-projects indented one step) with
-  their open tasks; the list is beside it, and a pane on the right shows
+  their open tasks. The views stay put; only **My projects** scrolls (it
+  fades where it is cut), and a name too long for the rail shows whole on
+  hover. The list is beside it, and a pane on the right shows
   the selected task's details (a click on it, or the keys resting on it)
   or, with none selected, an overview of the view (see "The overview").
   The popup is always 880 px, with or without a selection, in the Week
@@ -80,7 +82,8 @@ is last). Nothing has the cursor when the panel opens.
   don't show beside the open details pane, nor on a card whose date and
   time leave them no room (the pane's Date menu and the keys move it
   then). While the board has the keys, the footer names them (`t`, Ctrl+←
-  →, Space, Enter). A moved card goes to its new column at once; the move
+  →, Space, Enter), as it does for the task row under the cursor in Wide's
+  lists (Space, `e`, and `t` and `d` for a task that can move). A moved card goes to its new column at once; the move
   is sent as a move in a list is (see "Moving"), and moving it back to its
   day cancels it. Enter, `e` or a click opens the details beside the board,
   which keeps its four columns, narrower (titles on up to three lines); Esc
@@ -140,7 +143,11 @@ so the line says to open it and change the date there (in its own words).
 
 **Adding**: click **+** or press `a` anywhere: a field grows out of the
 button across the band (the band keeps its height, and nothing moves under
-it). Its placeholder says where the task goes: "Add a task to the Inbox…",
+it). In Wide it spans only the list column: the title stays over the rail
+(its line the count alone, as the rail names the view) and **+**, **Search**
+and **⋯** stay over the pane, usable while the field is open (**+** puts
+the caret back in the field); the suggestions are a menu under the word
+being typed. Its placeholder says where the task goes: "Add a task to the Inbox…",
 "for today…", for Upcoming's day, or to the project you are looking at;
 that date or project applies when the text gives none. In the Week view
 the task goes to the day of the column the cursor was last in: today from
@@ -150,8 +157,11 @@ day). The Quick Add parts
 show in colour as you type: `#project`, `/section` and `+person` in the
 accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
 the urgent colour, `{deadline}` and ` // description` muted; dates are left
-for Todoist to read and aren't coloured. While the field is open the footer
-shows its keys:
+for Todoist to read and aren't coloured. While the field is empty (Enter
+does nothing yet) the footer shows Quick Add's forms in those colours
+(`# project · @ label · p1 priority · tomorrow 9am`); once you type, it
+shows what the keys do now (with the suggestion list open, the list's
+keys):
 
 - **Enter** does what **After adding a task** says. **Close the panel**
   (the default) sends the task and closes the field and the panel. **Keep
@@ -160,13 +170,17 @@ shows its keys:
   Todoist answers, only the sent text leaves the field.
 - **Shift+Enter** does the other one.
 - **Esc** clears the text, and on an empty field closes it (the field
-  shrinks back into **+**).
+  shrinks back into **+**). The **×** at the field's end closes it at once,
+  its text gone.
 
-The task appears when Todoist has answered (a spinner in the field shows
-meanwhile). An error shows under the band and keeps the text. When the task
-was sent but no answer came back (a timeout, a lost connection), Todoist may
-have added it: the line says so, the text stays, and the list refreshes at
-once, so you can check before sending it again. An empty field also closes
+The task appears when Todoist has answered (a spinner takes the ×'s place
+meanwhile). A failed add says why at the field: its border and a strip
+hanging from it, over the tab row (no row moves), and the text stays.
+Red means Todoist refused it and nothing was added: Enter sends it again
+(the footer says **Retry**). Yellow means Todoist may have it: the task was
+sent but no answer came back (a timeout, a lost connection), or it was
+added with a warning; the list refreshes at once, so you can check before
+sending it again. An empty field also closes
 when it loses the keys (a click on a tab, a task, ↓ into the list), but not
 for its own right-click menu, so the menu's Paste lands in it; one with
 text stays open. Text you've typed is never thrown away by moving around: it
@@ -178,14 +192,15 @@ failed, the next time the panel opens. Adding the task or clearing it with
 Esc ends the draft; text typed after the sent text stays the draft (in
 every panel, on every monitor), while text typed afresh in its place stays
 whole. A suggestion that would make the text longer than 500
-characters isn't put in (the line under the band says so). A paste the
+characters isn't put in (the strip under the field says so). A paste the
 field can't take (over 16 KiB, not plain text, or no answer from the
 clipboard within two seconds) changes nothing, and the line says why. At
 most 500 characters. The text goes to Todoist's Quick Add (see below).
 
 **Suggestions**: typing `#` at the start of a word lists your projects (the
 Inbox too), `@` your labels (your personal ones and the shared labels on
-open tasks). The list drops from the band and narrows as you type: names
+open tasks). The list hangs from the field, raised over the rows on a
+clearer surface with a soft shadow, and narrows as you type: names
 that start with what you typed first, then names that contain it, at most
 six. ↓/↑ pick one, Enter or Tab (or a click) puts it in, as `#Name` or
 `@name` with spaces written `\ ` the way Quick Add reads them, followed by
@@ -224,9 +239,7 @@ empty list's line stands in the middle of the list.
 
 - **Today**: the date as the title, then one line with how many tasks are
   due today and how many are overdue ("4 due today · 2 overdue"; a zero is
-  left out); together they are the band's "left". With nothing left or
-  overdue, **Tomorrow** with its count and its first task instead (a click
-  selects it). **Next** (the next task with a time still ahead today, and
+  left out); together they are the band's "left". **Next** (the next task with a time still ahead today, and
   how far ahead), and **Today's times**: the hours from the first task's
   (or now's, when that is earlier) to the end of the last one, each task
   with a time as a block at its time, and a thin line at now with its time
@@ -236,7 +249,13 @@ empty list's line stands in the middle of the list.
   Tasks at the same time share the width (without their time), three side
   by side at most: the rest show as one "+N more" block. A block or Next
   selects that task ("+N more" the first of its tasks, in the list beside
-  the others).
+  the others). Below, **Deadlines**: the open tasks with a deadline today
+  or in the next seven days, nearest first, three at most ("+N more" for
+  the rest), each with its day ("Today" in red, "Tomorrow", "in 3 days").
+  Then **Tomorrow** with its count and its first two tasks (a time before
+  a timed one). A click on one selects it. These two show only when they
+  fit whole below Today's times: on a crowded day Tomorrow gives way
+  first, then Deadlines.
 - **A project**: **Sections** with their task counts ("(No section)" for
   the tasks without one) and its sub-projects: a section scrolls the list
   to it, a sub-project opens it. **When**: one bar of overdue, today, this

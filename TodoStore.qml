@@ -478,7 +478,8 @@ QtObject {
   // ---- adding -------------------------------------------------------------------
   property int addRequests: 0
   // A request's end: ok (the task exists, maybe with a warning) or not.
-  signal addFinished(int request, bool ok, string message)
+  // `kind` says what the message means for the task (addErrorKind).
+  signal addFinished(int request, bool ok, string message, string kind)
   // A token-set's end (the settings page clears the field on success).
   signal tokenSetFinished(bool ok)
   function add(text, dueDate, projectId) {
@@ -510,14 +511,21 @@ QtObject {
   // Why the field's last add failed, or its warning ("" when it worked):
   // it stays with the draft, also when the reply came after closing.
   property string addError: ""
+  // What addError means for the task: "unknown" (Quick Add went out, no
+  // answer came: it may exist, adding again may make two), "added" (it
+  // exists, with a warning), "refused" (it was never added: sending it
+  // again is safe), or "" (a reason of the field's own, not a send's).
+  property string addErrorKind: ""
   // A failed add's draft and reason have not been seen: the bar buttons
   // say so until a view shows the add field with its error line (each
   // view reports that: TodoView.addErrorShown), or the reason goes with
   // the draft (TodoView.closed).
   property bool addUnseen: false
   // No mark without its reason: whatever ends the reason ends the mark.
-  onAddErrorChanged: if (addError === "")
+  onAddErrorChanged: if (addError === "") {
     addUnseen = false
+    addErrorKind = ""
+  }
   // `kept`: sentKept as the reply came (what stays: afterAdd).
   signal fieldAdded(string text, bool kept)
   function addFromField(text, dueDate, projectId) {
@@ -539,7 +547,7 @@ QtObject {
   function afterAdd(text, sent, kept) {
     return kept ? Model.typedAfter(text, sent) : text === sent ? "" : text
   }
-  onAddFinished: function (request, ok, message) {
+  onAddFinished: function (request, ok, message, kind) {
     if (request !== pendingAdd)
       return
     var sent = pendingAddText
@@ -551,6 +559,7 @@ QtObject {
     // comes clears it at once. With every popup closed, the draft is the
     // store's; an open one's is in its field.
     addUnseen = !ok && message !== "" && (addDraft !== "" || FoamyShared.demandCount("todoist") > 0)
+    addErrorKind = message !== "" ? kind : ""
     addError = message
     if (!ok)
       return
@@ -627,7 +636,7 @@ QtObject {
       const request = job.extra.request
       // Later: add() returns its request before the view can match the end.
       Qt.callLater(function () {
-        store.addFinished(request, false, message)
+        store.addFinished(request, false, message, "refused")
       })
     }
     if (job.extra.closing) {
@@ -707,6 +716,17 @@ QtObject {
     var parts = Model.messageParts(message)
     return FoamyI18n.t(parts.key, parts.values)
   }
+  // What an add's end means for the task (addErrorKind). The helper says
+  // UNKNOWN_OUTCOME when Quick Add went out without an answer; a run with
+  // no reply at all (timed out, killed) may have sent it too. A helper
+  // that never started (-1) sent nothing.
+  function addOutcome(ok, reply, code) {
+    if (ok)
+      return "added"
+    if (reply)
+      return reply.code === "UNKNOWN_OUTCOME" ? "unknown" : "refused"
+    return code === -1 ? "refused" : "unknown"
+  }
   function failureText(reply, code) {
     if (reply && typeof reply.error === "string" && reply.error !== "")
       return helperText(reply.error)
@@ -730,7 +750,7 @@ QtObject {
       moveErrors = ({})
       undoWindow.stop()
       if (job.command === "add")
-        addFinished(job.extra.request, false, accountError)
+        addFinished(job.extra.request, false, accountError, "refused")
       if (job.extra.update)
         saveDone(job, false, accountError)
       if (job.command === "task")
@@ -757,7 +777,7 @@ QtObject {
       movingDone(job.extra.moving)
     if (stale) {
       if (job.command === "add")
-        addFinished(job.extra.request, false, "")
+        addFinished(job.extra.request, false, "", "")
       if (job.extra.update)
         saveDone(job, false, "")
       return
@@ -787,7 +807,7 @@ QtObject {
         })
     }
     if (job.command === "add")
-      addFinished(job.extra.request, ok, ok ? (reply.warning ? helperText(reply.warning) : "") : failureText(reply, code))
+      addFinished(job.extra.request, ok, ok ? (reply.warning ? helperText(reply.warning) : "") : failureText(reply, code), addOutcome(ok, reply, code))
     else if (ok && reply.warning)
       error = helperText(reply.warning)
     if (job.extra.update) {

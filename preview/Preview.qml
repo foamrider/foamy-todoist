@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtTest
 import qs.Commons as Commons
 import "../kit"
 import ".." as Plugin
@@ -12,7 +13,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
+  property var previewStates: ["today", "add-empty", "add-open", "add-error", "add-error-refused", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-suggest", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-rail", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -76,6 +77,13 @@ Item {
       data.tasks.push(Fixtures.task("late", "Last call", "home", {
         due: Fixtures.due(Model.dayKey(new Date()) + "T23:59:00")
       }))
+      // Deadlines: one today, more than the part shows ("+N more").
+      const deadlines = [["dl0", "File the expense report", 0], ["dl1", "Send the slides to the board", 1], ["dl2", "Renew the domain", 5], ["dl3", "Book the venue", 6]]
+      deadlines.forEach(function (item) {
+        data.tasks.push(Fixtures.task(item[0], item[1], "work", {
+          deadline: Fixtures.shift(Model.dayKey(new Date()), item[2])
+        }))
+      })
     }
     // A section name too long for its heading row (it ends with "…").
     if (previewState === "wide-long-heading")
@@ -84,6 +92,31 @@ Item {
           name: "Review everything the release needs before Friday's launch meeting"
         }) : section
       })
+    // Wide's suggestions for "#ho": six projects, one name longer than
+    // the menu's 320.
+    if (previewState === "wide-suggest")
+      ["Hobby projects", "Holiday in the mountains with the whole family", "Home renovation and garden planning for the spring of 2027", "Horse riding lessons", "Hosting"].forEach(function (name, i) {
+        data.projects.push({
+          id: "ho" + i,
+          name: name,
+          color: ["blue", "orange", "red", "green", "yellow"][i],
+          parent_id: null,
+          child_order: 10 + i,
+          inbox: false
+        })
+      })
+    // A rail with 26 projects, many named past its width: the views stay,
+    // "My projects" scrolls; the pointer on a cut name shows it whole.
+    if (previewState === "wide-rail")
+      for (let i = 0; i < 22; i++)
+        data.projects.push({
+          id: "r" + i,
+          name: ["Platform team: quarterly planning", "Incident reviews and follow-ups", "Customer onboarding", "Kitchen renovation", "Electrician and plumbing quotes", "Family calendar and school events", "Taxes and insurance papers", "Someday / maybe"][i % 8] + (i >= 8 ? " " + (i - 7) : ""),
+          color: ["blue", "orange", "red", "green", "yellow", "grape", "charcoal", "blue"][i % 8],
+          parent_id: i % 3 === 1 ? "work" : null,
+          child_order: 10 + i,
+          inbox: false
+        })
     if (previewState === "wide-long-label")
       data.tasks.push(Fixtures.task("long", "Plan the move", "inbox", {
         labels: ["waiting-for-the-landlord-to-confirm-the-moving-date-in-march"]
@@ -125,21 +158,29 @@ Item {
         view.openAdd()
         view.field.text = "Call the plumber tomorrow #Home p1 @calls"
       })
-    // Quick Add sent, no answer: the whole warning under the band.
-    if (previewState === "add-error")
+    // The empty add field: Quick Add's forms in the footer.
+    if (previewState === "add-empty")
+      Qt.callLater(function () {
+        view.openAdd()
+      })
+    // A failed add at the field: Quick Add sent, no answer (the task may
+    // exist: yellow); refused, safe to send again (red, Enter retries).
+    if (previewState === "add-error" || previewState === "add-error-refused")
       Qt.callLater(function () {
         view.openAdd()
         view.field.text = "Call the plumber tomorrow #Home"
-        store.addError = FoamyI18n.t("Todoist didn't answer. The task may have been added: check the list before adding it again.")
+        store.addErrorKind = previewState === "add-error" ? "unknown" : "refused"
+        store.addError = previewState === "add-error" ? FoamyI18n.t("Todoist didn't answer. The task may have been added: check the list before adding it again.") : FoamyI18n.t("Todoist is limiting requests. Try again in %1 seconds.", [FoamyI18n.number(42)])
       })
-    if (previewState.indexOf("suggest-") === 0)
+    if (previewState.indexOf("suggest-") === 0 || previewState === "wide-suggest")
       Qt.callLater(function () {
         view.openAdd()
         view.field.text = ({
             "suggest-projects": "Call the plumber #h",
             "suggest-labels": "Pay the rent @",
             "suggest-sections": "Review the release notes #Work /",
-            "suggest-people": "Plan the launch #Launch +"
+            "suggest-people": "Plan the launch #Launch +",
+            "wide-suggest": "Plan the summer #ho"
           })[previewState]
         view.field.cursorPosition = view.field.text.length
         view.field.textEdited()
@@ -209,6 +250,17 @@ Item {
             view.editor.setError("place", FoamyI18n.t("Todoist answered HTTP %1.", ["500"]))
           })
       })
+    if (previewState === "wide-rail")
+      Qt.callLater(function () {
+        // The renderer can't hover: a pointer move onto the first cut name
+        // (its row lit; the tooltip draws in the window's overlay, which
+        // the renderer's pictures leave out).
+        Qt.callLater(function () {
+          var name = preview.firstCut(view)
+          if (name)
+            pointer.mouseMove(name, name.width / 2, name.height / 2, -1, Qt.NoButton, Qt.NoModifier)
+        })
+      })
     if (previewState.indexOf("wide-week") === 0)
       Qt.callLater(function () {
         view.goTo(view.firstRowStop)
@@ -216,6 +268,20 @@ Item {
         if (previewState === "wide-week-pane")
           view.openTask(view.cursorRow().id, false)
       })
+  }
+  // The rail's first project name cut with "…" (the tooltip's case).
+  function firstCut(item) {
+    if (item.objectName === "railText" && item.visible && item.truncated)
+      return item
+    for (let i = 0; i < item.children.length; i++) {
+      const found = firstCut(item.children[i])
+      if (found)
+        return found
+    }
+    return null
+  }
+  TestEvent {
+    id: pointer
   }
   onPreviewStateChanged: Qt.callLater(applyState)
   Component.onCompleted: {
