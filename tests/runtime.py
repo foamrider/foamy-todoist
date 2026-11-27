@@ -239,6 +239,67 @@ ShellRoot {
     Commons.Style.reduceMotion = false;
     return out;
   }
+  // Wide's rail and frame: with 30 projects the four views stay where
+  // they are and only "My projects" scrolls (the keys' cursor on the last
+  // project scrolls it into sight, a fade and a hairline at the cut); a
+  // cut name shows whole on hover in a tooltip capped at 320 and wrapped,
+  // a whole one has none; the footer names the keys of the task row under
+  // the cursor (no t or d for a repeating task); the footer's hairline
+  // runs the card's full width. Then the snapshot as it was, done().
+  function wideRail(view, done) {
+    var store = Plugin.TodoStore;
+    var before = store.snapshot;
+    var crowded = shell.snapshot();
+    for (var i = 0; i < 26; i++)
+      crowded.projects.push({ id: "p" + i, name: (i === 24 ? "Electrician and plumbing quotes for the kitchen and the bathroom upstairs" : "Project " + i), color: "blue", parent_id: null, child_order: 10 + i, inbox: false });
+    store.snapshot = crowded;
+    var at = function(item) { return item.mapToItem(view, 0, 0).y; };
+    var today = shell.find(view, "rail-today");
+    var todayY = at(today);
+    var scroll = shell.find(view, "railProjects");
+    // The rail's column lays the new rows out on its next polish.
+    wait.waitFor(function() { return scroll.contentHeight > scroll.height + 50; }, 3000, function() {
+    if (!check(scroll.contentHeight > scroll.height + 50 && scroll.contentY === 0 && !shell.find(view, "railFadeTop").visible && shell.find(view, "railFadeBottom").visible, "wide, 30 projects: My projects scrolls, cut at the bottom (" + JSON.stringify([scroll.contentHeight, scroll.height]) + ")")) return;
+    // The keys to the last project: it scrolls into sight, the views stay.
+    view.goTo(view.railStop);
+    view.railCursor = view.railEntries.length - 2;
+    view.moveRequested(0, 1);
+    var last = shell.find(view, "rail-p25");
+    wait.waitFor(function() { var y = last.mapToItem(scroll, 0, 0).y; return view.railCursor === view.railEntries.length - 1 && y >= 0 && y + last.height <= scroll.height + 0.5; }, 3000, function(ok) {
+      if (!check(ok && scroll.contentY > 0 && Math.abs(at(today) - todayY) < 0.5 && shell.find(view, "railFadeTop").visible && shell.find(view, "railScrolledLine").visible, "the last project in sight, the views where they were (" + JSON.stringify([scroll.contentY, at(today), todayY]) + ")")) return;
+      // A cut name (in sight with the last one): the whole name on hover,
+      // capped and wrapped.
+      var cut = shell.find(shell.find(view, "rail-p24"), "railText");
+      var tip = cut.data.find(function(item) { return item.objectName === "railTip"; });
+      var whole = shell.find(shell.find(view, "rail-p23"), "railText");
+      var wholeTip = whole.data.find(function(item) { return item.objectName === "railTip"; });
+      ev.mouseMove(whole, whole.width / 2, whole.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+      wait.after(700, function() {
+        if (!check(!whole.truncated && !wholeTip.visible, "a whole name has no tooltip")) return;
+        ev.mouseMove(cut, cut.width / 2, cut.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+        wait.waitFor(function() { return tip.visible; }, 3000, function(shown) {
+          if (!check(shown && cut.truncated && tip.text === cut.text && tip.width <= Commons.Style.space(320) + 0.5 && tip.contentItem.lineCount >= 2 && tip.contentItem.wrapMode === Text.WrapAtWordBoundaryOrAnywhere, "a cut name: the whole name on hover, at most 320 wide, wrapped (" + JSON.stringify([shown, tip.width, tip.contentItem.lineCount]) + ")")) return;
+          ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+          store.snapshot = before;
+          // The keys of the task row under the cursor; a repeating one can't move.
+          view.goTo(view.firstRowStop);
+          var hints = shell.footerHints(view);
+          if (!check(JSON.stringify(hints) === JSON.stringify(["Space Complete", "e Edit", "t Tomorrow", "d Date"]), "wide: the footer names the row's keys (" + JSON.stringify(hints) + ")")) return;
+          var repeating = view.stops.map(function(index) { return view.rows[index]; }).findIndex(function(row) { return row.kind === "task" && row.recurring; });
+          view.goTo(view.firstRowStop + repeating);
+          hints = shell.footerHints(view);
+          if (!check(repeating >= 0 && JSON.stringify(hints) === JSON.stringify(["Space Complete", "e Edit"]), "a repeating task: no t or d (" + JSON.stringify(hints) + ")")) return;
+          view.cursor.index = -1;
+          if (!check(shell.footerHints(view).length === 0, "no row under the cursor: no hints")) return;
+          var line = shell.find(view, "footerLine");
+          if (!check(line.visible && line.mapToItem(view, 0, 0).x === 0 && line.width === view.width && Math.abs(at(line) - at(view.footer)) < 0.5, "wide: the footer's hairline the card's full width (" + JSON.stringify([line.visible, line.width, view.width]) + ")")) return;
+          view.clearSelection();
+          done();
+        });
+      });
+    });
+    });
+  }
   // The footer's hints as shown: each as its caps' text and its label.
   function footerHints(view) {
     var row = shell.find(view, "keyHints");
@@ -2845,9 +2906,11 @@ ShellRoot {
       if (!check(one.wideWidth === 880 && view.overviewShown && shell.find(view, "overview").visible && !view.editor.visible && view.paneTask === "" && shell.popupPlacement(one, 880) === "", "wide, no task: the overview in the pane, the card 880 under the button (" + shell.popupPlacement(one, 880) + ")")) return;
       if (!check(shell.find(view, "rail-work") !== null && shell.find(view, "rail-launch") !== null, "wide: the projects are in the rail")) return;
       if (shell.wideField(view) !== "") return;
-      // A snapshot the helper had to cut: a muted line says so.
-      shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));
-      store.sync();
+      shell.wideRail(view, function() {
+        // A snapshot the helper had to cut: a muted line says so.
+        shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));
+        store.sync();
+      });
       break;
     case 20:
       var cut = shell.find(view, "truncatedLine");

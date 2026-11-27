@@ -28,7 +28,9 @@ Two sizes (**Size** in Settings), both the popup under the bar:
   screen.
 - **Wide**: no tabs. A rail on the left lists the views (with **Week** after
   Upcoming), then **My projects** (sub-projects indented one step) with
-  their open tasks; the list is beside it, and a pane on the right shows
+  their open tasks. The views stay put; only **My projects** scrolls (it
+  fades where it is cut), and a name too long for the rail shows whole on
+  hover. The list is beside it, and a pane on the right shows
   the selected task's details (a click on it, or the keys resting on it)
   or, with none selected, an overview of the view (see "The overview").
   The popup is always 880 px, with or without a selection, in the Week
@@ -80,7 +82,8 @@ is last). Nothing has the cursor when the panel opens.
   don't show beside the open details pane, nor on a card whose date and
   time leave them no room (the pane's Date menu and the keys move it
   then). While the board has the keys, the footer names them (`t`, Ctrl+←
-  →, Space, Enter). A moved card goes to its new column at once; the move
+  →, Space, Enter), as it does for the task row under the cursor in Wide's
+  lists (Space, `e`, and `t` and `d` for a task that can move). A moved card goes to its new column at once; the move
   is sent as a move in a list is (see "Moving"), and moving it back to its
   day cancels it. Enter, `e` or a click opens the details beside the board,
   which keeps its four columns, narrower (titles on up to three lines); Esc

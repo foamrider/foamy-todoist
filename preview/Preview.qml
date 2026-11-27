@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtTest
 import qs.Commons as Commons
 import "../kit"
 import ".." as Plugin
@@ -12,7 +13,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-empty", "add-open", "add-error", "add-error-refused", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-suggest", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
+  property var previewStates: ["today", "add-empty", "add-open", "add-error", "add-error-refused", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-suggest", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-rail", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -97,6 +98,18 @@ Item {
           inbox: false
         })
       })
+    // A rail with 26 projects, many named past its width: the views stay,
+    // "My projects" scrolls; the pointer on a cut name shows it whole.
+    if (previewState === "wide-rail")
+      for (let i = 0; i < 22; i++)
+        data.projects.push({
+          id: "r" + i,
+          name: ["Platform team: quarterly planning", "Incident reviews and follow-ups", "Customer onboarding", "Kitchen renovation", "Electrician and plumbing quotes", "Family calendar and school events", "Taxes and insurance papers", "Someday / maybe"][i % 8] + (i >= 8 ? " " + (i - 7) : ""),
+          color: ["blue", "orange", "red", "green", "yellow", "grape", "charcoal", "blue"][i % 8],
+          parent_id: i % 3 === 1 ? "work" : null,
+          child_order: 10 + i,
+          inbox: false
+        })
     if (previewState === "wide-long-label")
       data.tasks.push(Fixtures.task("long", "Plan the move", "inbox", {
         labels: ["waiting-for-the-landlord-to-confirm-the-moving-date-in-march"]
@@ -230,6 +243,17 @@ Item {
             view.editor.setError("place", FoamyI18n.t("Todoist answered HTTP %1.", ["500"]))
           })
       })
+    if (previewState === "wide-rail")
+      Qt.callLater(function () {
+        // The renderer can't hover: a pointer move onto the first cut name
+        // (its row lit; the tooltip draws in the window's overlay, which
+        // the renderer's pictures leave out).
+        Qt.callLater(function () {
+          var name = preview.firstCut(view)
+          if (name)
+            pointer.mouseMove(name, name.width / 2, name.height / 2, -1, Qt.NoButton, Qt.NoModifier)
+        })
+      })
     if (previewState.indexOf("wide-week") === 0)
       Qt.callLater(function () {
         view.goTo(view.firstRowStop)
@@ -237,6 +261,20 @@ Item {
         if (previewState === "wide-week-pane")
           view.openTask(view.cursorRow().id, false)
       })
+  }
+  // The rail's first project name cut with "…" (the tooltip's case).
+  function firstCut(item) {
+    if (item.objectName === "railText" && item.visible && item.truncated)
+      return item
+    for (let i = 0; i < item.children.length; i++) {
+      const found = firstCut(item.children[i])
+      if (found)
+        return found
+    }
+    return null
+  }
+  TestEvent {
+    id: pointer
   }
   onPreviewStateChanged: Qt.callLater(applyState)
   Component.onCompleted: {

@@ -5,6 +5,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "kit"
 import "kit/FoamyPrefs.js" as Prefs
+import "kit/FoamyText.js" as FoamyText
 import "Preferences.js" as Schema
 import "Model.js" as Model
 
@@ -745,6 +746,11 @@ PanelKeyCatcher {
     }))
   }
   property int railCursor: -1
+  // The views at the rail's top (fixed); the label and the projects after
+  // them scroll.
+  readonly property int railViewCount: railEntries.filter(function (entry) {
+    return entry.kind === "view"
+  }).length
   function railIndexOfView() {
     for (let i = 0; i < railEntries.length; i++) {
       const entry = railEntries[i]
@@ -757,7 +763,8 @@ PanelKeyCatcher {
     for (let i = railCursor + delta; i >= 0 && i < railEntries.length; i += delta)
       if (railEntries[i].kind !== "label") {
         railCursor = i
-        railWheel.ensureVisible(railRows.itemAt(i))
+        if (i >= railViewCount)
+          railWheel.ensureVisible(railRows.itemAt(i - railViewCount))
         return true
       }
     return false
@@ -1359,7 +1366,7 @@ PanelKeyCatcher {
   readonly property real listHeight: Math.max(stateBox.visible ? stateBox.implicitHeight : weekShown ? Math.min(weekView.implicitHeight, maxListHeight) : Math.min(rowsHeight, maxListHeight), floatBottom - content.y - FoamyStyle.gap, searching ? searchHeldHeight : 0)
   // The list pane around the rows: a gap, the error lines (when shown), and a gap.
   readonly property real listChrome: FoamyStyle.gap + (errorLine.visible ? errorLine.height + FoamyStyle.gapSmall : 0) + FoamyStyle.gap
-  readonly property real railHeight: Math.min(railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
+  readonly property real railHeight: Math.min(railViews.implicitHeight + railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
   // The pane (also over the Week view, which then grows to show it).
   readonly property real paneHeight: paneShown ? Math.min(taskEditor.implicitHeight, maxListHeight) : overviewShown ? Math.min(overviewPane.implicitHeight, maxListHeight) : 0
   // Wide keeps its height while it is open, as it keeps its width: the body
@@ -1690,105 +1697,195 @@ PanelKeyCatcher {
     anchors.left: parent.left
     anchors.right: parent.right
 
-    // The rail (Wide): views, then the projects.
-    Flickable {
+    // The rail (Wide): the views, fixed; under them "My projects", which
+    // scrolls alone, so the open view is always in sight. Where the
+    // projects are cut, they fade, and a hairline under the views shows
+    // they pass beneath.
+    Component {
+      id: railRowDelegate
+      Item {
+        id: railRow
+        required property var modelData
+        required property int index
+        // The entry's place in railEntries (the projects' Repeater starts
+        // after the views).
+        readonly property int entry: modelData.kind === "view" ? index : index + root.railViewCount
+        objectName: "rail-" + (modelData.value || "label")
+        width: parent ? parent.width : 0
+        height: modelData.kind === "label" ? FoamyStyle.rowHeight - 4 : FoamyStyle.rowHeight - 6
+        readonly property bool selected: (modelData.kind === "view" && root.view === modelData.value && !root.searchActive) || (modelData.kind === "project" && root.view === "project" && root.projectId === modelData.value && !root.searchActive)
+        PlainText {
+          objectName: "railLabel"
+          visible: railRow.modelData.kind === "label"
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: FoamyStyle.gapSmall
+          anchors.left: parent.left
+          anchors.leftMargin: FoamyStyle.gap
+          text: railRow.modelData.text
+          wrapMode: Text.NoWrap
+          font.pixelSize: FoamyStyle.font.caption
+          font.weight: Font.DemiBold
+          color: FoamyPalette.mutedText
+        }
+        FoamyCursorSurface {
+          visible: railRow.modelData.kind !== "label"
+          anchors.fill: parent
+          hasCursor: root.on(root.railStop) && root.railCursor === railRow.entry
+          byKeys: viewCursor.byKeys
+          current: railRow.selected
+          onHovered: if (!root.fieldFocused) {
+            viewCursor.hover(root.railStop)
+            root.railCursor = railRow.entry
+          }
+          onClicked: {
+            root.leaveField()
+            root.railActivate(railRow.entry)
+          }
+          Accessible.role: Accessible.Button
+          Accessible.name: railRow.modelData.text
+          FoamyIcon {
+            id: railIcon
+            objectName: "railIcon"
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: FoamyStyle.gap + (railRow.modelData.depth || 0) * FoamyStyle.gapLarge
+            width: FoamyStyle.iconSize
+            height: width
+            name: railRow.modelData.iconName || "hash"
+            color: railRow.modelData.kind === "project" ? railColors.of(railRow.modelData.role) : FoamyPalette.secondaryText
+          }
+          PlainText {
+            id: railText
+            objectName: "railText"
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: railIcon.right
+            anchors.leftMargin: FoamyStyle.gap
+            anchors.right: railCount.left
+            anchors.rightMargin: FoamyStyle.gapSmall
+            text: railRow.modelData.text
+            wrapMode: Text.NoWrap
+            elide: Text.ElideRight
+            font.pixelSize: FoamyStyle.font.bodySmall
+            font.weight: railRow.selected ? Font.DemiBold : Font.Normal
+            HoverHandler {
+              id: railTextHover
+            }
+            // Cut: the whole name on hover, as the kit's tooltips: at most
+            // 320 wide, 3 lines of 200 characters, wrapped anywhere.
+            PanelToolTip {
+              id: railTip
+              objectName: "railTip"
+              visible: railTextHover.hovered && railText.truncated
+              text: FoamyText.cap(railRow.modelData.text, 3, 200)
+              fontFamily: FoamyStyle.fontFamily
+              implicitWidth: Math.min(implicitContentWidth + leftPadding + rightPadding, Commons.Style.space(320))
+              Binding {
+                target: railTip.contentItem
+                property: "wrapMode"
+                value: Text.WrapAtWordBoundaryOrAnywhere
+                when: railTip.contentItem !== null
+              }
+            }
+          }
+          PlainText {
+            id: railCount
+            objectName: "railCount"
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: FoamyStyle.gap
+            text: railRow.modelData.count > 0 ? FoamyI18n.number(railRow.modelData.count) : ""
+            wrapMode: Text.NoWrap
+            font.family: FoamyStyle.monoFamily
+            font.pixelSize: FoamyStyle.font.caption
+            // mutedText measures under 4.5:1, and secondaryText under it
+            // on the selected row's fill: there the text's own colour.
+            color: railRow.modelData.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : railRow.selected ? FoamyPalette.text : FoamyPalette.secondaryText
+          }
+        }
+      }
+    }
+    Item {
       id: rail
       objectName: "rail"
       visible: root.wide && root.store.signedIn && root.store.loaded
       anchors.left: parent.left
       width: visible ? 156 : 0
       height: parent.height
-      contentHeight: railColumn.implicitHeight + FoamyStyle.gap * 2
-      clip: true
-      boundsBehavior: Flickable.StopAtBounds
-      FoamyWheelScroll {
-        id: railWheel
-        target: rail
-      }
       Column {
-        id: railColumn
+        id: railViews
         y: FoamyStyle.gap
         x: FoamyStyle.gap
         width: rail.width - FoamyStyle.gap * 2
         Repeater {
-          id: railRows
-          model: root.railEntries
-          Item {
-            id: railRow
-            required property var modelData
-            required property int index
-            objectName: "rail-" + (modelData.value || "label")
-            width: railColumn.width
-            height: modelData.kind === "label" ? FoamyStyle.rowHeight - 4 : FoamyStyle.rowHeight - 6
-            readonly property bool selected: (modelData.kind === "view" && root.view === modelData.value && !root.searchActive) || (modelData.kind === "project" && root.view === "project" && root.projectId === modelData.value && !root.searchActive)
-            PlainText {
-              objectName: "railLabel"
-              visible: railRow.modelData.kind === "label"
-              anchors.bottom: parent.bottom
-              anchors.bottomMargin: FoamyStyle.gapSmall
-              anchors.left: parent.left
-              anchors.leftMargin: FoamyStyle.gap
-              text: railRow.modelData.text
-              wrapMode: Text.NoWrap
-              font.pixelSize: FoamyStyle.font.caption
-              font.weight: Font.DemiBold
-              color: FoamyPalette.mutedText
-            }
-            FoamyCursorSurface {
-              visible: railRow.modelData.kind !== "label"
-              anchors.fill: parent
-              hasCursor: root.on(root.railStop) && root.railCursor === railRow.index
-              byKeys: viewCursor.byKeys
-              current: railRow.selected
-              onHovered: if (!root.fieldFocused) {
-                viewCursor.hover(root.railStop)
-                root.railCursor = railRow.index
-              }
-              onClicked: {
-                root.leaveField()
-                root.railActivate(railRow.index)
-              }
-              Accessible.role: Accessible.Button
-              Accessible.name: railRow.modelData.text
-              FoamyIcon {
-                id: railIcon
-                objectName: "railIcon"
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: FoamyStyle.gap + (railRow.modelData.depth || 0) * FoamyStyle.gapLarge
-                width: FoamyStyle.iconSize
-                height: width
-                name: railRow.modelData.iconName || "hash"
-                color: railRow.modelData.kind === "project" ? railColors.of(railRow.modelData.role) : FoamyPalette.secondaryText
-              }
-              PlainText {
-                objectName: "railText"
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: railIcon.right
-                anchors.leftMargin: FoamyStyle.gap
-                anchors.right: railCount.left
-                anchors.rightMargin: FoamyStyle.gapSmall
-                text: railRow.modelData.text
-                wrapMode: Text.NoWrap
-                elide: Text.ElideRight
-                font.pixelSize: FoamyStyle.font.bodySmall
-                font.weight: railRow.selected ? Font.DemiBold : Font.Normal
-              }
-              PlainText {
-                id: railCount
-                objectName: "railCount"
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.right: parent.right
-                anchors.rightMargin: FoamyStyle.gap
-                text: railRow.modelData.count > 0 ? FoamyI18n.number(railRow.modelData.count) : ""
-                wrapMode: Text.NoWrap
-                font.family: FoamyStyle.monoFamily
-                font.pixelSize: FoamyStyle.font.caption
-                // mutedText measures under 4.5:1, and secondaryText under it
-                // on the selected row's fill: there the text's own colour.
-                color: railRow.modelData.urgent ? FoamyPalette.onSurface(FoamyPalette.error) : railRow.selected ? FoamyPalette.text : FoamyPalette.secondaryText
-              }
-            }
+          model: root.railEntries.slice(0, root.railViewCount)
+          delegate: railRowDelegate
+        }
+      }
+      Flickable {
+        id: railScroll
+        objectName: "railProjects"
+        anchors.top: railViews.bottom
+        anchors.bottom: parent.bottom
+        width: parent.width
+        contentHeight: railColumn.implicitHeight + FoamyStyle.gap
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        FoamyWheelScroll {
+          id: railWheel
+          target: railScroll
+        }
+        Column {
+          id: railColumn
+          x: FoamyStyle.gap
+          width: rail.width - FoamyStyle.gap * 2
+          Repeater {
+            id: railRows
+            model: root.railEntries.slice(root.railViewCount)
+            delegate: railRowDelegate
+          }
+        }
+      }
+      Rectangle {
+        objectName: "railScrolledLine"
+        visible: !railScroll.atYBeginning
+        anchors.top: railScroll.top
+        x: FoamyStyle.gap
+        z: 1
+        width: parent.width - FoamyStyle.gap * 2
+        height: FoamyStyle.borderWidth
+        color: FoamyPalette.divider
+      }
+      Rectangle {
+        objectName: "railFadeTop"
+        visible: !railScroll.atYBeginning
+        anchors.top: railScroll.top
+        width: parent.width
+        height: FoamyStyle.padding
+        gradient: Gradient {
+          GradientStop {
+            position: 0
+            color: FoamyPalette.background
+          }
+          GradientStop {
+            position: 1
+            color: Qt.alpha(FoamyPalette.background, 0)
+          }
+        }
+      }
+      Rectangle {
+        objectName: "railFadeBottom"
+        visible: !railScroll.atYEnd
+        anchors.bottom: railScroll.bottom
+        width: parent.width
+        height: FoamyStyle.padding
+        gradient: Gradient {
+          GradientStop {
+            position: 0
+            color: Qt.alpha(FoamyPalette.background, 0)
+          }
+          GradientStop {
+            position: 1
+            color: FoamyPalette.background
           }
         }
       }
@@ -2395,6 +2492,41 @@ PanelKeyCatcher {
   readonly property bool keyHintsShown: adding && saveStatus === ""
   // The Week board has the keys: the footer names them (README, Keyboard).
   readonly property bool weekHintsShown: weekShown && on(firstRowStop) && !blocked && !adding
+  // Wide, a list view: the task the keys act on (keyTarget), whose keys
+  // the footer names; null when there is none.
+  readonly property var rowHintsTask: {
+    if (!wide || weekShown || adding || blocked || saveStatus !== "")
+      return null
+    var row = keyTarget()
+    return row && row.kind === "task" ? row : null
+  }
+  // Its keys: Space (undoes a completion or a move in its window), e, and
+  // t and d when the task can move (not a repeating one).
+  readonly property var rowHints: {
+    var row = rowHintsTask
+    if (!row)
+      return []
+    var undoes = !!row.struck || Model.has(store.moves, row.id)
+    var hints = [
+      {
+        key: "Space",
+        text: undoes ? FoamyI18n.t("Undo") : FoamyI18n.t("Complete")
+      },
+      {
+        key: "e",
+        text: FoamyI18n.t("Edit")
+      }
+    ]
+    if (!undoes && store.canMove(row.id) && store.moveRefusal(row.id) === "")
+      hints.push({
+        key: "t",
+        text: FoamyI18n.t("Tomorrow")
+      }, {
+        key: "d",
+        text: FoamyI18n.t("Date")
+      })
+    return hints
+  }
   // While adding, the keys and what they do; else where the tasks come
   // from, how fresh they are, and Refresh.
   FoamyPanelFooter {
@@ -2404,6 +2536,8 @@ PanelKeyCatcher {
     anchors.bottom: parent.bottom
     width: parent.width
     horizontalPadding: FoamyStyle.padding
+    // Wide: its own hairline, edge to edge (footerLine), closes the columns.
+    divider: !root.wide
     // A launch that failed first (until the next one works), as foamy-clock's
     // footer; else, with cached data shown after a failed sync, the time of
     // the last good one.
@@ -2509,11 +2643,11 @@ PanelKeyCatcher {
     // a task" sets them (Enter retries an add Todoist refused), Esc; while
     // the suggestion list shows, its keys (Enter adds when the word already
     // is the highlighted entry; Tab inserts then). The Week board's keys
-    // while it has them.
+    // while it has them; in Wide's lists, the keys of the task they act on.
     Row {
       id: keyHints
       objectName: "keyHints"
-      visible: (root.keyHintsShown && !root.addEmpty) || root.weekHintsShown
+      visible: (root.keyHintsShown && !root.addEmpty) || root.weekHintsShown || root.rowHintsTask !== null
       // On the footer's line (beside the taller Todoist action in Week).
       anchors.verticalCenter: parent ? parent.verticalCenter : undefined
       spacing: FoamyStyle.gapLarge
@@ -2536,7 +2670,7 @@ PanelKeyCatcher {
           key: "↵",
           text: FoamyI18n.t("Details")
         }
-      ] : root.suggestOpen ? [
+      ] : root.rowHintsTask !== null ? root.rowHints : root.suggestOpen ? [
         {
           key: "↑↓",
           text: FoamyI18n.t("Choose")
@@ -2605,6 +2739,17 @@ PanelKeyCatcher {
         }
       }
     }
+  }
+
+  // Wide: the footer's hairline at the card's full width, where the rail's
+  // and the pane's dividers end, so it closes the three columns.
+  Rectangle {
+    objectName: "footerLine"
+    visible: panelFooter.visible && root.wide
+    anchors.top: panelFooter.top
+    width: parent.width
+    height: 1
+    color: FoamyPalette.divider
   }
 
   TodoSettings {
