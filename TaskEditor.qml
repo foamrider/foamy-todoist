@@ -645,111 +645,46 @@ FocusScope {
     color: FoamyPalette.mutedText
   }
 
-  // The pane's place, the Project control: its mark in the ring's column,
-  // the place on the title's text edge, a chevron; the property rows'
-  // hover fill and keys' ring. Over the pane's header (paneHead), before
-  // the form in the file, so Tab reaches it first; the header's buttons
-  // come last. The place elides to leave them room (also "Completed" and
-  // Undo), whole in a tooltip.
-  Rectangle {
+  // The pane's place, the Project control (the kit's FoamyTitleAction):
+  // its mark in the ring's column, the place on the title's text edge, a
+  // chevron. Over the pane's header (paneHead), before the form in the
+  // file, so Tab reaches it first; the header's buttons come last. The
+  // place has the header's room first: only the buttons (Undo, Open,
+  // Close), and the sync icon when "Checking with Todoist…" doesn't fit
+  // whole (paneHeadStatus), make it end with "…" (whole in a tooltip).
+  FoamyTitleAction {
     id: paneHeadPlace
     objectName: "paneHeaderPlace"
     readonly property real inset: FoamyStyle.padding - FoamyStyle.gap
-    readonly property real textX: editor.textEdge - inset
-    // Its words' room: the header less the buttons, the margins and the chevron.
-    readonly property real room: editor.width - inset - paneHeadActions.width - paneHeadActions.anchors.rightMargin - FoamyStyle.gap
-    readonly property real chrome: textX + FoamyStyle.gapSmall + placeChevron.width + FoamyStyle.gap
+    // The place's room: the header less its margins, the buttons and a gap.
+    readonly property real room: editor.width - inset - paneHeadButtons.width - paneHeadButtons.anchors.rightMargin - FoamyStyle.gap
     visible: paneHead.visible
     // Anchored, so a mirrored panel mirrors the header.
     anchors.left: parent.left
     anchors.leftMargin: inset
     y: FoamyStyle.gapSmall
-    implicitWidth: chrome + placeText.implicitWidth
-    width: Math.max(0, Math.min(implicitWidth, room))
-    height: FoamyStyle.actionSize
-    radius: FoamyStyle.radius
-    color: placeMouse.containsMouse || activeFocus ? FoamyPalette.hoverFill : "transparent"
-    border.width: activeFocus ? 1 : 0
-    border.color: Commons.Color.accent
-    // Hidden with the header, so off the Tab path then.
-    activeFocusOnTab: true
-    Accessible.role: Accessible.Button
-    Accessible.name: FoamyI18n.t("Project: %1", [editor.placeLabel])
-    Accessible.onPressAction: editor.openPlaceMenu(false)
-    Keys.onPressed: function (event) {
-      if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-        event.accepted = true
-        editor.openPlaceMenu(true)
-      }
-    }
-    FoamyIcon {
-      objectName: "paneHeaderMark"
-      anchors.left: parent.left
-      anchors.leftMargin: editor.ringEdge + (editor.gutter - width) / 2 - paneHeadPlace.inset
-      anchors.verticalCenter: parent.verticalCenter
-      width: FoamyStyle.iconSize
-      height: width
-      name: "hash"
-      color: editor.placeColor
-    }
-    PlainText {
-      id: placeText
-      objectName: "paneHeaderPlaceText"
-      anchors.left: parent.left
-      anchors.leftMargin: paneHeadPlace.textX
-      anchors.verticalCenter: parent.verticalCenter
-      width: Math.max(0, paneHeadPlace.width - paneHeadPlace.chrome)
-      text: editor.placeLabel
-      wrapMode: Text.NoWrap
-      elide: Text.ElideRight
-      maximumLineCount: 1
-    }
-    FoamyIcon {
-      id: placeChevron
-      anchors.left: placeText.right
-      anchors.leftMargin: FoamyStyle.gapSmall
-      anchors.verticalCenter: parent.verticalCenter
-      width: FoamyStyle.iconSize
-      height: width
-      name: "chevron-down"
-      color: FoamyPalette.secondaryText
-    }
-    MouseArea {
-      id: placeMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: editor.openPlaceMenu(false)
-    }
-    // Cut: the whole place on hover, at most as wide as the pane.
-    Ui.PanelToolTip {
-      id: placeTip
-      objectName: "paneHeaderPlaceTip"
-      visible: placeMouse.containsMouse && placeText.truncated
-      text: editor.placeLabel
-      implicitWidth: Math.min(implicitContentWidth + leftPadding + rightPadding, editor.width)
-      // The host's tooltip wraps at word boundaries only; a name typed
-      // without spaces may break anywhere.
-      Binding {
-        target: placeTip.contentItem
-        property: "wrapMode"
-        value: Text.WrapAtWordBoundaryOrAnywhere
-        when: placeTip.contentItem !== null
-      }
-    }
-    // A menu's width at the control's start: the move menu (its trailing
-    // edge on its anchor's) hangs under the control from its start.
-    Item {
-      id: paneMenuAnchor
-      anchors.left: parent.left
-      width: picker.menuWidth
-      height: parent.height
+    width: Math.min(implicitWidth, room - paneHeadStatus.reserved)
+    text: editor.placeLabel
+    iconName: "hash"
+    iconColor: editor.placeColor
+    accessibleName: FoamyI18n.t("Project: %1", [editor.placeLabel])
+    fontSize: FoamyStyle.font.body
+    fontWeight: Font.Normal
+    markCenter: editor.ringEdge + editor.gutter / 2 - inset
+    textStart: editor.textEdge - inset
+    // At most the pane's width.
+    tooltipMaxWidth: Math.min(Commons.Style.space(320), editor.width)
+    menuWidth: picker.menuWidth
+    onActivated: function (keyboard) {
+      editor.openPlaceMenu(keyboard)
     }
   }
 
   // A failed move: why, and Retry, under the Project control (the pane's
   // header, the page's band) and above the form; it doesn't scroll. Before
-  // the form in the file: Retry is the next Tab stop after the control.
+  // the form in the file, so Retry comes before the task's fields: in Wide
+  // the next Tab stop after the control, in Small after the band's Undo
+  // and Open in Todoist, as they show.
   Item {
     id: placeErrorBox
     objectName: "placeError"
@@ -1329,37 +1264,70 @@ FocusScope {
   }
 
   // The pane's header: the task's place at the start (the Project
-  // control, paneHeadPlace, lies over it), Open in Todoist and Close at the
-  // end, a hairline under it; the form scrolls below. After the form in
-  // the file, so Tab reaches the task's fields before its buttons.
+  // control, paneHeadPlace, lies over it), the completion's state, Undo,
+  // Open in Todoist and Close at the end, a hairline under it; the form
+  // scrolls below. After the form in the file, so Tab reaches the task's
+  // fields before its buttons. Its height never changes with the state.
   Item {
     id: paneHead
     objectName: "paneHeader"
     visible: editor.pane && editor.task !== null
     width: parent.width
     height: visible ? FoamyStyle.actionSize + FoamyStyle.gapSmall * 2 + FoamyStyle.borderWidth : 0
+    // Completed (Undo beside it while its time runs), or its outcome
+    // unknown, said in words only when they fit whole beside the whole
+    // place. Else "Completed" is left out (the filled ring, the struck
+    // title and Undo say it), and "Checking with Todoist…" is the row's
+    // sync icon, named by the words, for which the place makes room.
+    Item {
+      id: paneHeadStatus
+      readonly property bool shown: editor.completedLook || editor.completion === "unconfirmed"
+      readonly property bool whole: shown && paneHeadPlace.implicitWidth + completedLabel.implicitWidth + FoamyStyle.gapSmall <= paneHeadPlace.room
+      readonly property bool iconShown: shown && !whole && editor.completion === "unconfirmed"
+      // What the place leaves for the icon.
+      readonly property real reserved: iconShown ? checkingIcon.width + FoamyStyle.gapSmall : 0
+      anchors.right: paneHeadButtons.left
+      y: FoamyStyle.gapSmall
+      width: whole ? completedLabel.implicitWidth + FoamyStyle.gapSmall : reserved
+      height: paneOpen.height
+      PlainText {
+        id: completedLabel
+        objectName: "paneCompleted"
+        visible: paneHeadStatus.whole
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        text: editor.completion === "unconfirmed" ? FoamyI18n.t("Checking with Todoist…") : FoamyI18n.t("Completed")
+        wrapMode: Text.NoWrap
+        font.pixelSize: FoamyStyle.font.bodySmall
+        color: FoamyPalette.secondaryText
+      }
+      FoamyIcon {
+        id: checkingIcon
+        objectName: "paneChecking"
+        visible: paneHeadStatus.iconShown
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        width: FoamyStyle.font.bodySmall
+        height: width
+        name: "refresh-cw"
+        color: FoamyPalette.secondaryText
+        Accessible.role: Accessible.StaticText
+        Accessible.name: completedLabel.text
+        HoverHandler {
+          id: checkingHover
+        }
+        Ui.PanelToolTip {
+          objectName: "paneCheckingTip"
+          visible: checkingHover.hovered
+          text: completedLabel.text
+        }
+      }
+    }
     Row {
-      id: paneHeadActions
+      id: paneHeadButtons
       anchors.right: parent.right
       anchors.rightMargin: FoamyStyle.padding - FoamyStyle.gap
       y: FoamyStyle.gapSmall
-      // Completed (Undo beside it while its time runs), or its outcome
-      // unknown: said here, so the card keeps its height (the place elides
-      // to make room).
-      Item {
-        visible: editor.completedLook || editor.completion === "unconfirmed"
-        width: completedLabel.implicitWidth + FoamyStyle.gapSmall
-        height: paneOpen.height
-        PlainText {
-          id: completedLabel
-          objectName: "paneCompleted"
-          anchors.verticalCenter: parent.verticalCenter
-          text: editor.completion === "unconfirmed" ? FoamyI18n.t("Checking with Todoist…") : FoamyI18n.t("Completed")
-          wrapMode: Text.NoWrap
-          font.pixelSize: FoamyStyle.font.bodySmall
-          color: FoamyPalette.secondaryText
-        }
-      }
       FoamyAction {
         objectName: "paneUndo"
         visible: editor.struck
@@ -1429,7 +1397,7 @@ FocusScope {
     if (!base)
       return
     var here = Edit.placeValue(base.projectId, base.sectionId)
-    openMenu(pane ? paneMenuAnchor : pageBand.compactTitleMenuAnchor, Edit.placeOptions(store.model, projects).map(function (option) {
+    openMenu(pane ? paneHeadPlace.menuAnchor : pageBand.compactTitleMenuAnchor, Edit.placeOptions(store.model, projects).map(function (option) {
       var project = editor.store.model.projects[option.projectId]
       return {
         text: option.label,

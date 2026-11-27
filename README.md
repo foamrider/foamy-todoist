@@ -310,9 +310,10 @@ anywhere in it, or Enter on it (one Tab stop each), changes it.
   project's mark and a chevron. A click on it, or Enter or Space, opens
   the menu of your projects and their sections under it, the task's place
   checked; a pick moves the task. A move Todoist refuses shows why on one
-  line under it, above the task, with **Retry**. A place too long for the
-  header ends with "…" ("Completed" and **Undo** keep their room) and
-  shows whole when you point at it.
+  line under it, above the task, with **Retry**. The place has the
+  header's room first: it ends with "…" only where **Undo**, **Open in
+  Todoist** and **Close** leave it less, and shows whole when you point at
+  it.
 - **Priority** (P1 to P4, flags in the rows'
   colours) and **Labels** (× takes one off; a click elsewhere in the row,
   marked **+** after the labels, adds one of your personal labels) open a
@@ -335,10 +336,13 @@ anywhere in it, or Enter on it (one Tab stop each), changes it.
   an icon in the page's band, or in Wide in the pane's header. While a
   completion can be undone the ring shows it completed, the title is
   struck through, and **Undo** is in the page's band, or in Wide in the
-  pane's header after "Completed"; the ring undoes too (Undo with the keys
-  gives them to the ring). Once the completion is sent it still shows
-  completed, without Undo; if Todoist didn't answer, the ring is plain and
-  the pane's header says "Checking with Todoist…" until the next refresh.
+  pane's header; the ring undoes too (Undo with the keys gives them to the
+  ring). Once the completion is sent it still shows completed, without
+  Undo; if Todoist didn't answer, the ring is plain and the pane's header
+  says "Checking with Todoist…" until the next refresh. The pane's header
+  says "Completed" or "Checking with Todoist…" only where the words fit
+  whole beside the place; else "Completed" is left out, and "Checking with
+  Todoist…" is the row's refresh mark, which says it when you point at it.
   Then the ring does nothing. In Small the ring completes and goes back to
   the list, where the row has its Undo.
   Completing the task (here, or with its row's ring or Space) saves what
