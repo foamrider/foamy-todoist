@@ -12,9 +12,9 @@ How the lists are made:
 
 ## `foamy-todoist-helper`
 
-- `bin/aarch64/foamy-todoist-helper`: sha256 `5720e683993dbf9c1c7f940b640aa2c49412bcff88e642582a2b46370ec8c347`
-- `bin/x86_64/foamy-todoist-helper`: sha256 `a52ce003c05b71792a9c4b91ae311fc2e78931db3cc01e5abc6e572e497e0857`
-- `native/native.pin`: source `05e8b399bbadb2de0111a320605ec92918bcc16c12ff30e1558dcba522eb1808`, toolchain 1.99.1
+- `bin/aarch64/foamy-todoist-helper`: sha256 `45cb4d3a736a6b3123ab221405d61d9bc5c7cb30d0ce68c86bebb8e8f9624e12`
+- `bin/x86_64/foamy-todoist-helper`: sha256 `ee6505508e8606386389c0eab3289929f265469ed8798ecb82ec81411be0645a`
+- `native/native.pin`: source `9bd2112f75dbcbbe8f80d26192c0fa69462dd59c73002fde521ec06da68e09b9`, toolchain 1.99.1
 
 ### Crates linked into `foamy-todoist-helper`
 
@@ -57,7 +57,7 @@ First-party crates (not third-party code, listed for completeness):
 
 | Crate | Version | Source | License | Arches | Notices |
 |---|---|---|---|---|---|
-| foamy-helper | 0.1.2 | `kit/rust/foamy-helper/` (foamy-kit, vendored) | MIT | both | [N7](#n7) |
+| foamy-helper | 0.1.3 | `kit/rust/foamy-helper/` (foamy-kit, vendored) | MIT | both | [N7](#n7) |
 | foamy-todoist-helper | 0.1.0 | `native/` (this plugin) | MIT | both | `LICENSE` |
 
 ### Toolchain code linked into `foamy-todoist-helper`
@@ -426,7 +426,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### N7
 
-Shipped by: foamy-helper 0.1.2 (foamy-kit's LICENSE).
+Shipped by: foamy-helper 0.1.3 (foamy-kit's LICENSE).
 
 ```text
 MIT License
