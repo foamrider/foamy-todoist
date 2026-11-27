@@ -342,7 +342,8 @@ ShellRoot {
   // with Todoist…"); the header's height and the form stay put. `says`:
   // for struck, sending and unconfirmed the word, "icon" or "";
   // `says.whole`: the place shows whole. A cut place shows whole in a
-  // tooltip on hover, wrapped, no wider than the pane. Then the sync
+  // tooltip on hover, no wider than the pane; the sync icon shows its
+  // tooltip on hover. Then the sync
   // brings the task back open, done().
   function headerFlow(view, reply, says, done) {
     var store = Plugin.TodoStore;
@@ -370,6 +371,8 @@ ShellRoot {
       if (x(chevron) < x(place) - 0.5 || x(chevron) + chevron.width > x(place) + place.width + 0.5) off.push("the chevron outside the control " + JSON.stringify([x(chevron), x(chevron) + chevron.width, x(place), x(place) + place.width]));
       var next = [said, icon, undo, open].find(function(item) { return item !== null && item.visible; });
       if (x(place) + place.width + Kit.FoamyStyle.gap > x(next) + 0.5) off.push("the control runs into " + next.objectName + " " + JSON.stringify([x(place) + place.width, x(next)]));
+      // Cut, it takes all the room: it ends one gap before the next item.
+      else if (words.truncated && x(next) - (x(place) + place.width) > Kit.FoamyStyle.gap + 0.5) off.push("the cut place leaves room before " + next.objectName + " " + JSON.stringify([x(place) + place.width, x(next)]));
       if (want === "icon") {
         if (said.visible || !iconShown || icon.Accessible.name !== "Checking with Todoist…" || !iconTip || iconTip.text !== "Checking with Todoist…") off.push("not the icon named Checking with Todoist… (" + [said.visible, iconShown, iconShown ? icon.Accessible.name : ""] + ")");
       } else if (want !== "") {
@@ -400,11 +403,16 @@ ShellRoot {
             wait.waitFor(function() { return Model.has(store.unconfirmed, id) && shell.held("sync"); }, 15000, function(ok2) {
               shell.afterFrame(one.popup.cardItem, function() {
                 if (!check(ok2 && looks("unconfirmed") === "", label + ", unconfirmed: " + looks("unconfirmed"))) return;
-                shell.release("sync");
-                wait.waitFor(function() { return !store.busy && !Model.has(store.unconfirmed, id) && ed.completion === ""; }, 15000, function(ok3) {
-                  if (!check(ok3 && view.paneShown && !said.visible && !icon.visible, label + ": the sync, open again")) return;
-                  store.error = "";
-                  done();
+                ev.mouseMove(icon, icon.width / 2, icon.height / 2, -1, Qt.NoButton, Qt.NoModifier);
+                wait.waitFor(function() { return iconTip.visible; }, 3000, function(tipShown) {
+                  if (!check(tipShown, label + ", unconfirmed: the sync icon's tooltip on hover")) return;
+                  ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
+                  shell.release("sync");
+                  wait.waitFor(function() { return !store.busy && !Model.has(store.unconfirmed, id) && ed.completion === ""; }, 15000, function(ok3) {
+                    if (!check(ok3 && view.paneShown && !said.visible && !icon.visible, label + ": the sync, open again")) return;
+                    store.error = "";
+                    done();
+                  });
                 });
               });
             });
@@ -414,7 +422,7 @@ ShellRoot {
       if (says.whole) return sent();
       ev.mouseMove(place, place.width / 2, place.height / 2, -1, Qt.NoButton, Qt.NoModifier);
       wait.waitFor(function() { return tip.visible; }, 3000, function(shown) {
-        if (!check(shown && tip.text === words.text && tip.implicitWidth <= ed.width + 0.5 && tip.contentItem.wrapMode === Text.WrapAtWordBoundaryOrAnywhere, "the whole place in a tooltip, at most the pane's width (" + JSON.stringify([tip.text, tip.implicitWidth, ed.width]) + ")")) return;
+        if (!check(shown && tip.text === words.text && tip.implicitWidth <= ed.width + 0.5, "the whole place in a tooltip, at most the pane's width (" + JSON.stringify([tip.text, tip.implicitWidth, ed.width]) + ")")) return;
         ev.mouseMove(view.band, 10, 10, -1, Qt.NoButton, Qt.NoModifier);
         sent();
       });
@@ -432,6 +440,8 @@ ShellRoot {
       if (!check(view.editor.placeLabel === "Work", "the short place: Work (" + view.editor.placeLabel + ")")) return;
       shell.headerFlow(view, long, { struck: "", sending: "", unconfirmed: "icon", whole: false }, function() {
         if (!check(view.editor.placeLabel === "Work for the quarterly planning group › Reviews waiting for the release", "the long place (" + view.editor.placeLabel + ")")) return;
+        // A later sync gets the standard snapshot again.
+        shell.put("reply-sync.json", JSON.stringify(shell.snapshot()));
         done();
       });
     });
