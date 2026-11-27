@@ -2344,8 +2344,9 @@ PanelKeyCatcher {
     visible: root.editingSettings
     width: parent.width
     height: parent.height
-    // Wide's page is 880, its column the settings width (the kit's wide one).
-    columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width
+    // Wide's page is 880, its column the settings width (the kit's wide
+    // one): Back and the title, the error line and the sections in it.
+    columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width - FoamyStyle.padding * 2
     preferences: root.preferences
     prefs: root.prefs
     saving: root.saving

@@ -16,9 +16,6 @@ FoamySettingsPage {
   // so a pick the queue refuses (no bar entry) shows the saved value again
   // at once instead of staying on show beside the error.
   property FoamyPrefsQueue prefs: null
-  // The sections' width, centred on the page: Wide's page is the popup's
-  // 880 but keeps the settings width (TodoView sets it).
-  property real columnWidth: width
   signal saveRequested(string key, var value)
   function pref(key) {
     return Prefs.value(Schema.fields, preferences, key)
@@ -107,8 +104,7 @@ FoamySettingsPage {
     id: accountSection
     objectName: "accountSection"
     visible: !page.store.signedIn
-    width: Math.min(parent.width, page.columnWidth)
-    x: (parent.width - width) / 2
+    width: parent.width
     title: FoamyI18n.t("Account")
     description: FoamyI18n.t("Find your API token in Todoist under Settings → Integrations → Developer.")
     // Signed out, in the order of the steps: where the token is (Open
@@ -196,8 +192,7 @@ FoamySettingsPage {
 
   FoamySettingsSection {
     objectName: "panelSection"
-    width: Math.min(parent.width, page.columnWidth)
-    x: (parent.width - width) / 2
+    width: parent.width
     // The first section signed in.
     topPadding: page.store.signedIn ? 0 : FoamyStyle.sectionGap
     title: FoamyI18n.t("Panel")
@@ -318,8 +313,7 @@ FoamySettingsPage {
   // section's title is its label, with the (i) beside it.
   FoamySettingsSection {
     objectName: "openCommandSection"
-    width: Math.min(parent.width, page.columnWidth)
-    x: (parent.width - width) / 2
+    width: parent.width
     topPadding: FoamyStyle.sectionGap
     title: FoamyI18n.t("Open command")
     info: FoamyI18n.t("A command to open Todoist links with, for example omarchy-launch-or-focus-webapp Todoist {url}. {url} is replaced with the link; without it, the link is added at the end. No shell: quotes and pipes aren't supported.")
@@ -342,8 +336,7 @@ FoamySettingsPage {
 
   FoamySettingsSection {
     objectName: "barSection"
-    width: Math.min(parent.width, page.columnWidth)
-    x: (parent.width - width) / 2
+    width: parent.width
     topPadding: FoamyStyle.sectionGap
     title: FoamyI18n.t("Bar")
     FoamyDropdown {
@@ -375,8 +368,7 @@ FoamySettingsPage {
 
   FoamySettingsSection {
     objectName: "refreshSection"
-    width: Math.min(parent.width, page.columnWidth)
-    x: (parent.width - width) / 2
+    width: parent.width
     topPadding: FoamyStyle.sectionGap
     title: FoamyI18n.t("Refresh")
     FoamyDropdown {
@@ -407,8 +399,7 @@ FoamySettingsPage {
     id: signedInSection
     objectName: "signedInSection"
     visible: page.store.signedIn
-    width: Math.min(parent.width, page.columnWidth)
-    x: (parent.width - width) / 2
+    width: parent.width
     topPadding: FoamyStyle.sectionGap
     title: FoamyI18n.t("Account")
     // Esc while the question has the keys: the row back, the page stays.

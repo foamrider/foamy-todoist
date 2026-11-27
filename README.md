@@ -32,8 +32,9 @@ Two sizes (**Size** in Settings), both the popup under the bar:
   the selected task's details (a click on it, or the keys resting on it)
   or, with none selected, an overview of the view (see "The overview").
   The popup is always 880 px, with or without a selection, in the Week
-  view and on its settings page (whose sections keep the 560 px column,
-  centred), so it never changes width while open. Its height holds while
+  view and on its settings page (one column of the settings width,
+  centred: Back and the title, a save's error with Retry and the
+  sections), so it never changes width while open. Its height holds while
   it is open too: at least 12 rows, and never lower than the tallest it has
   been since it opened (a longer view or task grows it once; a shorter one
   leaves room at the bottom), up to 70% of the screen (the list scrolls

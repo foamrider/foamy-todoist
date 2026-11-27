@@ -4251,12 +4251,14 @@ ShellRoot {
       var withTask = [one.cardWidth, one.popup.contentWidth, view.paneShown];
       view.clearSelection();
       if (!check(JSON.stringify(withTask) === JSON.stringify([880, 880, true]) && one.cardWidth === 880 && one.popup.contentWidth === 880 && view.overviewShown, "880 with a task and without (" + JSON.stringify([withTask, one.cardWidth]) + ")")) return;
-      // Settings: 880 too, its sections in a column of the settings width, centred.
+      // Settings: 880 too, its sections in a column of the settings width,
+      // centred; Back starts at the column's edge (the kit's columnWidth).
       view.settingsRequested();
       var section = shell.find(view.settingsPage, "accountSection");
       var sectionX = section.mapToItem(view, 0, 0).x;
       var column = Kit.FoamyStyle.popupWidthWide - Kit.FoamyStyle.padding * 2;
-      if (!check(view.editingSettings && one.cardWidth === 880 && one.popup.contentWidth === 880 && section.width === column && Math.abs(sectionX - (view.width - column) / 2) < 1, "settings in Wide: 880, the column " + column + " centred (" + JSON.stringify([one.cardWidth, section.width, sectionX]) + ")")) return;
+      var backX = view.settingsPage.backTarget.mapToItem(view, 0, 0).x;
+      if (!check(view.editingSettings && one.cardWidth === 880 && one.popup.contentWidth === 880 && section.width === column && Math.abs(sectionX - (view.width - column) / 2) < 1 && Math.abs(backX - sectionX) < 1, "settings in Wide: 880, the column " + column + " centred, Back on its edge (" + JSON.stringify([one.cardWidth, section.width, sectionX, backX]) + ")")) return;
       view.settingsClosed();
       if (!check(!view.editingSettings && one.popup.contentWidth === 880, "back from settings: 880")) return;
       one.close();
