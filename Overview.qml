@@ -11,12 +11,14 @@ import "Model.js" as Model
 // view (Model.overview, `summary`), in the editor's look (captioned parts,
 // no help text). Today: the date as the title, what is due today and
 // overdue (one line; together they are the band's "left"), the next timed
-// task and the day's timeline. A project, the Inbox and search: the
+// task, the day's timeline, then the deadlines of the coming week and
+// tomorrow's first tasks (the lower parts: they give way first, below). A
+// project, the Inbox and search: the
 // sections and sub-projects (a project), when the tasks are due, the
 // labels. Upcoming: the next seven days, the next deadline, the tasks
 // without a date. A part with nothing to show is left out: a zero figure,
-// When for an empty list. A Today with nothing left or overdue shows what
-// tomorrow holds instead of its figures.
+// When for an empty list. A Today with nothing left or overdue shows no
+// figures.
 //
 // Every clickable part is one click target and one Tab stop with one hover
 // fill, as the editor's sections: Enter or Space does what a click does.
@@ -44,6 +46,26 @@ FocusScope {
   // Today with nothing left or overdue.
   readonly property bool dayClear: kind === "today" && summary.left === 0 && summary.overdue === 0
   readonly property alias scroll: scroll
+  // Today's lower parts (Deadlines, then Tomorrow) show only whole, under
+  // the parts above them, without scrolling the pane: on a crowded day they
+  // give way, Tomorrow first, and Today's times keeps its room. Their
+  // heights come from their rows (fixed), not from the parts, so whether
+  // they show never feeds back into what they measure.
+  readonly property real briefRowHeight: FoamyStyle.rowHeight - 6
+  readonly property var deadlines: kind === "today" ? summary.deadlines : null
+  readonly property var tomorrow: kind === "today" ? summary.tomorrow : null
+  readonly property int deadlinesMore: deadlines ? deadlines.count - deadlines.tasks.length : 0
+  readonly property real deadlinesHeight: deadlines ? captionLine.implicitHeight + deadlines.tasks.length * briefRowHeight + (deadlinesMore > 0 ? moreLine.implicitHeight : 0) : 0
+  readonly property real tomorrowHeight: tomorrow ? captionLine.implicitHeight + tomorrow.tasks.length * briefRowHeight : 0
+  // The bottom of the parts above (laid out first; the lower parts never
+  // move them).
+  readonly property real upperBottom: [dateTitle, figures, nextPart, timesPart, untimedLine].reduce(function (bottom, item) {
+    return item.visible ? Math.max(bottom, item.y + item.height) : bottom
+  }, 0)
+  // The pane's height is the scroll's (it fills the pane).
+  readonly property real room: height - topInset - FoamyStyle.gap
+  readonly property bool deadlinesShown: deadlines !== null && deadlines.count > 0 && upperBottom + FoamyStyle.sectionGap + deadlinesHeight <= room
+  readonly property bool tomorrowShown: tomorrow !== null && tomorrow.count > 0 && (deadlinesShown || !deadlines || deadlines.count === 0) && upperBottom + (deadlinesShown ? FoamyStyle.sectionGap + deadlinesHeight : 0) + FoamyStyle.sectionGap + tomorrowHeight <= room
   // The first caption's top: level with the list's first heading, which
   // stands at the bottom of its row less a small gap (TaskRow's header,
   // TodoView.heightOf), below the list's top margin.
@@ -100,6 +122,12 @@ FocusScope {
     visible: false
     text: "X"
   }
+  // The "+N more" line's height, for the same (not shown).
+  MoreLine {
+    id: moreLine
+    visible: false
+    text: "X"
+  }
 
   FoamyWheelScroll {
     target: scroll
@@ -128,6 +156,7 @@ FocusScope {
       // ---- Today ----
       // The pane's title, as the editor's task title.
       PlainText {
+        id: dateTitle
         objectName: "overviewDate"
         visible: overview.kind === "today"
         Layout.fillWidth: true
@@ -187,23 +216,8 @@ FocusScope {
           text: FoamyI18n.t("overdue")
         }
       }
-      // Nothing left or overdue: tomorrow's count and its first task.
       Part {
-        id: tomorrowPart
-        objectName: "overviewTomorrow"
-        readonly property var tomorrow: overview.kind === "today" ? overview.summary.tomorrow : null
-        visible: overview.dayClear && tomorrow !== null && tomorrow.count > 0
-        caption: tomorrow ? FoamyI18n.tn("Tomorrow · %1 tasks", tomorrow.count) : ""
-        TaskTarget {
-          objectName: "tomorrowTask"
-          readonly property var first: tomorrowPart.tomorrow ? tomorrowPart.tomorrow.first : null
-          iconName: "calendar"
-          text: first ? first.text : ""
-          detail: first ? first.time : ""
-          onActivated: overview.taskPicked(first.id)
-        }
-      }
-      Part {
+        id: nextPart
         objectName: "overviewNext"
         visible: overview.kind === "today" && overview.summary.next !== null
         caption: FoamyI18n.t("Next")
@@ -217,6 +231,7 @@ FocusScope {
         }
       }
       Part {
+        id: timesPart
         objectName: "overviewTimes"
         visible: overview.kind === "today" && overview.summary.blocks.length > 0
         caption: FoamyI18n.t("Today's times")
@@ -228,6 +243,7 @@ FocusScope {
         }
       }
       PlainText {
+        id: untimedLine
         objectName: "overviewUntimed"
         visible: overview.kind === "today" && overview.summary.untimed > 0
         Layout.fillWidth: true
@@ -236,6 +252,49 @@ FocusScope {
         text: overview.kind === "today" ? FoamyI18n.tn("%1 tasks without a time", overview.summary.untimed) : ""
         font.pixelSize: FoamyStyle.font.bodySmall
         color: FoamyPalette.mutedText
+      }
+      // Deadlines from today to a week on, nearest first: the day in words
+      // at the end, red for today (as a row's deadline).
+      Part {
+        objectName: "overviewDeadlines"
+        visible: overview.deadlinesShown
+        caption: FoamyI18n.t("Deadlines")
+        spacing: 0
+        Repeater {
+          model: overview.deadlinesShown ? overview.deadlines.tasks : []
+          BriefRow {
+            required property var modelData
+            objectName: "deadline-" + modelData.id
+            iconName: "target"
+            text: modelData.text
+            trail: modelData.inDays === 0 ? FoamyI18n.t("Today") : modelData.inDays === 1 ? FoamyI18n.t("Tomorrow") : FoamyI18n.tn("in %1 days", modelData.inDays)
+            trailColor: modelData.inDays === 0 ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.secondaryText
+            iconColor: modelData.inDays === 0 ? FoamyPalette.onSurface(FoamyPalette.error) : FoamyPalette.onSurface(FoamyPalette.accent)
+            onActivated: overview.taskPicked(modelData.id)
+          }
+        }
+        MoreLine {
+          objectName: "deadlinesMore"
+          visible: overview.deadlinesMore > 0
+          text: FoamyI18n.tn("+%1 more", overview.deadlinesMore)
+        }
+      }
+      // Tomorrow: its count and first two tasks, a time before a timed one.
+      Part {
+        objectName: "overviewTomorrow"
+        visible: overview.tomorrowShown
+        caption: overview.tomorrow ? FoamyI18n.tn("Tomorrow · %1 tasks", overview.tomorrow.count) : ""
+        spacing: 0
+        Repeater {
+          model: overview.tomorrowShown ? overview.tomorrow.tasks : []
+          BriefRow {
+            required property var modelData
+            objectName: "tomorrow-" + modelData.id
+            lead: modelData.time
+            text: modelData.text
+            onActivated: overview.taskPicked(modelData.id)
+          }
+        }
       }
 
       // ---- a project, the Inbox, search ----
@@ -566,6 +625,86 @@ FocusScope {
       id: slot
       Layout.fillWidth: true
       spacing: part.spacing
+    }
+  }
+  // "+N more" under a part's rows, in line with their text.
+  component MoreLine: PlainText {
+    Layout.fillWidth: true
+    Layout.leftMargin: FoamyStyle.gap * 2 + FoamyStyle.iconSize
+    wrapMode: Text.NoWrap
+    font.pixelSize: FoamyStyle.font.caption
+    color: FoamyPalette.mutedText
+  }
+  // A task in one line (Deadlines, Tomorrow): an icon or a time (the
+  // icon's room, a time's width; empty for an untimed task), its text
+  // elided, and a day at the end.
+  component BriefRow: Target {
+    id: briefRow
+    property string iconName: ""
+    property string lead: ""
+    property string text: ""
+    property string trail: ""
+    property color trailColor: FoamyPalette.secondaryText
+    property color iconColor: FoamyPalette.onSurface(FoamyPalette.accent)
+    Layout.fillWidth: true
+    implicitHeight: overview.briefRowHeight
+    Accessible.name: [lead, text, trail].filter(function (part) {
+      return part !== ""
+    }).join(" ")
+    FoamyIcon {
+      id: briefIcon
+      visible: briefRow.iconName !== ""
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.gap
+      anchors.verticalCenter: parent.verticalCenter
+      width: FoamyStyle.iconSize
+      height: width
+      name: briefRow.iconName
+      color: briefRow.iconColor
+    }
+    PlainText {
+      id: briefLead
+      objectName: "briefLead"
+      visible: briefRow.iconName === ""
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.gap
+      anchors.verticalCenter: parent.verticalCenter
+      text: briefRow.lead
+      wrapMode: Text.NoWrap
+      font.family: FoamyStyle.monoFamily
+      font.pixelSize: FoamyStyle.font.caption
+      color: FoamyPalette.secondaryText
+    }
+    // The lead's column: as wide as "00:00", the icon's room at least.
+    PlainText {
+      id: leadMetrics
+      visible: false
+      text: "00:00"
+      font.family: FoamyStyle.monoFamily
+      font.pixelSize: FoamyStyle.font.caption
+    }
+    PlainText {
+      objectName: "briefText"
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.gap * 2 + (briefRow.iconName !== "" ? FoamyStyle.iconSize : Math.max(FoamyStyle.iconSize, leadMetrics.implicitWidth))
+      anchors.right: briefTrail.left
+      anchors.rightMargin: briefTrail.text !== "" ? FoamyStyle.gap : 0
+      anchors.verticalCenter: parent.verticalCenter
+      text: briefRow.text
+      wrapMode: Text.NoWrap
+      elide: Text.ElideRight
+      font.pixelSize: FoamyStyle.font.bodySmall
+    }
+    PlainText {
+      id: briefTrail
+      objectName: "briefTrail"
+      anchors.right: parent.right
+      anchors.rightMargin: FoamyStyle.gap
+      anchors.verticalCenter: parent.verticalCenter
+      text: briefRow.trail
+      wrapMode: Text.NoWrap
+      font.pixelSize: FoamyStyle.font.caption
+      color: briefRow.trailColor
     }
   }
   // What a figure counts, beside its number.

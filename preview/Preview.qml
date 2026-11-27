@@ -77,6 +77,13 @@ Item {
       data.tasks.push(Fixtures.task("late", "Last call", "home", {
         due: Fixtures.due(Model.dayKey(new Date()) + "T23:59:00")
       }))
+      // Deadlines: one today, more than the part shows ("+N more").
+      const deadlines = [["dl0", "File the expense report", 0], ["dl1", "Send the slides to the board", 1], ["dl2", "Renew the domain", 5], ["dl3", "Book the venue", 6]]
+      deadlines.forEach(function (item) {
+        data.tasks.push(Fixtures.task(item[0], item[1], "work", {
+          deadline: Fixtures.shift(Model.dayKey(new Date()), item[2])
+        }))
+      })
     }
     // A section name too long for its heading row (it ends with "…").
     if (previewState === "wide-long-heading")

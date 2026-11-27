@@ -1061,9 +1061,67 @@ test('overview, Today: tomorrow\'s count and first task (by time, untimed last),
   );
   const o = Model.overview(m, 'today', TODAY, NOW_TODAY(12 * 60));
   assert.deepEqual([o.left, o.overdue], [0, 0]);
-  assert.deepEqual(o.tomorrow, { count: 3, first: { id: 'nine', text: 'At nine', time: '09:00' } });
+  assert.deepEqual(o.tomorrow, {
+    count: 3,
+    tasks: [
+      { id: 'nine', text: 'At nine', time: '09:00' },
+      { id: 'ten', text: 'At ten', time: '10:00' },
+    ],
+  });
   const none = Model.overview(model(snapshotWith([])), 'today', TODAY, NOW_TODAY(12 * 60));
-  assert.deepEqual(none.tomorrow, { count: 0, first: null });
+  assert.deepEqual(none.tomorrow, { count: 0, tasks: [] });
+});
+
+test('overview, Today: tomorrow is the local day after today, across midnight and time zones; done tasks are out', () => {
+  // Oslo is UTC+1 in November: 22:59Z is 23:59 today, 23:00Z is 00:00
+  // tomorrow, 22:59Z tomorrow is still tomorrow, 23:00Z tomorrow is the day after.
+  const m = model(
+    snapshotWith([
+      task('lateToday', 'Late today', 'p', { due: due('2026-11-16T22:59:00Z') }),
+      task('midnight', 'At midnight', 'p', { due: due('2026-11-16T23:00:00Z') }),
+      task('lastMinute', 'Last minute', 'p', { due: due('2026-11-17T22:59:00Z') }),
+      task('dayAfter', 'Day after', 'p', { due: due('2026-11-17T23:00:00Z') }),
+      task('floating', 'Floating', 'p', { due: due('2026-11-17T08:00:00') }),
+      task('done', 'Done', 'p', { due: due('2026-11-17T07:00:00') }),
+    ]),
+  );
+  const o = Model.overview(m, 'today', TODAY, NOW_TODAY(12 * 60, { struck: { done: true } }));
+  assert.equal(o.left, 1, 'late today stays today');
+  assert.equal(o.tomorrow.count, 3);
+  assert.deepEqual(
+    o.tomorrow.tasks.map((t) => [t.id, t.time]),
+    [['midnight', '00:00'], ['floating', '08:00']],
+  );
+  // The day after, at its own midnight: tomorrow moves on.
+  const next = Model.overview(m, 'today', '2026-11-17', NOW_TODAY(12 * 60));
+  assert.deepEqual(next.tomorrow.tasks.map((t) => t.id), ['dayAfter']);
+});
+
+test('overview, Today: deadlines from today to seven days on, nearest first, three shown, the rest counted', () => {
+  const at = (id, deadline, extra) => task(id, id, 'p', Object.assign({ deadline }, extra || {}));
+  const m = model(
+    snapshotWith([
+      at('past', '2026-11-15'),
+      at('week', '2026-11-23'),
+      at('eight', '2026-11-24'),
+      at('today', '2026-11-16', { due: due('2026-11-20') }),
+      at('second', '2026-11-18', { child_order: 2 }),
+      at('first', '2026-11-18', { child_order: 1 }),
+      at('done', '2026-11-17'),
+      task('none', 'No deadline', 'p', { due: due('2026-11-16') }),
+    ]),
+  );
+  const o = Model.overview(m, 'today', TODAY, NOW_TODAY(12 * 60, { struck: { done: true } }));
+  assert.equal(o.deadlines.count, 4, 'today, both on the 18th and the seventh day; not yesterday, the eighth day or a done task');
+  assert.deepEqual(
+    o.deadlines.tasks.map((t) => [t.id, t.day, t.inDays]),
+    [['today', '2026-11-16', 0], ['first', '2026-11-18', 2], ['second', '2026-11-18', 2]],
+  );
+  assert.equal(o.deadlines.count - o.deadlines.tasks.length, 1, '+1 more');
+  // A task the list hides (sent completion) leaves the count.
+  const hidden = Model.overview(m, 'today', TODAY, NOW_TODAY(12 * 60, { struck: { done: true }, hidden: { today: true } }));
+  assert.deepEqual([hidden.deadlines.count, hidden.deadlines.tasks.map((t) => t.id)], [3, ['first', 'second', 'week']]);
+  assert.deepEqual(Model.overview(model(snapshotWith([])), 'today', TODAY, NOW_TODAY(0)).deadlines, { count: 0, tasks: [] });
 });
 
 test('overview, Today: the hours come from the blocks and now; overlapping blocks share lanes', () => {

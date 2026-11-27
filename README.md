@@ -239,9 +239,7 @@ empty list's line stands in the middle of the list.
 
 - **Today**: the date as the title, then one line with how many tasks are
   due today and how many are overdue ("4 due today · 2 overdue"; a zero is
-  left out); together they are the band's "left". With nothing left or
-  overdue, **Tomorrow** with its count and its first task instead (a click
-  selects it). **Next** (the next task with a time still ahead today, and
+  left out); together they are the band's "left". **Next** (the next task with a time still ahead today, and
   how far ahead), and **Today's times**: the hours from the first task's
   (or now's, when that is earlier) to the end of the last one, each task
   with a time as a block at its time, and a thin line at now with its time
@@ -251,7 +249,13 @@ empty list's line stands in the middle of the list.
   Tasks at the same time share the width (without their time), three side
   by side at most: the rest show as one "+N more" block. A block or Next
   selects that task ("+N more" the first of its tasks, in the list beside
-  the others).
+  the others). Below, **Deadlines**: the open tasks with a deadline today
+  or in the next seven days, nearest first, three at most ("+N more" for
+  the rest), each with its day ("Today" in red, "Tomorrow", "in 3 days").
+  Then **Tomorrow** with its count and its first two tasks (a time before
+  a timed one). A click on one selects it. These two show only when they
+  fit whole below Today's times: on a crowded day Tomorrow gives way
+  first, then Deadlines.
 - **A project**: **Sections** with their task counts ("(No section)" for
   the tasks without one) and its sub-projects: a section scrolls the list
   to it, a sub-project opens it. **When**: one bar of overdue, today, this

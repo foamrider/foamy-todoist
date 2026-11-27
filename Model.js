@@ -1046,6 +1046,11 @@ var BLOCK_MINUTES = 60
 // At most this many blocks side by side: a timeline can't show thousands,
 // and a lane keeps room to click (the rest are summed up, todayOverview).
 var MAX_LANES = 3
+// Today's deadlines: today and the next seven days, three rows at most;
+// tomorrow's first two tasks (the rest are counted).
+var DEADLINE_DAYS = 7
+var DEADLINE_ROWS = 3
+var TOMORROW_ROWS = 2
 
 // Today (the personal tasks due today or before): {kind: "today", left
 // (due today), overdue, untimed (due today without a time), next (the
@@ -1059,21 +1064,37 @@ var MAX_LANES = 3
 // hour is empty when no block and not now is in it. Each block: {id, text,
 // time, minutes, length (minutes, cut at midnight), struck, lane, lanes}:
 // blocks that overlap share their width in lanes.
+// `deadlines`: {count, tasks} of the open tasks whose deadline is today or
+// within DEADLINE_DAYS after it, the first DEADLINE_ROWS of them, nearest
+// first ({id, text, day, inDays}). `tomorrow`: {count, tasks} of the open
+// tasks due tomorrow, the first TOMORROW_ROWS of them by time, untimed last
+// ({id, text, time}). A struck task (completed, still undoable) is in
+// neither.
 function todayOverview(model, today, options) {
   options = Object.assign({}, options, { personalView: true })
   var now = Number(options.nowMinutes) || 0
-  // `tomorrow`: how many tasks are due tomorrow and the first of them
-  // ({id, text, time}), for a day with nothing left.
-  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: 0, end: 0, rows: [], nowMinutes: now, now: false, blocks: [], tomorrow: { count: 0, first: null } }
+  var out = { kind: "today", left: 0, overdue: 0, untimed: 0, next: null, start: 0, end: 0, rows: [], nowMinutes: now, now: false, blocks: [], deadlines: { count: 0, tasks: [] }, tomorrow: { count: 0, tasks: [] } }
+  var struck = options.struck
   var timed = []
   var tomorrow = addDays(today, 1)
+  var lastDeadline = addDays(today, DEADLINE_DAYS)
   var tomorrows = []
+  var deadlines = []
+  var deadlineSoon = function (task) {
+    return !!task.deadline && task.deadline >= today && task.deadline <= lastDeadline
+  }
   visibleTasks(model, options, function (task) {
-    return !!task.due && task.due.day <= tomorrow
+    return (!!task.due && task.due.day <= tomorrow) || deadlineSoon(task)
   }).forEach(function (task) {
-    if (task.due.day === tomorrow)
-      tomorrows.push(task)
-    else if (task.due.day < today)
+    var done = has(struck, task.id) && !!struck[task.id]
+    if (deadlineSoon(task) && !done)
+      deadlines.push(task)
+    if (!task.due || task.due.day > tomorrow)
+      return
+    if (task.due.day === tomorrow) {
+      if (!done)
+        tomorrows.push(task)
+    } else if (task.due.day < today)
       out.overdue++
     else {
       out.left++
@@ -1085,10 +1106,17 @@ function todayOverview(model, today, options) {
   })
   tomorrows.sort(byDay)
   out.tomorrow.count = tomorrows.length
-  if (tomorrows.length)
-    out.tomorrow.first = { id: tomorrows[0].id, text: tomorrows[0].text, time: tomorrows[0].due.time }
+  out.tomorrow.tasks = tomorrows.slice(0, TOMORROW_ROWS).map(function (task) {
+    return { id: task.id, text: task.text, time: task.due.time }
+  })
+  deadlines.sort(function (a, b) {
+    return compare(a.deadline, b.deadline) || a.order - b.order || compare(a.id, b.id)
+  })
+  out.deadlines.count = deadlines.length
+  out.deadlines.tasks = deadlines.slice(0, DEADLINE_ROWS).map(function (task) {
+    return { id: task.id, text: task.text, day: task.deadline, inDays: daysBetween(today, task.deadline) }
+  })
   timed.sort(byDay)
-  var struck = options.struck
   // The hours a block is in ({hour: true}), for the fold.
   var busy = dict()
   timed.forEach(function (task, i) {

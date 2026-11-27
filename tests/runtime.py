@@ -1986,15 +1986,44 @@ ShellRoot {
       var tomorrowCount = pane.summary.tomorrow.count;
       var stateBox = shell.find(view, "stateBox");
       var listArea = shell.find(view, "listArea");
-      if (!check(view.rows.length === 0 && tomorrowCount > 0 && !shown("overviewFigures") && shown("overviewTomorrow") && clearTexts.indexOf("Tomorrow · " + tomorrowCount + " tasks") >= 0 && clearTexts.indexOf(pane.summary.tomorrow.first.text) >= 0 && clearTexts.indexOf("0") < 0 && Math.abs(stateBox.y + stateBox.height / 2 - listArea.height / 2) <= 1, "nothing left today: tomorrow, no zero, the line centred (" + JSON.stringify([clearTexts, stateBox.y, stateBox.height, listArea.height]) + ")")) return false;
+      if (!check(view.rows.length === 0 && tomorrowCount > 0 && !shown("overviewFigures") && shown("overviewTomorrow") && clearTexts.indexOf("Tomorrow · " + tomorrowCount + " tasks") >= 0 && clearTexts.indexOf(pane.summary.tomorrow.tasks[0].text) >= 0 && clearTexts.indexOf("0") < 0 && Math.abs(stateBox.y + stateBox.height / 2 - listArea.height / 2) <= 1, "nothing left today: tomorrow, no zero, the line centred (" + JSON.stringify([clearTexts, stateBox.y, stateBox.height, listArea.height]) + ")")) return false;
       // Tomorrow's first task opens in the pane.
-      var first = pane.summary.tomorrow.first.id;
-      click(part("tomorrowTask"));
+      var first = pane.summary.tomorrow.tasks[0].id;
+      click(part("tomorrow-" + first));
       if (!check(view.paneTask === first && view.editor.visible, "tomorrow's task in the pane (" + view.paneTask + ")")) return false;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       view.clearSelection();
       store.snapshot = shell.snapshot();
       return true;
+    }, function() {
+      // Below the day, as tall as the editor: Deadlines (t1's in three
+      // days), whole inside the pane; no room for Tomorrow, so it gave way.
+      var texts = shell.visibleTexts(pane);
+      var deadlineRow = part("deadline-t1");
+      var deadlineBottom = deadlineRow.mapToItem(pane.scroll, 0, 0).y + deadlineRow.height;
+      if (!check(shown("overviewTimes") && shown("overviewDeadlines") && inOrder(texts, ["2 tasks without a time", "Deadlines", "Send the quarterly report to Finance", "in 3 days"]) && !shown("deadlinesMore") && pane.summary.tomorrow.count === 2 && !shown("overviewTomorrow") && pane.scroll.contentY === 0 && deadlineBottom <= pane.scroll.height, "Deadlines under the day; Tomorrow gave way (" + JSON.stringify([texts, deadlineBottom, pane.scroll.height]) + ")")) return false;
+      // The keys on a deadline: the accent ring; Enter selects its task.
+      deadlineRow.forceActiveFocus(Qt.TabFocusReason);
+      if (!check(deadlineRow.activeFocus && deadlineRow.border.width === 1 && Qt.colorEqual(deadlineRow.border.color, Commons.Color.accent), "a deadline takes the keys, with the ring")) return false;
+      ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
+      if (!check(view.paneTask === "t1" && view.editor.visible && !pane.visible && wideStill(), "Enter on a deadline selected its task (" + view.paneTask + ")")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      view.clearSelection();
+      // A taller pane: room for Tomorrow too.
+      pane.height = Kit.FoamyStyle.rowHeight * 24;
+      return true;
+    }, function() {
+      var texts = shell.visibleTexts(pane);
+      var lastRow = part("tomorrow-t11");
+      var bottom = lastRow.mapToItem(pane.scroll, 0, 0).y + lastRow.height;
+      if (!check(shown("overviewDeadlines") && shown("overviewTomorrow") && inOrder(texts, ["Deadlines", "Send the quarterly report to Finance", "in 3 days", "Tomorrow · 2 tasks", "10:00", "Draft the launch post", "Pay the electricity bill"]) && bottom <= pane.scroll.height, "a taller pane: Tomorrow under Deadlines (" + JSON.stringify([texts, bottom, pane.scroll.height]) + ")")) return false;
+      // A click on tomorrow's task (not in Today's list): the pane on it.
+      click(part("tomorrow-t10"));
+      if (!check(view.paneTask === "t10" && view.editor.visible && !pane.visible, "a click on tomorrow's task opened it (" + view.paneTask + ")")) return false;
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      view.clearSelection();
+      pane.height = Qt.binding(function() { return view.editor.height; });
+      return check(view.paneTask === "" && pane.visible && wideStill(), "the overview again");
     }, function() {
       // Today: the date, the figures, Next, the timeline, the untimed count.
       var todayTexts = shell.visibleTexts(pane);
@@ -2083,7 +2112,7 @@ ShellRoot {
       view.focusList();
       return true;
     }, function() {
-      if (!check(!shown("overviewNext") && pane.scroll.contentHeight > pane.scroll.height * 1.5, "a short pane with no Next (" + JSON.stringify([pane.scroll.contentHeight, pane.scroll.height]) + ")")) return false;
+      if (!check(!shown("overviewNext") && !shown("overviewDeadlines") && !shown("overviewTomorrow") && pane.scroll.contentHeight > pane.scroll.height * 1.5, "a short pane with no Next, the lower parts gone (" + JSON.stringify([pane.scroll.contentHeight, pane.scroll.height]) + ")")) return false;
       // Tab: the keys on the first block, and it shows.
       ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
       var first = part("block-t3");
