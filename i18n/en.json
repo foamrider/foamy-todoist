@@ -185,7 +185,7 @@
   "Paste your API token": "Paste your API token",
   "Pick a priority from 1 to 4.": "Pick a priority from 1 to 4.",
   "Priority": "Priority",
-  "Project": "Project",
+  "Project: %1": "Project: %1",
   "Redo": "Redo",
   "Refresh": "Refresh",
   "Refresh every": "Refresh every",

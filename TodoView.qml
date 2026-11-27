@@ -1389,6 +1389,7 @@ PanelKeyCatcher {
     fieldOpen: root.fieldOpen
     settingsHasCursor: viewCursor.at(root.menuStop)
     menuHasCursor: viewCursor.at(root.menuStop)
+    cursorByKeys: viewCursor.byKeys
     onSettingsClicked: {
       root.leaveField()
       root.settingsRequested()
@@ -1996,6 +1997,7 @@ PanelKeyCatcher {
           iconName: addsQuery ? "plus" : ""
           kind: stateBox.kind === "signedOut" ? "primary" : "secondary"
           hasCursor: viewCursor.at(root.firstRowStop) && !root.stops.length
+          cursorByKeys: viewCursor.byKeys
           onHoveredChanged: if (hovered)
             viewCursor.hover(root.firstRowStop)
           onClicked: addsQuery ? root.addQuery() : opensSettings ? root.settingsRequested() : root.store.retry()
@@ -2217,6 +2219,7 @@ PanelKeyCatcher {
     refreshing: root.store.syncing
     refreshEnabled: root.store.signedIn && !root.store.busy
     refreshHasCursor: viewCursor.at(root.refreshStop)
+    cursorByKeys: viewCursor.byKeys
     onRefreshHovered: function (hovered) {
       if (hovered && !root.fieldFocused)
         viewCursor.hover(root.refreshStop)
@@ -2344,8 +2347,9 @@ PanelKeyCatcher {
     visible: root.editingSettings
     width: parent.width
     height: parent.height
-    // Wide's page is 880, its column the settings width (the kit's wide one).
-    columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width
+    // Wide's page is 880, its column the settings width (the kit's wide
+    // one): Back and the title, the error line and the sections in it.
+    columnWidth: root.wide ? FoamyStyle.popupWidthWide - FoamyStyle.padding * 2 : width - FoamyStyle.padding * 2
     preferences: root.preferences
     prefs: root.prefs
     saving: root.saving

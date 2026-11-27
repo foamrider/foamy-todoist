@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
+  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -52,6 +52,20 @@ Item {
       })
     if (previewState === "truncated")
       data.truncated = true
+    // A place too long for the pane's header (its task unconfirmed: the
+    // sync icon beside it).
+    if (previewState === "wide-task-long-place") {
+      data.projects = data.projects.map(function (project) {
+        return project.id === "work" ? Object.assign({}, project, {
+          name: "Work for the quarterly planning group"
+        }) : project
+      })
+      data.sections = data.sections.map(function (section) {
+        return section.id === "s-review" ? Object.assign({}, section, {
+          name: "Reviews waiting for the release"
+        }) : section
+      })
+    }
     // Today's timeline crowded at 10:00 (three lanes, the rest summed up)
     // and a task at 23:59; the Inbox with a label as long as Todoist allows.
     if (previewState === "wide-crowded") {
@@ -79,7 +93,7 @@ Item {
     // The fixtures assign one task to someone else: show it, as an example.
     store.othersTasks = "show"
     // A completion whose outcome is unknown: the list's row, a Week card, the pane.
-    if (previewState === "unconfirmed" || previewState === "wide-week-unconfirmed" || previewState === "wide-task-unconfirmed")
+    if (previewState === "unconfirmed" || previewState === "wide-week-unconfirmed" || previewState === "wide-task-unconfirmed" || previewState === "wide-task-long-place")
       store.unconfirmed = {
         "t4": true
       }
@@ -154,15 +168,18 @@ Item {
       })
     // The editor: the page (Small), the pane (Wide); the Date field open,
     // a refused save under the date, the keys on the empty Deadline section
-    // (its fill as on hover, and the keys' ring; the renderer can't hover).
+    // (its fill as on hover, and the keys' ring; the renderer can't hover);
+    // the move menu open under the band's place (the Project control).
     // A completed task, its Undo time running: the page (Small) and the
     // pane (Wide) show it completed, with Undo; sent, without; unconfirmed,
-    // a plain ring and "Checking with Todoist…".
-    if (previewState === "editor-completed" || previewState === "wide-task-completed" || previewState === "wide-task-sent" || previewState === "wide-task-unconfirmed")
+    // a plain ring and "Checking with Todoist…" (the sync icon in the
+    // pane's header, where the words don't fit whole; also with a long
+    // place).
+    if (previewState === "editor-completed" || previewState === "wide-task-completed" || previewState === "wide-task-sent" || previewState === "wide-task-unconfirmed" || previewState === "wide-task-long-place")
       Qt.callLater(function () {
         view.openTask("t4", false)
       })
-    if (previewState === "editor" || previewState === "editor-error" || previewState === "editor-date-open" || previewState === "editor-section-cursor")
+    if (previewState === "editor" || previewState === "editor-error" || previewState === "editor-date-open" || previewState === "editor-section-cursor" || previewState === "editor-place-menu")
       Qt.callLater(function () {
         view.openTask("t4", false)
         if (previewState === "editor-error")
@@ -177,11 +194,20 @@ Item {
           Qt.callLater(function () {
             view.editor.closeField("deadline", true)
           })
+        if (previewState === "editor-place-menu")
+          Qt.callLater(function () {
+            view.editor.openPlaceMenu(false)
+          })
       })
-    // Wide: a task in the pane (the full width); the Week view (always full).
-    if (previewState === "wide-task")
+    // Wide: a task in the pane (the full width), also with a move Todoist
+    // refused under the pane's header; the Week view (always full).
+    if (previewState === "wide-task" || previewState === "wide-task-place-error")
       Qt.callLater(function () {
         view.goTo(view.firstRowStop)
+        if (previewState === "wide-task-place-error")
+          Qt.callLater(function () {
+            view.editor.setError("place", FoamyI18n.t("Todoist answered HTTP %1.", ["500"]))
+          })
       })
     if (previewState.indexOf("wide-week") === 0)
       Qt.callLater(function () {
