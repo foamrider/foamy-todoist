@@ -281,10 +281,12 @@ ShellRoot {
   }
   // A move Todoist refuses, picked from the keys (Space on the place, the
   // Project control): why and Retry on one line right under the control
-  // (the page's band, the pane's header) and above the form, which doesn't
-  // scroll it; Retry sends the same pick again and the line goes. `now`:
-  // the snapshot's changes that keep the task where it is; `pick`: the
-  // menu's entry; `after`: the changes once it moved. Then done().
+  // (the page's band, the pane's header), inside the editor's width, and
+  // above the form, which doesn't scroll it; Tab from the control reaches
+  // Retry before the task's fields (in Small after Open in Todoist); Retry
+  // sends the same move again and the line goes. `now`: the snapshot's
+  // changes that keep the task where it is; `pick`: the menu's entry;
+  // `after`: the changes once it moved (the move's update). Then done().
   function failedMove(editor, now, pick, after, done) {
     var store = Plugin.TodoStore;
     var id = editor.taskId;
@@ -294,6 +296,8 @@ ShellRoot {
     var scroll = shell.find(editor, "editorScroll");
     var head = shell.find(editor, editor.pane ? "paneHeader" : "editorBand");
     var y = function(item) { return item.mapToItem(editor, 0, 0).y; };
+    var x = function(item) { return item.mapToItem(editor, 0, 0).x; };
+    var update = [Object.assign({ op: "update", id: id }, after[id])];
     var refused = {};
     refused[id] = { code: "HTTP", error: "Todoist answered HTTP %1.\u001f502" };
     shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith(now), { results: refused })));
@@ -305,15 +309,26 @@ ShellRoot {
     editor.menu.activate(at);
     wait.waitFor(function() { return shell.calls("apply").length === from + 1 && !store.busy && !editor.saving; }, 15000, function(ok) {
       var sent = shell.updatesSince(from);
-      if (!check(ok && line.visible && error.text === "Todoist answered HTTP 502." && error.wrapMode === Text.WordWrap && error.Accessible.role === Accessible.AlertMessage && Qt.colorEqual(error.color, Kit.FoamyPalette.onSurface(Kit.FoamyPalette.error)) && retry.visible, "a refused move: why and Retry under the place (" + JSON.stringify([line.visible, error.text, sent]) + ")")) return;
+      if (!check(ok && JSON.stringify(sent) === JSON.stringify(update) && line.visible && error.text === "Todoist answered HTTP 502." && retry.visible, "a refused move: why and Retry under the place (" + JSON.stringify([line.visible, error.text, sent]) + ")")) return;
+      if (!check(x(error) >= -0.5 && x(error) + error.width <= editor.width + 0.5 && x(retry) >= -0.5 && x(retry) + retry.width <= editor.width + 0.5 && x(retry) >= x(error) + error.paintedWidth - 0.5, "the why and Retry inside the editor's width (" + JSON.stringify([x(error), error.width, x(retry), retry.width, editor.width]) + ")")) return;
       if (!check(Math.abs(y(line) - (y(head) + head.height)) <= 1 && Math.abs(y(scroll) - (y(line) + line.height)) <= 1 && error.mapToItem(editor, 0, 0).y >= y(line) && shell.find(editor, "section-due").mapToItem(editor, 0, 0).y > y(line) + line.height, "the line right under the place, the form below it (" + JSON.stringify([y(head) + head.height, y(line), line.height, y(scroll)]) + ")")) return;
+      // Tab from the control: Retry, before the task's fields (in Small
+      // the band's Open in Todoist comes first, as it shows).
+      editor.placeButton.forceActiveFocus();
+      var tabbed = [];
+      for (var tab = 0; tab < 2 && !retry.activeFocus; tab++) {
+        ev.keyClick(Qt.Key_Tab, Qt.NoModifier, -1);
+        var at = editor.Window.window.activeFocusItem;
+        tabbed.push(at === retry ? "Retry" : at ? at.objectName : "");
+      }
+      if (!check(JSON.stringify(tabbed) === JSON.stringify(editor.pane ? ["Retry"] : ["editOpen", "Retry"]), "Tab from the place: Retry (" + JSON.stringify(tabbed) + ")")) return;
       var moved = {};
       moved[id] = "ok";
       shell.put("reply-apply.json", JSON.stringify(Object.assign(shell.snapshotWith(after), { results: moved })));
       ev.mouseClick(retry, retry.width / 2, retry.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       wait.waitFor(function() { return shell.calls("apply").length === from + 2 && !store.busy && !editor.saving; }, 15000, function(ok2) {
         var again = shell.updatesSince(from);
-        if (!check(ok2 && JSON.stringify(again[1]) === JSON.stringify(again[0]) && !line.visible && Math.abs(y(scroll) - (y(head) + head.height)) <= 1 && editor.placeLabel === pick, "Retry sent the same move; the line went (" + JSON.stringify(again) + ")")) return;
+        if (!check(ok2 && JSON.stringify(again) === JSON.stringify(update.concat(update)) && !line.visible && Math.abs(y(scroll) - (y(head) + head.height)) <= 1 && editor.placeLabel === pick, "Retry sent the same move; the line went (" + JSON.stringify(again) + ")")) return;
         done();
       });
     });
@@ -1688,6 +1703,15 @@ ShellRoot {
       shell.weekAdds(view, cases.slice(1), done);
     });
   }
+  // The middle of the pane's header's empty space, between the place (the
+  // Project control) and Open, in the editor's coordinates; null when the
+  // place leaves less than two gaps there.
+  function headerGap(editor) {
+    var place = editor.placeButton;
+    var from = place.mapToItem(editor, place.width, 0).x;
+    var to = shell.find(editor, "paneOpen").mapToItem(editor, 0, 0).x;
+    return to - from > 2 * Kit.FoamyStyle.gap ? { x: (from + to) / 2, y: shell.find(editor, "paneHeader").height / 2 } : null;
+  }
   // Wide: a click on the pane's empty space takes the keys from its title
   // (the typed text saved) and keeps the selection; a click on the list's
   // space that isn't a row (below the rows, a heading, the top margin)
@@ -1724,8 +1748,10 @@ ShellRoot {
     var first = typed(" here");
     var stop = view.cursor.index;
     // The pane header's empty space: nothing there takes a click.
-    ev.mouseClick(editor, editor.width / 2, 4, Qt.LeftButton, Qt.NoModifier, -1);
-    if (!check(!editor.contentField.inputActiveFocus && !view.blocked && view.paneTask === id && view.cursor.index === stop && editor.task !== null, "a click in the pane's empty space took the keys, kept the selection")) return;
+    var gap = shell.headerGap(editor);
+    if (!check(gap !== null, "the pane's header has empty space between the place and Open")) return;
+    ev.mouseClick(editor, gap.x, gap.y, Qt.LeftButton, Qt.NoModifier, -1);
+    if (!check(!editor.menu.opened && !editor.contentField.inputActiveFocus && !view.blocked && view.paneTask === id && view.cursor.index === stop && editor.task !== null, "a click in the pane's empty space took the keys, kept the selection")) return;
     if (!check(editor.saving && footerStatus.text === "Saving…" && !view.footer.statusError, "the footer says Saving… while it runs (" + footerStatus.text + ")")) return;
     // An add draft left open (the field without the keys): the save's
     // status takes the key hints' place, and they come back after it.
@@ -4123,8 +4149,11 @@ ShellRoot {
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(big4.weekPaneOpen && big4.editor.visible && !big4.blocked, "Enter opened the pane over the week once more")) return;
-      // Its empty space at the bottom (the header's start is the place).
-      ev.mouseClick(big4.editor, big4.editor.width / 2, big4.editor.height - 4, Qt.LeftButton, Qt.NoModifier, -1);
+      // The header's empty space, between the place and Open: nothing
+      // there takes the click (no menu; the pane and its selection stay).
+      var weekGap = shell.headerGap(big4.editor);
+      if (!check(weekGap !== null, "the pane's header has empty space between the place and Open")) return;
+      ev.mouseClick(big4.editor, weekGap.x, weekGap.y, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(big4.weekPaneOpen && big4.cursor.index === big4.firstRowStop && !big4.editor.menu.opened, "a click in the pane over the week keeps it")) return;
       var todayList = shell.find(big4.week, "weekColumn-today").list;
       var todayBelow = todayList.contentHeight - todayList.contentY;
