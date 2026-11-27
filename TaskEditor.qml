@@ -623,14 +623,6 @@ FocusScope {
       }
     ]
   }
-  // A click on the editor's empty space outside its scroll (the page's
-  // band) takes the keys from a field and goes no further: over
-  // the Week view it would reach the cards under the pane.
-  FoamyClickAway {
-    anchors.fill: parent
-    z: -1
-  }
-
   // The page's task is gone (the pane closes instead: TodoView.paneShown).
   PlainText {
     objectName: "editorEmpty"

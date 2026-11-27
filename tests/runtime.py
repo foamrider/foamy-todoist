@@ -3526,6 +3526,18 @@ ShellRoot {
       var sent1 = JSON.parse(shell.calls("apply").pop().slice("apply ".length));
       if (!check(JSON.stringify(sent1) === JSON.stringify({ commands: [{ op: "update", id: "t4", content: "Review the **PR**" }] }), "only the text was sent (" + JSON.stringify(sent1) + ")")) return;
       if (!check(editor1.contentField.text === "Review the **PR**" && store.model.byId.t4.content === "Review the **PR**" && shell.find(editor1, "editTitleText").text === "Review the PR" && editor1.errorOf("content") === "" && !editor1.saving, "saved: the field shows Todoist's value")) return;
+      // The band's empty space, between the place and Open in Todoist: a
+      // click there takes the keys from a field and leaves them in the page
+      // (its key home); nothing is sent.
+      var bandPlace = editor1.placeButton;
+      var bandOpen = shell.find(editor1, "editOpen");
+      var bandFrom = bandPlace.mapToItem(editor1, bandPlace.width, 0).x;
+      var bandTo = bandOpen.mapToItem(editor1, 0, 0).x;
+      var bandY = bandOpen.mapToItem(editor1, 0, bandOpen.height / 2).y;
+      var applied = shell.calls("apply").length;
+      editor1.contentField.focusInput();
+      ev.mouseClick(editor1, (bandFrom + bandTo) / 2, bandY, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(bandTo - bandFrom > 2 * Kit.FoamyStyle.gap && !editor1.contentField.inputActiveFocus && editor1.activeFocus && view.pageShown && !editor1.menu.opened && shell.calls("apply").length === applied, "a click on the band's empty space took the keys to the page (" + JSON.stringify([bandFrom, bandTo, editor1.contentField.inputActiveFocus, editor1.activeFocus]) + ")")) return;
       // No deadline: the row says "Add deadline" (no caption); a click
       // opens a one-line field. A deadline that isn't a day: said at once,
       // nothing sent, the field stays open; Esc drops it and closes the field.
@@ -4146,8 +4158,8 @@ ShellRoot {
       if (!check(!big4.blocked && big4.weekPaneOpen, "Esc: the keys back, the pane stays")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!big4.weekPaneOpen && !big4.editor.visible && one.opened, "Esc: the pane closes")) return;
-      // The pane again; a click in it keeps it, a click on a column's empty
-      // space (below its cards, its heading) closes it and clears the cursor.
+      // The pane again; a click on a column's empty space (below its
+      // cards, its heading) closes it and clears the cursor.
       big4.goTo(big4.firstRowStop);
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
@@ -4159,12 +4171,6 @@ ShellRoot {
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(big4.weekPaneOpen && big4.editor.visible && !big4.blocked, "Enter opened the pane over the week once more")) return;
-      // The header's empty space, between the place and Open: nothing
-      // there takes the click (no menu; the pane and its selection stay).
-      var weekGap = shell.headerGap(big4.editor);
-      if (!check(weekGap !== null, "the pane's header has empty space between the place and Open")) return;
-      ev.mouseClick(big4.editor, weekGap.x, weekGap.y, Qt.LeftButton, Qt.NoModifier, -1);
-      if (!check(big4.weekPaneOpen && big4.cursor.index === big4.firstRowStop && !big4.editor.menu.opened, "a click in the pane over the week keeps it")) return;
       var todayList = shell.find(big4.week, "weekColumn-today").list;
       var todayBelow = todayList.contentHeight - todayList.contentY;
       if (!check(todayBelow < todayList.height - 12, "Today's column has room below its cards (" + JSON.stringify([todayList.contentHeight, todayList.height]) + ")")) return;
