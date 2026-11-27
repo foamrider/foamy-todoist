@@ -140,7 +140,11 @@ so the line says to open it and change the date there (in its own words).
 
 **Adding**: click **+** or press `a` anywhere: a field grows out of the
 button across the band (the band keeps its height, and nothing moves under
-it). Its placeholder says where the task goes: "Add a task to the Inbox…",
+it). In Wide it spans only the list column: the title stays over the rail
+(its line the count alone, as the rail names the view) and **+**, **Search**
+and **⋯** stay over the pane, usable while the field is open (**+** puts
+the caret back in the field); the suggestions are a menu under the word
+being typed. Its placeholder says where the task goes: "Add a task to the Inbox…",
 "for today…", for Upcoming's day, or to the project you are looking at;
 that date or project applies when the text gives none. In the Week view
 the task goes to the day of the column the cursor was last in: today from

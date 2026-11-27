@@ -29,9 +29,14 @@ import "Model.js" as Model
 // at the field: its border and a strip hanging from it in the reason's
 // tone (TodoStore.addErrorKind), over the tab row, so no row moves.
 //
+// Wide: the field spans only the list column (the band's field slot);
+// the title stays over the rail and +, Search and ⋯ over the pane, usable
+// while it is open (+ gives the keys back to the field). The suggestions
+// are a menu under the word being typed.
+//
 // One cursor (FoamyCursor) over the stops, in on-screen order: +, Search,
-// ⋯ (the band's, while its
-// field is closed), the tabs or the rail, each list row that does something
+// ⋯ (the band's, while its field is closed; in Wide always), the tabs or
+// the rail, each list row that does something
 // (the Week view's grid is one stop), the footer's Todoist button and
 // Refresh. Nothing has the cursor on open. While a field, the editor or a
 // menu has the keys the key catcher is blocked.
@@ -1376,6 +1381,26 @@ PanelKeyCatcher {
   implicitHeight: editingSettings ? settingsView.implicitHeight : pageShown ? taskEditor.implicitHeight : heroBand.implicitHeight + bodyHeight + (panelFooter.visible ? panelFooter.implicitHeight : 0)
 
   // ---- the band ----------------------------------------------------------------------------
+  // Wide's field slot: the list column less gapLarge each side, never over
+  // the band's buttons; none (width -1) in Small or without the rail.
+  readonly property var fieldSlot: {
+    if (!wide || !rail.visible)
+      return {
+        x: 0,
+        width: -1
+      }
+    var left = listArea.x + FoamyStyle.gapLarge
+    var right = listArea.x + listArea.width - FoamyStyle.gapLarge
+    var buttons = heroBand.titleRow.buttonsWidth + FoamyStyle.gapLarge
+    if (LayoutMirroring.enabled)
+      left = Math.max(left, FoamyStyle.padding + buttons)
+    else
+      right = Math.min(right, width - FoamyStyle.padding - buttons)
+    return {
+      x: left,
+      width: Math.max(0, right - left)
+    }
+  }
   readonly property string viewTitle: view === "project" && store.model.projects[projectId] ? store.model.projects[projectId].name : ""
   readonly property string meta: {
     if (!store.signedIn || !store.loaded)
@@ -1383,6 +1408,15 @@ PanelKeyCatcher {
     var counts = store.counts
     if (searching)
       return FoamyI18n.t("Search")
+    // Wide with the field open: the title column ends at the rail, which
+    // names the view, so the line is the count alone.
+    if (wide && fieldOpen) {
+      if (view === "today")
+        return counts.overdue ? FoamyI18n.tn("%1 left", counts.today) + " · " + FoamyI18n.tn("%1 overdue", counts.overdue) : FoamyI18n.tn("%1 left", counts.today)
+      if (view === "upcoming")
+        return FoamyI18n.tn("%1 tasks in the next 7 days", counts.week)
+      return FoamyI18n.tn("%1 tasks", view === "inbox" ? counts.inbox : view === "week" ? weekCount : counts.projects[projectId] || 0)
+    }
     // Small: the open tab names the view, so the line says the rest (Today:
     // the date first).
     if (!wide) {
@@ -1419,6 +1453,11 @@ PanelKeyCatcher {
     field: fieldBox
     fieldOrigin: root.searching ? searchAction : addAction
     fieldOpen: root.fieldOpen
+    // Wide: the field over the list column, clear of the buttons (the
+    // Week view's list runs under them). Band coordinates as drawn: the
+    // band and the body share x 0, and the anchored list mirrors in RTL.
+    fieldX: root.fieldSlot.x
+    fieldWidth: root.fieldSlot.width
     settingsHasCursor: viewCursor.at(root.menuStop)
     menuHasCursor: viewCursor.at(root.menuStop)
     cursorByKeys: viewCursor.byKeys
@@ -2059,8 +2098,30 @@ PanelKeyCatcher {
   readonly property rect fieldRect: Qt.rect(heroBand.x + heroBand.fieldRect.x, heroBand.y + heroBand.fieldRect.y, heroBand.fieldRect.width, heroBand.fieldRect.height)
   readonly property real hangY: fieldRect.y + fieldRect.height + FoamyStyle.gapSmall
 
+  // Where the text's character `start` stands in the field, from its
+  // start edge. `moves`: what moves it, read by the caller's binding.
+  function wordOffset(start, moves) {
+    const editor = addField.editorItem as Controls.TextArea
+    if (!editor)
+      return 0
+    const at = editor.positionToRectangle(start)
+    return editor.mapToItem(fieldBox, at.x, 0).x
+  }
   // The suggestions: a raised menu hanging from the field over the tab row
-  // and the rows, as wide as the field. The field keeps the keys.
+  // and the rows. Small: as wide as the field. Wide: a menu as wide as its
+  // widest row, menuWidth to 320, its glyphs under the word being typed,
+  // kept inside the field's extent. The field keeps the keys.
+  FontMetrics {
+    id: suggestMetrics
+    font.family: FoamyStyle.fontFamily
+    font.pixelSize: FoamyStyle.font.body
+  }
+  FontMetrics {
+    id: suggestBold
+    font.family: FoamyStyle.fontFamily
+    font.pixelSize: FoamyStyle.font.body
+    font.weight: Font.DemiBold
+  }
   FoamyShadow {
     visible: suggestions.visible
     z: 19
@@ -2075,9 +2136,24 @@ PanelKeyCatcher {
     objectName: "suggestions"
     visible: root.suggestOpen
     z: 20
-    x: root.fieldRect.x
+    // Around a row's content: the border, the menu's and the row's padding.
+    readonly property real inset: FoamyStyle.borderWidth + FoamyStyle.menuPadding + FoamyStyle.rowPadding
+    // The widest row: the glyph, the name (its matched part DemiBold), a
+    // person's email (bodySmall, measured at body: never short).
+    readonly property real natural: !root.suggestOpen ? 0 : root.suggest.items.reduce(function (most, item) {
+      var end = item.matchStart + item.matchLength
+      var name = suggestMetrics.advanceWidth(item.name.slice(0, item.matchStart)) + suggestBold.advanceWidth(item.name.slice(item.matchStart, end)) + suggestMetrics.advanceWidth(item.name.slice(end))
+      return Math.max(most, FoamyStyle.iconSize + FoamyStyle.gap + name + (item.email ? FoamyStyle.gap + suggestMetrics.advanceWidth(item.email) : 0))
+    }, 0) + inset * 2 + FoamyStyle.gapTiny
+    // Where the word being typed starts in the field (the editor's own x,
+    // read again as the text or the caret moves).
+    // Read again as the text, the caret or the field's growth move it (a
+    // narrow field scrolls its text while it grows): those are the
+    // binding's dependencies, passed to wordOffset.
+    readonly property real wordX: root.suggestOpen && root.wide ? root.wordOffset(root.suggest.start, [addField.cursorPosition, addField.text, heroBand.fieldProgress, fieldBox.width]) : 0
+    width: root.wide ? Math.min(root.fieldRect.width, Math.max(FoamyStyle.menuWidth, Math.min(Commons.Style.space(320), natural))) : root.fieldRect.width
+    x: root.wide ? Math.max(root.fieldRect.x, Math.min(root.fieldRect.x + root.fieldRect.width - width, root.fieldRect.x + wordX - inset)) : root.fieldRect.x
     y: root.hangY
-    width: root.fieldRect.width
     height: suggestionColumn.implicitHeight + FoamyStyle.menuPadding * 2 + FoamyStyle.borderWidth * 2
     radius: FoamyStyle.radius
     color: FoamyPalette.raisedMenuFill
@@ -2112,6 +2188,7 @@ PanelKeyCatcher {
             color: suggestionRow.hasCursor ? FoamyPalette.hoverFill : "transparent"
           }
           Row {
+            id: suggestionLine
             anchors.left: parent.left
             anchors.leftMargin: FoamyStyle.rowPadding
             anchors.verticalCenter: parent.verticalCenter
@@ -2145,9 +2222,13 @@ PanelKeyCatcher {
                 wrapMode: Text.NoWrap
                 font.weight: Font.DemiBold
               }
+              // The rest, cut with "…" where the menu ends.
               PlainText {
+                objectName: "suggestionRest"
+                width: Math.min(implicitWidth, Math.max(0, suggestionLine.width - (suggestionRow.isProject ? FoamyStyle.iconSize + FoamyStyle.gap : 0) - x))
                 text: suggestionRow.modelData.name.slice(suggestionRow.modelData.matchStart + suggestionRow.modelData.matchLength)
                 wrapMode: Text.NoWrap
+                elide: Text.ElideRight
               }
             }
             // A person's email, muted after the name (one-line menu rows).

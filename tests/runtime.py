@@ -186,6 +186,59 @@ ShellRoot {
     if (shell.find(view, "errorLine").visible) off.push("the list's error line shows (the rows moved)");
     return off.join("; ");
   }
+  // Wide's band field over the list column: it spans the list less
+  // gapLarge a side, the title stays (the meta the count alone) and the
+  // buttons stay usable: + gives the keys back to the field, Search takes
+  // it (the draft set aside); the suggestions are a menu 232 to 320 wide
+  // with the glyph under the typed word; over the Week view (no pane) the
+  // field stays clear of the buttons. Leaves Today, the field closed.
+  // "" when all checks passed, else the failure (already reported).
+  function wideField(view) {
+    var fail = function(ok, label) { return check(ok, label) ? "" : label; };
+    var band = view.band;
+    var list = shell.find(view, "listArea");
+    var field = shell.find(view, "fieldBox");
+    var at = function(item) { return item.mapToItem(view, 0, 0); };
+    // The field at its open place at once (no growth to wait for).
+    Commons.Style.reduceMotion = true;
+    view.openAdd();
+    var l = at(list);
+    var r = band.fieldRect;
+    var out = fail(Math.abs(r.x - (l.x + Kit.FoamyStyle.gapLarge)) <= 1 && Math.abs(r.width - (list.width - Kit.FoamyStyle.gapLarge * 2)) <= 1, "wide: the field spans the list column (" + JSON.stringify([r.x, r.width, l.x, list.width]) + ")");
+    if (out) return out;
+    out = fail(band.buttonsActive && band.titleRow.opacity === 1 && view.meta === "6 left · 2 overdue", "wide: the title stays, the meta the count alone, the buttons active (" + JSON.stringify([band.buttonsActive, band.titleRow.opacity, view.meta]) + ")");
+    if (out) return out;
+    for (var ch of "Plan #h") ev.keyClickChar(ch, Qt.NoModifier, -1);
+    var menu = shell.find(view, "suggestions");
+    var word = band.mapToItem(view, 0, 0).x + r.x + menu.wordX;
+    out = fail(menu.visible && menu.width >= Kit.FoamyStyle.menuWidth - 0.5 && menu.width <= Commons.Style.space(320) + 0.5 && menu.width < r.width && Math.abs(at(menu).x + menu.inset - word) <= 1 && Math.abs(at(menu).y - (band.mapToItem(view, 0, 0).y + r.y + r.height + Kit.FoamyStyle.gapSmall)) <= 1, "wide: the suggestions a menu under the word (" + JSON.stringify([menu.visible, menu.width, at(menu).x + menu.inset, word]) + ")");
+    if (out) return out;
+    ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+    // The keys away, + brings them back to the field, the text kept.
+    view.focusList();
+    var plus = shell.find(view, "addAction");
+    ev.mouseClick(plus, plus.width / 2, plus.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+    out = fail(view.fieldOpen && view.fieldFocused && view.field.text === "Plan #h", "wide: + gives the keys back to the field (" + JSON.stringify([view.fieldFocused, view.field.text]) + ")");
+    if (out) return out;
+    var search = shell.find(view, "searchAction");
+    ev.mouseClick(search, search.width / 2, search.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+    out = fail(view.searching && view.fieldFocused && view.searchDraft === "Plan #h", "wide: Search works with the field open, the draft set aside (" + JSON.stringify([view.searching, view.searchDraft]) + ")");
+    if (out) return out;
+    view.leaveSearch();
+    view.field.text = "";
+    view.closeField();
+    // The Week view's list runs under the buttons: the field stops before them.
+    view.setView("week");
+    view.openAdd();
+    var firstButton = Math.min(at(plus).x, at(search).x, at(band.menuButton).x);
+    out = fail(band.fieldRect.x + band.fieldRect.width <= firstButton - Kit.FoamyStyle.gapLarge + 1, "wide, Week: the field clear of the buttons (" + JSON.stringify([band.fieldRect.x + band.fieldRect.width, firstButton]) + ")");
+    view.closeField();
+    view.setView("today");
+    view.focusList();
+    view.cursor.index = -1;
+    Commons.Style.reduceMotion = false;
+    return out;
+  }
   // The footer's hints as shown: each as its caps' text and its label.
   function footerHints(view) {
     var row = shell.find(view, "keyHints");
@@ -2791,6 +2844,7 @@ ShellRoot {
       // under the button.
       if (!check(one.wideWidth === 880 && view.overviewShown && shell.find(view, "overview").visible && !view.editor.visible && view.paneTask === "" && shell.popupPlacement(one, 880) === "", "wide, no task: the overview in the pane, the card 880 under the button (" + shell.popupPlacement(one, 880) + ")")) return;
       if (!check(shell.find(view, "rail-work") !== null && shell.find(view, "rail-launch") !== null, "wide: the projects are in the rail")) return;
+      if (shell.wideField(view) !== "") return;
       // A snapshot the helper had to cut: a muted line says so.
       shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));
       store.sync();

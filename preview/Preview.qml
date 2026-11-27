@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-empty", "add-open", "add-error", "add-error-refused", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
+  property var previewStates: ["today", "add-empty", "add-open", "add-error", "add-error-refused", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-suggest", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -84,6 +84,19 @@ Item {
           name: "Review everything the release needs before Friday's launch meeting"
         }) : section
       })
+    // Wide's suggestions for "#ho": six projects, one name longer than
+    // the menu's 320.
+    if (previewState === "wide-suggest")
+      ["Hobby projects", "Holiday in the mountains with the whole family", "Home renovation and garden planning for the spring of 2027", "Horse riding lessons", "Hosting"].forEach(function (name, i) {
+        data.projects.push({
+          id: "ho" + i,
+          name: name,
+          color: ["blue", "orange", "red", "green", "yellow"][i],
+          parent_id: null,
+          child_order: 10 + i,
+          inbox: false
+        })
+      })
     if (previewState === "wide-long-label")
       data.tasks.push(Fixtures.task("long", "Plan the move", "inbox", {
         labels: ["waiting-for-the-landlord-to-confirm-the-moving-date-in-march"]
@@ -139,14 +152,15 @@ Item {
         store.addErrorKind = previewState === "add-error" ? "unknown" : "refused"
         store.addError = previewState === "add-error" ? FoamyI18n.t("Todoist didn't answer. The task may have been added: check the list before adding it again.") : FoamyI18n.t("Todoist is limiting requests. Try again in %1 seconds.", [FoamyI18n.number(42)])
       })
-    if (previewState.indexOf("suggest-") === 0)
+    if (previewState.indexOf("suggest-") === 0 || previewState === "wide-suggest")
       Qt.callLater(function () {
         view.openAdd()
         view.field.text = ({
             "suggest-projects": "Call the plumber #h",
             "suggest-labels": "Pay the rent @",
             "suggest-sections": "Review the release notes #Work /",
-            "suggest-people": "Plan the launch #Launch +"
+            "suggest-people": "Plan the launch #Launch +",
+            "wide-suggest": "Plan the summer #ho"
           })[previewState]
         view.field.cursorPosition = view.field.text.length
         view.field.textEdited()
