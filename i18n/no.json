@@ -185,7 +185,7 @@
   "Paste your API token": "Lim inn API-tokenet ditt",
   "Pick a priority from 1 to 4.": "Velg en prioritet fra 1 til 4.",
   "Priority": "Prioritet",
-  "Project": "Prosjekt",
+  "Project: %1": "Prosjekt: %1",
   "Redo": "Gjør om",
   "Refresh": "Oppdater",
   "Refresh every": "Oppdater hvert",

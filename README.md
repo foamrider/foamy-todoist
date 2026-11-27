@@ -255,7 +255,8 @@ A list that continues past the card's edge fades out at that edge.
 **Editing**: a click on a task, Enter or `e` opens it in the editor. In
 Small the editor takes the panel's place, like the settings page:
 **Back** (or Esc, or ← on Back) returns to the list with the task under the
-cursor. Its band says "Saving…" while a change is sent. In Wide it is
+cursor. Its band says "Saving…" while a change is sent; its title is the
+task's project (and section), the **Project** control (see below). In Wide it is
 the details pane on the right (the left in right-to-left languages), which
 shows the selected task (the one the keys or a click moved to; pointing at
 a row doesn't change it). While it shows a task, the task keys (Space,
@@ -263,8 +264,9 @@ Enter, `e`, `t`, `d`, `T`, Ctrl+O, and Ctrl+←/→ in the Week view) act on
 it, also with the pointer on another row (`d` then opens the pane's own
 Date menu); after an arrow key they act on the cursor's row, which the pane
 then shows. Its header row shows the task's project (and
-section), **Open in Todoist** and **Close** (as Esc in the list). `e` or a
-click on a part puts the caret there, Tab moves through the parts (the
+section), the **Project** control, then **Open in Todoist** and **Close**
+(as Esc in the list). `e` or a click on a part puts the caret there, Tab
+moves through the parts in the order they show (the project first, the
 header's two buttons last), and Esc gives the keys back to the list.
 While a change is sent, the footer says "Saving…" in place of "Updated …",
 then "Saved" for two seconds. A click on the list's space that isn't a row
@@ -276,10 +278,11 @@ A task completed or deleted elsewhere closes the pane too. A click on
 empty space anywhere in the panel takes the keys from a text field, which
 saves as when you leave it.
 
-The editor reads like the task, as Todoist's task view does: the ring and
-the title, the description under it, then the task's **Project**, **Date**,
-**Deadline**, **Priority** and **Labels**, one row each: the icon under the
-ring, the value in line with the title, a small caption at the row's end.
+The editor reads like the task, as Todoist's task view does: the task's
+project (and section) at the top, the ring and the title, the description
+under it, then the task's **Date**, **Deadline**, **Priority** and
+**Labels**, one row each: the icon under the ring, the value in line with
+the title, a small caption at the row's end.
 An empty row says what a click adds ("Add deadline"). Each part is edited
 where it is. Each property row is one click target, as in Todoist: a click
 anywhere in it, or Enter on it (one Tab stop each), changes it.
@@ -301,7 +304,15 @@ anywhere in it, or Enter on it (one Tab stop each), changes it.
   or deadline.
   The calendar icon has the date's colour (overdue, today, tomorrow, this
   week).
-- **Project** (and section), **Priority** (P1 to P4, flags in the rows'
+- **Project**: the project (and section) at the top, written once, is the
+  control: in Small the band's title, in Wide the pane's header, with the
+  project's mark and a chevron. A click on it, or Enter or Space, opens
+  the menu of your projects and their sections under it, the task's place
+  checked; a pick moves the task. A move Todoist refuses shows why on one
+  line under it, above the task, with **Retry**. A place too long for the
+  header ends with "…" ("Completed" and **Undo** keep their room) and
+  shows whole when you point at it.
+- **Priority** (P1 to P4, flags in the rows'
   colours) and **Labels** (× takes one off; a click elsewhere in the row,
   marked **+** after the labels, adds one of your personal labels) open a
   menu and save when you pick. A label too long for the row is cut, and
@@ -389,7 +400,7 @@ accent tint and a bar at its start.
 | ↑ ↓, Enter | the rail (Wide) | pick a view or project; ← from the list goes to the rail |
 | ↑ ↓ ← → | the Week view | move in a column, across columns |
 | Ctrl+← Ctrl+→ | the Week view | move the task a day earlier or later (also the card's ‹ and › buttons) |
-| Enter, Space | a value in the editor | change it (a menu, or the date field) |
+| Enter, Space | a value in the editor, or its project at the top | change it (a menu, or the date field) |
 | Esc | the editor's field | drop the change; with none, back to the list (the date field: close it) |
 | Tab, Shift+Tab | the list (Wide) | into the details pane (the task's fields, or the overview's parts); with neither, the next or previous panel |
 | Enter, Space | a part of the overview | what a click does |

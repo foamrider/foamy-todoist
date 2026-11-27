@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import qs.Commons as Commons
+import qs.Ui as Ui
 import "kit"
 import "Model.js" as Model
 import "Edit.js" as Edit
@@ -15,10 +16,14 @@ import "Edit.js" as Edit
 // (`keysReturned`). The pane has its own header row instead of a band: the
 // task's place, Open in Todoist and Close (`closeRequested`); the panel's
 // footer says "Saving…", then "Saved" for a moment (`savedShown`).
+// The place (project and section, said once) is the Project control in
+// both: the band's title action (Small), the header's place (Wide). A
+// click, Enter or Space opens the move menu under it; a failed move shows
+// under it, with Retry, above the form.
 //
 // It reads like the task, after Todoist's task view: the completion ring
-// and the title, the description under it, then the properties (Project,
-// Date, Deadline, Priority, Labels), one row each: the icon in the ring's
+// and the title, the description under it, then the properties (Date,
+// Deadline, Priority, Labels), one row each: the icon in the ring's
 // column, the value on the title's text edge, its caption at the row's end.
 // Every part is edited where it is: the title and description are quiet
 // fields; a property row (one click target, as in Todoist) opens its menu,
@@ -89,6 +94,8 @@ FocusScope {
   readonly property alias ring: ringBox
   // Open in Todoist: in the page's band, or in the pane's header.
   readonly property Item openButton: pane ? paneOpen : pageOpen
+  // The Project control: the page band's title, or the pane header's place.
+  readonly property Item placeButton: pane ? paneHeadPlace : pageBand.compactTitleButton
   // The page keeps the keys when a click on its empty space takes them from
   // a field (FoamyClickAway), as Esc and Back work there; the pane gives
   // them to the list's (null: the search goes on to the panel).
@@ -526,7 +533,8 @@ FocusScope {
     return Model.dayWords(day, formatDate, translate, store.today) || day
   }
   // The task's place, "Project" or "Project › Section", as the saves in
-  // flight leave it: the Project row and the page's band say it.
+  // flight leave it: the Project control says it (the page's band, the
+  // pane's header).
   readonly property var placeProject: base ? store.model.projects[base.projectId] || null : null
   readonly property string placeLabel: {
     if (!base)
@@ -534,6 +542,7 @@ FocusScope {
     var section = base.sectionId ? store.model.sections[base.sectionId] : null
     return (placeProject ? placeProject.name : "") + (section ? " › " + section.name : "")
   }
+  readonly property color placeColor: roleColor(placeProject ? Model.colorRole(placeProject.color) : "muted")
   // The title at rest: as the list shows it (plain text), in the field's
   // place, while the field doesn't have the keys and holds neither an
   // unsaved change nor a failed save (those show the raw text). Only when
@@ -572,9 +581,10 @@ FocusScope {
   // icons centre) and the title's text edge (where their values start).
   readonly property real ringEdge: FoamyStyle.padding - FoamyStyle.gapSmall
   readonly property real textEdge: ringEdge + gutter + contentInput.leftPadding
-  implicitHeight: (pane ? paneHead.height : pageBand.implicitHeight) + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
+  implicitHeight: (pane ? paneHead.height : pageBand.implicitHeight) + placeErrorBox.height + Math.min(form.implicitHeight, pane ? form.implicitHeight : FoamyStyle.popupMaxHeight)
 
-  // The page's band: Back, the task's place, "Saving…", Open in Todoist.
+  // The page's band: Back, the task's place (the Project control),
+  // "Saving…", Open in Todoist.
   FoamyHeroBand {
     id: pageBand
     objectName: "editorBand"
@@ -582,6 +592,13 @@ FocusScope {
     compact: true
     width: parent.width
     compactTitle: editor.placeLabel
+    compactTitleAction: editor.base !== null
+    compactTitleIconName: "hash"
+    compactTitleIconColor: editor.placeColor
+    compactTitleAccessibleName: FoamyI18n.t("Project: %1", [editor.placeLabel])
+    onCompactTitleActivated: function (keyboard) {
+      editor.openPlaceMenu(keyboard)
+    }
     saving: editor.saving
     onBack: editor.back()
     compactTrailing: [
@@ -628,6 +645,129 @@ FocusScope {
     color: FoamyPalette.mutedText
   }
 
+  // The pane's place, the Project control: its mark in the ring's column,
+  // the place on the title's text edge, a chevron; the property rows'
+  // hover fill and keys' ring. Over the pane's header (paneHead), before
+  // the form in the file, so Tab reaches it first; the header's buttons
+  // come last. The place elides to leave them room (also "Completed" and
+  // Undo), whole in a tooltip.
+  Rectangle {
+    id: paneHeadPlace
+    objectName: "paneHeaderPlace"
+    readonly property real inset: FoamyStyle.padding - FoamyStyle.gap
+    readonly property real textX: editor.textEdge - inset
+    // Its words' room: the header less the buttons, the margins and the chevron.
+    readonly property real room: editor.width - inset - paneHeadActions.width - paneHeadActions.anchors.rightMargin - FoamyStyle.gap
+    readonly property real chrome: textX + FoamyStyle.gapSmall + placeChevron.width + FoamyStyle.gap
+    visible: paneHead.visible
+    // Anchored, so a mirrored panel mirrors the header.
+    anchors.left: parent.left
+    anchors.leftMargin: inset
+    y: FoamyStyle.gapSmall
+    implicitWidth: chrome + placeText.implicitWidth
+    width: Math.max(0, Math.min(implicitWidth, room))
+    height: FoamyStyle.actionSize
+    radius: FoamyStyle.radius
+    color: placeMouse.containsMouse || activeFocus ? FoamyPalette.hoverFill : "transparent"
+    border.width: activeFocus ? 1 : 0
+    border.color: Commons.Color.accent
+    // Hidden with the header, so off the Tab path then.
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: FoamyI18n.t("Project: %1", [editor.placeLabel])
+    Accessible.onPressAction: editor.openPlaceMenu(false)
+    Keys.onPressed: function (event) {
+      if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        event.accepted = true
+        editor.openPlaceMenu(true)
+      }
+    }
+    FoamyIcon {
+      objectName: "paneHeaderMark"
+      anchors.left: parent.left
+      anchors.leftMargin: editor.ringEdge + (editor.gutter - width) / 2 - paneHeadPlace.inset
+      anchors.verticalCenter: parent.verticalCenter
+      width: FoamyStyle.iconSize
+      height: width
+      name: "hash"
+      color: editor.placeColor
+    }
+    PlainText {
+      id: placeText
+      objectName: "paneHeaderPlaceText"
+      anchors.left: parent.left
+      anchors.leftMargin: paneHeadPlace.textX
+      anchors.verticalCenter: parent.verticalCenter
+      width: Math.max(0, paneHeadPlace.width - paneHeadPlace.chrome)
+      text: editor.placeLabel
+      wrapMode: Text.NoWrap
+      elide: Text.ElideRight
+      maximumLineCount: 1
+    }
+    FoamyIcon {
+      id: placeChevron
+      anchors.left: placeText.right
+      anchors.leftMargin: FoamyStyle.gapSmall
+      anchors.verticalCenter: parent.verticalCenter
+      width: FoamyStyle.iconSize
+      height: width
+      name: "chevron-down"
+      color: FoamyPalette.secondaryText
+    }
+    MouseArea {
+      id: placeMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: editor.openPlaceMenu(false)
+    }
+    // Cut: the whole place on hover, at most as wide as the pane.
+    Ui.PanelToolTip {
+      id: placeTip
+      objectName: "paneHeaderPlaceTip"
+      visible: placeMouse.containsMouse && placeText.truncated
+      text: editor.placeLabel
+      implicitWidth: Math.min(implicitContentWidth + leftPadding + rightPadding, editor.width)
+      // The host's tooltip wraps at word boundaries only; a name typed
+      // without spaces may break anywhere.
+      Binding {
+        target: placeTip.contentItem
+        property: "wrapMode"
+        value: Text.WrapAtWordBoundaryOrAnywhere
+        when: placeTip.contentItem !== null
+      }
+    }
+    // A menu's width at the control's start: the move menu (its trailing
+    // edge on its anchor's) hangs under the control from its start.
+    Item {
+      id: paneMenuAnchor
+      anchors.left: parent.left
+      width: picker.menuWidth
+      height: parent.height
+    }
+  }
+
+  // A failed move: why, and Retry, under the Project control (the pane's
+  // header, the page's band) and above the form; it doesn't scroll. Before
+  // the form in the file: Retry is the next Tab stop after the control.
+  Item {
+    id: placeErrorBox
+    objectName: "placeError"
+    visible: editor.task !== null && editor.errorOf("place") !== ""
+    anchors.top: editor.pane ? paneHead.bottom : pageBand.bottom
+    width: parent.width
+    height: visible ? placeError.implicitHeight + FoamyStyle.gap * 2 : 0
+    FoamySettingsError {
+      id: placeError
+      x: FoamyStyle.padding
+      y: FoamyStyle.gap
+      width: parent.width - FoamyStyle.padding * 2
+      text: editor.errorOf("place")
+      retryable: true
+      onRetry: editor.retry("place")
+    }
+  }
+
   FoamyWheelScroll {
     id: wheel
     target: scroll
@@ -665,7 +805,7 @@ FocusScope {
     id: scroll
     objectName: "editorScroll"
     visible: editor.task !== null
-    anchors.top: editor.pane ? paneHead.bottom : pageBand.bottom
+    anchors.top: placeErrorBox.bottom
     anchors.bottom: parent.bottom
     width: parent.width
     contentWidth: width
@@ -952,25 +1092,6 @@ FocusScope {
         Divider {
           Layout.bottomMargin: FoamyStyle.gapSmall
         }
-        Section {
-          id: placeSection
-          objectName: "section-place"
-          caption: FoamyI18n.t("Project")
-          accessibleName: FoamyI18n.t("Project") + ": " + placeRow.text
-          error: editor.errorOf("place")
-          onActivated: function (keyboard) {
-            editor.openPlaceMenu(keyboard)
-          }
-          onRetry: editor.retry("place")
-          ValueRow {
-            id: placeRow
-            objectName: "editPlace"
-            iconName: "hash"
-            iconColor: editor.roleColor(editor.placeProject ? Model.colorRole(editor.placeProject.color) : "muted")
-            text: editor.placeLabel
-          }
-        }
-
         // Date: Todoist's own words for it (due.string) in a one-line field.
         Section {
           id: dueSection
@@ -1207,39 +1328,16 @@ FocusScope {
     }
   }
 
-  // The pane's header: the task's place at the start (its mark in the
-  // ring's column, the name on the title's text edge), Open in Todoist and
-  // Close at the end, a hairline under it; the form scrolls below. After
-  // the form in the file, so Tab reaches the task's fields first.
+  // The pane's header: the task's place at the start (the Project
+  // control, paneHeadPlace, lies over it), Open in Todoist and Close at the
+  // end, a hairline under it; the form scrolls below. After the form in
+  // the file, so Tab reaches the task's fields before its buttons.
   Item {
     id: paneHead
     objectName: "paneHeader"
     visible: editor.pane && editor.task !== null
     width: parent.width
     height: visible ? FoamyStyle.actionSize + FoamyStyle.gapSmall * 2 + FoamyStyle.borderWidth : 0
-    FoamyIcon {
-      // Anchored, so a mirrored panel mirrors the header.
-      anchors.left: parent.left
-      anchors.leftMargin: editor.ringEdge + (editor.gutter - width) / 2
-      y: (parent.height - FoamyStyle.borderWidth - height) / 2
-      width: FoamyStyle.iconSize
-      height: width
-      name: "hash"
-      color: editor.roleColor(editor.placeProject ? Model.colorRole(editor.placeProject.color) : "muted")
-    }
-    PlainText {
-      objectName: "paneHeaderPlace"
-      anchors.left: parent.left
-      anchors.leftMargin: editor.textEdge
-      anchors.right: paneHeadActions.left
-      anchors.rightMargin: FoamyStyle.gap
-      y: (parent.height - FoamyStyle.borderWidth - height) / 2
-      text: editor.placeLabel
-      wrapMode: Text.NoWrap
-      elide: Text.ElideRight
-      font.pixelSize: FoamyStyle.font.bodySmall
-      color: FoamyPalette.secondaryText
-    }
     Row {
       id: paneHeadActions
       anchors.right: parent.right
@@ -1331,7 +1429,7 @@ FocusScope {
     if (!base)
       return
     var here = Edit.placeValue(base.projectId, base.sectionId)
-    openMenu(placeRow, Edit.placeOptions(store.model, projects).map(function (option) {
+    openMenu(pane ? paneMenuAnchor : pageBand.compactTitleMenuAnchor, Edit.placeOptions(store.model, projects).map(function (option) {
       var project = editor.store.model.projects[option.projectId]
       return {
         text: option.label,
