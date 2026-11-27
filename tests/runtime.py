@@ -300,6 +300,25 @@ ShellRoot {
     });
     });
   }
+  // The footer's row (its refresh button) centred between the hairline
+  // over it (the kit footer's own in Small, footerLine in Wide) and the
+  // card's bottom, in the list and the Week view: true, else false after
+  // reporting the distances. Leaves Today.
+  function footerCentred(view, label) {
+    var ok = true;
+    for (var name of ["today", "week"]) {
+      view.setView(name);
+      var line = shell.find(view, "footerLine");
+      var hairline = line.visible ? line : view.footer.children[0];
+      var refresh = view.footer.refreshButton;
+      var top = refresh.mapToItem(view, 0, 0).y;
+      var above = top - (hairline.mapToItem(view, 0, 0).y + hairline.height);
+      var below = view.height - (top + refresh.height);
+      ok = ok && check(hairline.visible && hairline.height === 1 && above > 0 && Math.abs(above - below) <= 1, label + ", " + name + ": the footer's row centred under its hairline (above " + above + ", below " + below + ")");
+    }
+    view.setView("today");
+    return ok;
+  }
   // The footer's hints as shown: each as its caps' text and its label.
   function footerHints(view) {
     var row = shell.find(view, "keyHints");
@@ -2924,6 +2943,7 @@ ShellRoot {
       if (!check(line.visible && line.text === "Can't reach Todoist. Check your connection.", "the error line says what failed (" + line.text + ")")) return;
       if (!check(store.loaded && view.rows.length > 0 && view.footer.status.indexOf("Updated") === 0, "the cached tasks stay, with the old Updated time (" + view.footer.status + ")")) return;
       if (!check(store.failures === 1, "one failure counted")) return;
+      if (!shell.footerCentred(view, "small")) return;
       one.prefs.save("panelWidth", "wide");
       break;
     case 19:
@@ -2935,6 +2955,7 @@ ShellRoot {
       if (!check(one.wideWidth === 880 && view.overviewShown && shell.find(view, "overview").visible && !view.editor.visible && view.paneTask === "" && shell.popupPlacement(one, 880) === "", "wide, no task: the overview in the pane, the card 880 under the button (" + shell.popupPlacement(one, 880) + ")")) return;
       if (!check(shell.find(view, "rail-work") !== null && shell.find(view, "rail-launch") !== null, "wide: the projects are in the rail")) return;
       if (shell.wideField(view) !== "") return;
+      if (!shell.footerCentred(view, "wide")) return;
       shell.wideRail(view, function() {
         // A snapshot the helper had to cut: a muted line says so.
         shell.put("reply-sync.json", JSON.stringify(Object.assign(shell.snapshot(), { truncated: true })));

@@ -2538,6 +2538,10 @@ PanelKeyCatcher {
     horizontalPadding: FoamyStyle.padding
     // Wide: its own hairline, edge to edge (footerLine), closes the columns.
     divider: !root.wide
+    // footerLine covers the footer's top pixel, so the row starts `spacing`
+    // under it, as under the kit's own hairline: centred, and the footer as
+    // tall as Small's.
+    topPadding: root.wide ? panelFooter.spacing + 1 : 0
     // A launch that failed first (until the next one works), as foamy-clock's
     // footer; else, with cached data shown after a failed sync, the time of
     // the last good one.
