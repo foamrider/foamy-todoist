@@ -1,5 +1,5 @@
 pragma Singleton
-// foamy-kit 0.16.0 ef4882d76a20b9a897c574e949d0a94292d57265201d15ec86bc93bdb15edc05 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.17.0 0309d6032a00a945be12b8a05d19e3d16cf12fd8b4d59b7a5e783d14fa215a2c — do not edit; change foamy-kit and run sync
 import QtQuick
 import Quickshell.Io
 import qs.Commons as Commons
@@ -39,6 +39,10 @@ QtObject {
   // draws there to set them apart).
   readonly property color menuFill: lightTheme ? Qt.tint(background, Qt.alpha("#ffffff", 0.7)) : Qt.tint(background, Qt.alpha(text, 0.035))
   readonly property color menuBorder: lightTheme ? Qt.alpha(text, 0.40) : border
+  // A raised menu (FoamyMenu `raised`, a list that hangs from a field over
+  // the rows): a clearer step above the card, with a FoamyShadow under it.
+  // Light themes keep menuFill, already lighter than the card.
+  readonly property color raisedMenuFill: lightTheme ? menuFill : Qt.tint(background, Qt.alpha(text, 0.07))
   // Inline help notes (FoamyInfoNote): a subtle surface under a heading.
   readonly property color noteFill: Qt.alpha(text, 0.045)
   // Text on an accent fill (FoamyButton primary): the popup's text or its
