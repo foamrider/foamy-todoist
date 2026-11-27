@@ -670,7 +670,7 @@ FocusScope {
     accessibleName: FoamyI18n.t("Project: %1", [editor.placeLabel])
     fontSize: FoamyStyle.font.body
     fontWeight: Font.Normal
-    markCenter: editor.ringEdge + editor.gutter / 2 - inset
+    iconCenter: editor.ringEdge + editor.gutter / 2 - inset
     textStart: editor.textEdge - inset
     // At most the pane's width.
     tooltipMaxWidth: Math.min(Commons.Style.space(320), editor.width)

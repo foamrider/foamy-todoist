@@ -1,4 +1,4 @@
-// foamy-kit 0.16.0 411da422907ceb3d076b7aca8ba1a1a509098d74a4347fbaf7333d85211cff3a — do not edit; change foamy-kit and run sync
+// foamy-kit 0.16.0 be910434afd2e59c66249ece03fa6aaba1ea6b4cee0f462831b0b0fde97ae4b9 — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Layouts
 
@@ -227,7 +227,8 @@ Item {
   // The compact title as a control (off by default): FoamySettingsHeader's
   // title action, a FoamyTitleAction (titleAction, titleIconName,
   // titleIconColor, titleAccessibleName, titleButton, titleMenuAnchor,
-  // titleActivated). The button and the anchor are null while it is off.
+  // titleActivated). The button and the anchor are null while it is off;
+  // turned off, the caller places the keys it had.
   property bool compactTitleAction: false
   property string compactTitleIconName: ""
   property color compactTitleIconColor: FoamyPalette.secondaryText

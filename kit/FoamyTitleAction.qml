@@ -1,4 +1,4 @@
-// foamy-kit 0.16.0 5476f7c4a70f1fa2bb8d512e30d369147520ae2a34db32f68bb51beec754f085 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.16.0 3cb8ef7b94c9e4c184117dc1b69e7a33bb8477b3207b8b8080768e6ca8cc4398 — do not edit; change foamy-kit and run sync
 import QtQuick
 import qs.Commons as Commons
 import qs.Ui
@@ -24,8 +24,10 @@ import "FoamyText.js" as FoamyText
 // and no text). A cut text shows on hover in a tooltip, wrapped, at most
 // `tooltipMaxWidth` wide (Style.space(320)), with at most 3 lines of 200
 // characters, cut with "…"; the accessible name keeps it all.
-// `markCenter` and `textStart` (from its start edge) line the mark and the
-// text up with a column outside it (a form's icon column, its text edge).
+// `iconCenter` and `textStart` (from its start edge) line the mark and the
+// text up with a column outside it (a form's icon column, its text edge);
+// `fontSize` and `fontWeight` (FoamyStyle.font.title, DemiBold) set the
+// text's font.
 // `menuAnchor` is an item `menuWidth` wide (FoamyStyle.menuWidth, as a
 // FoamyMenu) at its start: a menu anchored to it, its trailing edge on the
 // anchor's, hangs under the control from its start (the right in RTL).
@@ -39,15 +41,13 @@ Rectangle {
   property string accessibleName: text
   property real fontSize: FoamyStyle.font.title
   property int fontWeight: Font.DemiBold
-  readonly property real padding: FoamyStyle.gap
-  property real markCenter: padding + FoamyStyle.iconSize / 2
-  property real textStart: iconName !== "" ? padding + FoamyStyle.iconSize + FoamyStyle.gapSmall : padding
+  property real iconCenter: FoamyStyle.gap + FoamyStyle.iconSize / 2
+  property real textStart: iconName !== "" ? FoamyStyle.gap + FoamyStyle.iconSize + FoamyStyle.gapSmall : FoamyStyle.gap
   property real tooltipMaxWidth: Commons.Style.space(320)
   property real menuWidth: FoamyStyle.menuWidth
   readonly property bool hovered: mouse.containsMouse
-  readonly property bool truncated: label.truncated
   // Everything but the text's words: its start, the chevron, the end padding.
-  readonly property real minimumWidth: textStart + FoamyStyle.gapSmall + FoamyStyle.iconSize + padding
+  readonly property real minimumWidth: textStart + FoamyStyle.gapSmall + FoamyStyle.iconSize + FoamyStyle.gap
   readonly property alias menuAnchor: menuAnchor
 
   signal activated(bool keyboard)
@@ -82,7 +82,7 @@ Rectangle {
     objectName: "foamyTitleActionMark"
     visible: root.iconName !== ""
     anchors.left: parent.left
-    anchors.leftMargin: root.markCenter - width / 2
+    anchors.leftMargin: root.iconCenter - width / 2
     anchors.verticalCenter: parent.verticalCenter
     width: FoamyStyle.iconSize
     height: width
@@ -110,7 +110,7 @@ Rectangle {
   FoamyIcon {
     objectName: "foamyTitleActionChevron"
     anchors.right: parent.right
-    anchors.rightMargin: root.padding
+    anchors.rightMargin: FoamyStyle.gap
     anchors.verticalCenter: parent.verticalCenter
     width: FoamyStyle.iconSize
     height: width
