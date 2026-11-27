@@ -173,8 +173,8 @@ ShellRoot {
     if (line.truncated) off.push("elided");
     if (line.contentWidth > line.width + 1) off.push("text " + line.contentWidth + " wider than " + line.width);
     if (line.lineCount < (lines || 1)) off.push(line.lineCount + " lines, want " + (lines || 1));
-    if (!Qt.colorEqual(line.color, Kit.FoamyPalette.onSurface(tone, Kit.FoamyPalette.raisedMenuFill))) off.push("text colour " + line.color + ", not the tone " + tone);
-    if (!border.visible || !Qt.colorEqual(border.border.color, tone)) off.push("the field's border " + border.visible + " " + border.border.color);
+    if (String(line.color) !== String(Kit.FoamyPalette.onSurface(tone, Kit.FoamyPalette.raisedMenuFill))) off.push("text colour " + line.color + ", not the tone " + tone);
+    if (!border.visible || String(border.border.color) !== String(Kit.FoamyPalette.onSurface(tone, Kit.FoamyPalette.bandFill))) off.push("the field's border " + border.visible + " " + border.border.color + ", not the tone " + tone);
     // The open field's place (it may still be growing there).
     var s = strip.mapToItem(view, 0, 0);
     var b = view.band.mapToItem(view, 0, 0);

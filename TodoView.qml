@@ -1543,7 +1543,8 @@ PanelKeyCatcher {
       radius: addField.cornerRadius
       color: "transparent"
       border.width: FoamyStyle.borderWidth
-      border.color: root.addErrorTone
+      // A thin mark on the band: read on the band's fill.
+      border.color: FoamyPalette.onSurface(root.addErrorTone, FoamyPalette.bandFill)
     }
     // The way out for the pointer (Esc for the keys): search ends, an add
     // is cancelled (its text goes). The spinner takes its place while an
@@ -1755,9 +1756,10 @@ PanelKeyCatcher {
     }
     QtObject {
       id: railColors
-      function of(role) {
+      // `surface`: what it is drawn on, when not the popup's background.
+      function of(role, surface) {
         // Marks and icons on the surface: readable in a light theme too.
-        return role === "error" ? FoamyPalette.onSurface(FoamyPalette.error) : role === "warning" ? FoamyPalette.onSurface(FoamyPalette.warning) : role === "success" ? FoamyPalette.onSurface(FoamyPalette.success) : role === "info" ? FoamyPalette.onSurface(FoamyPalette.info) : role === "accent" ? FoamyPalette.onSurface(FoamyPalette.accent) : FoamyPalette.mutedText
+        return role === "error" ? FoamyPalette.onSurface(FoamyPalette.error, surface) : role === "warning" ? FoamyPalette.onSurface(FoamyPalette.warning, surface) : role === "success" ? FoamyPalette.onSurface(FoamyPalette.success, surface) : role === "info" ? FoamyPalette.onSurface(FoamyPalette.info, surface) : role === "accent" ? FoamyPalette.onSurface(FoamyPalette.accent, surface) : FoamyPalette.mutedText
       }
     }
     Rectangle {
@@ -2122,7 +2124,7 @@ PanelKeyCatcher {
               width: FoamyStyle.iconSize
               height: width
               name: "hash"
-              color: railColors.of(suggestionRow.modelData.role)
+              color: railColors.of(suggestionRow.modelData.role, FoamyPalette.raisedMenuFill)
             }
             // The name, its matched part DemiBold (plain text runs, no markup).
             Row {
@@ -2132,7 +2134,7 @@ PanelKeyCatcher {
                 text: suggestionRow.sigil
                 wrapMode: Text.NoWrap
                 // Labels' @ in the info colour, as on task rows; / and + muted.
-                color: suggestionRow.modelData.kind === "label" ? FoamyPalette.onSurface(FoamyPalette.info) : FoamyPalette.mutedText
+                color: suggestionRow.modelData.kind === "label" ? FoamyPalette.onSurface(FoamyPalette.info, FoamyPalette.raisedMenuFill) : FoamyPalette.mutedText
               }
               PlainText {
                 text: suggestionRow.modelData.name.slice(0, suggestionRow.modelData.matchStart)
@@ -2197,7 +2199,7 @@ PanelKeyCatcher {
     radius: FoamyStyle.radius
     color: FoamyPalette.raisedMenuFill
     border.width: FoamyStyle.borderWidth
-    border.color: Qt.alpha(root.addErrorTone, 0.6)
+    border.color: Qt.alpha(FoamyPalette.onSurface(root.addErrorTone, FoamyPalette.raisedMenuFill), 0.6)
     FoamyIcon {
       id: addErrorIcon
       anchors.left: parent.left
