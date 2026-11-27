@@ -2326,10 +2326,15 @@ ShellRoot {
       if (!check(shell.find(view, "stateText").text === "Add your Todoist API token in Settings", "signed out: the line (" + shell.find(view, "stateText").text + ")")) return;
       var open = shell.find(view, "stateButton");
       if (!check(open.visible && open.text === "Open settings", "signed out: Open settings")) return;
+      // The keys on the (primary) button: its keys' border, which a primary
+      // has none of otherwise.
+      view.goTo(view.firstRowStop);
+      if (!check(open.hasCursor && open.border.color.a > 0.99, "signed out: the keys on Open settings draw its border (" + open.border.color + ")")) return;
       if (!check(!view.field.visible && !view.footer.visible, "no field or footer while signed out")) return;
       if (!check(!view.band.menuButton.visible, "signed out: no ⋯ menu (nothing to open in Todoist)")) return;
       // The gear in its place is the same stop: Enter opens Settings.
       view.goTo(view.menuStop);
+      if (!check(view.band.settingsButton.hasCursor && view.band.settingsButton.border.width === 1, "signed out: the keys on the gear draw its border (" + view.band.settingsButton.border.width + ")")) return;
       view.activate(false);
       if (!check(view.editingSettings, "signed out: Enter on the gear opens Settings")) return;
       view.settingsClosed();
@@ -2415,6 +2420,7 @@ ShellRoot {
       // ↑ from the tabs: ⋯, Search, +; Enter on +: the band field opens.
       view.moveRequested(0, -1);
       if (!check(view.cursor.index === view.menuStop && view.band.menuButton.hasCursor, "↑ from the tabs: ⋯ (" + view.cursor.index + ")")) return;
+      if (!check(view.band.menuButton.border.width === 1, "the keys on ⋯ draw its border (" + view.band.menuButton.border.width + ")")) return;
       view.moveRequested(0, -1);
       view.moveRequested(0, -1);
       if (!check(view.cursor.index === view.addStop && plus.hasCursor, "then Search, then + (" + view.cursor.index + ")")) return;
@@ -2989,6 +2995,9 @@ ShellRoot {
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       // The footer's Todoist button: a cursor stop; Enter opens the view in the browser.
       var button = shell.find(view, "openTodoist");
+      // The keys on the footer's refresh button: its border.
+      view.goTo(view.refreshStop);
+      if (!check(view.footer.refreshButton.hasCursor && view.footer.refreshButton.border.width === 1, "the keys on refresh draw its border (" + view.footer.refreshButton.border.width + ")")) return;
       view.cursor.index = view.openStop;
       if (!check(button.visible && button.hasCursor && button.label === "Todoist", "the footer button has the cursor")) return;
       shell.expectedUrl = Model.webUrl(view.view, view.projectId);

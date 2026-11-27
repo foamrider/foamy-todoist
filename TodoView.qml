@@ -1389,6 +1389,7 @@ PanelKeyCatcher {
     fieldOpen: root.fieldOpen
     settingsHasCursor: viewCursor.at(root.menuStop)
     menuHasCursor: viewCursor.at(root.menuStop)
+    cursorByKeys: viewCursor.byKeys
     onSettingsClicked: {
       root.leaveField()
       root.settingsRequested()
@@ -1996,6 +1997,7 @@ PanelKeyCatcher {
           iconName: addsQuery ? "plus" : ""
           kind: stateBox.kind === "signedOut" ? "primary" : "secondary"
           hasCursor: viewCursor.at(root.firstRowStop) && !root.stops.length
+          cursorByKeys: viewCursor.byKeys
           onHoveredChanged: if (hovered)
             viewCursor.hover(root.firstRowStop)
           onClicked: addsQuery ? root.addQuery() : opensSettings ? root.settingsRequested() : root.store.retry()
@@ -2217,6 +2219,7 @@ PanelKeyCatcher {
     refreshing: root.store.syncing
     refreshEnabled: root.store.signedIn && !root.store.busy
     refreshHasCursor: viewCursor.at(root.refreshStop)
+    cursorByKeys: viewCursor.byKeys
     onRefreshHovered: function (hovered) {
       if (hovered && !root.fieldFocused)
         viewCursor.hover(root.refreshStop)
