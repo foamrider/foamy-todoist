@@ -882,6 +882,10 @@ PanelKeyCatcher {
   // This view shows the add field with why its last add failed (the
   // list's error line): the bar buttons' mark goes. Not on Settings or
   // Small's editor page, where the line is out of sight.
+  // A failed add's reason nobody has seen, its draft set aside by a search:
+  // the search's own edits (typing, Esc on the query, a refused paste)
+  // don't end it; it comes back with the draft when the search ends.
+  readonly property bool reasonKept: searching && searchDraft !== "" && store.addUnseen
   readonly property bool addErrorShown: active && store.signedIn && !editingSettings && !pageShown && fieldOpen && !searching && addError !== ""
   // Checked a call later, once the change has settled: a popup closing
   // from Settings hides the page before `active` follows, which would
@@ -1193,7 +1197,7 @@ PanelKeyCatcher {
           store.sentKept = false
           store.addError = ""
           store.addDraft = ""
-        } else if (!store.addUnseen)
+        } else if (!reasonKept)
           store.addError = ""
       } else if (searching)
         leaveSearch()
@@ -1462,10 +1466,8 @@ PanelKeyCatcher {
       rightPadding: LayoutMirroring.enabled ? startPadding : endPadding
       Accessible.name: fieldBox.placeholder
       onTextEdited: {
-        // Typing ends the add's reason, but not a search's typing while
-        // nobody has seen it yet (the failed draft is set aside: it comes
-        // back with its reason when the search ends).
-        if (!(root.searching && root.store.addUnseen))
+        // Typing ends the add's reason (see reasonKept for a search's).
+        if (!root.reasonKept)
           root.store.addError = ""
         if (root.store.sentKept && !root.searching && !text.startsWith(root.store.pendingAddText))
           root.store.sentKept = false
@@ -1476,7 +1478,7 @@ PanelKeyCatcher {
       }
       // A refused paste (pasteError, a catalog key) is the newest news:
       // like typing, it ends the add's error, so the line says why.
-      onPasteErrorChanged: if (pasteError !== "")
+      onPasteErrorChanged: if (pasteError !== "" && !root.reasonKept)
         root.store.addError = ""
       // An empty add field closes when its edit ends without the keys (a
       // click elsewhere, ↓ into the list). The edit's end, not the focus

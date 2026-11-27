@@ -300,9 +300,6 @@ Item {
               spacing: FoamyStyle.gap
               clip: true
               opacity: cardSurface.struck ? FoamyStyle.disabledOpacity : 1
-              // What the project may take: the rest of the line after the
-              // parts that show whole and the move actions' place when they
-              // show.
               // The parts that always show whole (the date and the time
               // above all), with the gap after each.
               readonly property real fixedWidth: [checkingMark, dateBox, timeLabel, repeatMark].reduce(function (sum, part) {
@@ -311,6 +308,9 @@ Item {
               // The move actions fit after them (else they would cover the
               // time: a long date, or one with its year).
               readonly property bool actionsFit: fixedWidth + moveActions.claim <= width
+              // What the project may take: the rest of the line after the
+              // parts that show whole and the move actions' place when they
+              // show.
               readonly property real room: Math.max(0, width - fixedWidth - (moveActions.visible ? moveActions.claim + spacing : 0))
               // Its completion was sent, the outcome unknown until the next sync.
               FoamyIcon {

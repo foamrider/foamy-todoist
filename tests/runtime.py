@@ -873,6 +873,7 @@ ShellRoot {
           // not dropped by the search's typing, by Esc on the query or by
           // a view change; and the mark never outlives its reason.
           view.startSearch();
+          view.searchDraft = "Kept";
           store.addDraft = "Kept";
           store.addError = reason;
           store.addUnseen = true;
@@ -886,6 +887,18 @@ ShellRoot {
           if (!check(!store.addUnseen, "no reason left: no mark")) return;
           store.addDraft = "";
           view.setView("today");
+          // The draft the view change brought back to the field goes too.
+          view.field.text = "";
+          view.fieldOpen = false;
+          view.focusList();
+          // No draft set aside (a search from an empty field): the search's
+          // typing ends an earlier add's reason, as typing always did.
+          view.startSearch();
+          store.addError = reason;
+          store.addUnseen = true;
+          ev.keyClickChar("q", Qt.NoModifier, -1);
+          if (!check(view.searching && view.searchDraft === "" && store.addError === "" && !store.addUnseen, "a search with no draft set aside: typing ends the reason and the mark (" + JSON.stringify([store.addError, store.addUnseen]) + ")")) return;
+          view.leaveSearch();
           view.openAdd();
           done();
         });
@@ -3180,12 +3193,21 @@ ShellRoot {
       // loses the sent text and the spaces after it, and comes back so.
       view.field.selectAll();
       for (var k5 of "Third") ev.keyClickChar(k5, Qt.NoModifier, -1);
+      // The reply held until the search's edits below are done.
+      shell.hold("add");
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       for (var k6 of "  Fourth") ev.keyClickChar(k6, Qt.NoModifier, -1);
       // A click away from the field (it stays open with its text), then /.
       view.leaveField();
       view.cursor.emitTextKey(view, "/");
       if (!check(view.searching && view.searchDraft === "Third  Fourth" && view.addBusy, "Search put the draft aside while the add is on its way (" + JSON.stringify(view.searchDraft) + ")")) return;
+      // A query typed and cleared with Esc: the draft set aside is still
+      // "typed after" the text on its way.
+      view.field.focusInput();
+      ev.keyClickChar("z", Qt.NoModifier, -1);
+      ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
+      if (!check(view.searching && view.field.text === "" && view.searchDraft === "Third  Fourth" && view.addBusy && store.sentKept, "Esc cleared the query, the draft still typed after the sent text (" + JSON.stringify([view.field.text, view.searchDraft, store.sentKept]) + ")")) return;
+      shell.release("add");
       wait.waitFor(function() { return !view.addBusy && !store.busy; }, 15000, function(added) {
         if (!check(added && shell.calls("add").length === shell.callsBefore + 2 && view.searchDraft === "Fourth", "added: the put-aside draft without the sent text (" + JSON.stringify(view.searchDraft) + ")")) return;
         ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
