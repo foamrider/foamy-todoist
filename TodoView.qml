@@ -19,11 +19,15 @@ import "Model.js" as Model
 //
 // The band field: + (or `a`) and Search (or `/`) open it, growing from
 // their button over the title row. Adding, it colours the Quick Add tokens
-// and the footer shows the keys; Enter adds and does what "After adding a
-// task" says (close the panel, or keep the field open), Shift+Enter the
-// other. Esc clears the text, then closes the field. An empty field closes
-// when its edit ends without the keys (not for its own right-click menu);
-// one with text stays open.
+// and the footer says what the keys do now (an empty field: Quick Add's
+// forms instead, as Enter does nothing; the suggestion list's own keys
+// while it shows); Enter adds and does what "After adding a task" says
+// (close the panel, or keep the field open), Shift+Enter the other. Esc
+// clears the text, then closes the field; the field's × closes it at once.
+// An empty field closes when its edit ends without the keys (not for its
+// own right-click menu); one with text stays open. A failed add says why
+// at the field: its border and a strip hanging from it in the reason's
+// tone (TodoStore.addErrorKind), over the tab row, so no row moves.
 //
 // One cursor (FoamyCursor) over the stops, in on-screen order: +, Search,
 // ⋯ (the band's, while its
@@ -339,6 +343,19 @@ PanelKeyCatcher {
       viewCursor.index = addStop
       focusList()
     }
+  }
+  // The field's ×: the add's text and its reason go, the field closes (as
+  // Esc twice); in search, search ends.
+  function cancelField() {
+    if (searching) {
+      leaveSearch()
+      return
+    }
+    store.sentKept = false
+    store.addError = ""
+    store.addDraft = ""
+    addField.text = ""
+    closeField()
   }
   function startSearch() {
     if (!store.signedIn)
@@ -898,6 +915,16 @@ PanelKeyCatcher {
   }
   onAddErrorShownChanged: if (addErrorShown)
     noteAddErrorSeen()
+  // The add's reason at the field (its border, the strip under it) while
+  // the add field is open; else on the list's error line.
+  readonly property bool addErrorAtField: fieldOpen && !searching && addError !== ""
+  // Yellow when the task may exist (no answer) or exists with a warning:
+  // adding it again may make two. Red when it can be sent again.
+  readonly property color addErrorTone: store.addErrorKind === "unknown" || store.addErrorKind === "added" ? FoamyPalette.warning : FoamyPalette.error
+  // Enter sends the refused text again.
+  readonly property bool addRetries: addErrorAtField && store.addErrorKind === "refused"
+  // Nothing to add: Enter does nothing, the footer shows Quick Add's forms.
+  readonly property bool addEmpty: adding && addField.text.trim() === "" && !suggestOpen
   readonly property bool addBusy: store.addPending
   readonly property string addDay: view === "today" ? store.today : view === "upcoming" ? (upcomingDay || Model.addDays(store.today, 1)) : view === "week" ? weekAddDay : ""
   // The Week view's add date: the day of the column the cursor was last
@@ -1139,6 +1166,7 @@ PanelKeyCatcher {
     var result = Model.applySuggestion(addField.text, suggest.start, suggest.end, suggest.items[index])
     // Past the field's limit the text would be cut: keep the draft as it is.
     if (result.text.length > addField.maximumLength) {
+      store.addErrorKind = ""
       store.addError = FoamyI18n.t("The task is too long for this suggestion")
       // The list covers the error line: close it (until the text changes).
       suggestDismissed = true
@@ -1226,9 +1254,11 @@ PanelKeyCatcher {
     // The draft comes back with why its add failed (the reply may have
     // come after the popup closed); setView clears the error otherwise.
     var draftError = store.addDraft !== "" ? store.addError : ""
+    var draftKind = store.addErrorKind
     editingTask = ""
     paneTask = ""
     setView(next, store.lastProject)
+    store.addErrorKind = draftError !== "" ? draftKind : ""
     store.addError = draftError
     fieldOpen = false
     addField.text = ""
@@ -1317,9 +1347,11 @@ PanelKeyCatcher {
   readonly property real rowsHeight: rows.reduce(function (sum, row) {
     return sum + root.heightOf(row)
   }, 0)
-  // The suggestion list floats over the rows; the list pane is at least as
-  // tall as it while it shows, so it stays inside the card.
-  readonly property real listHeight: Math.max(stateBox.visible ? stateBox.implicitHeight : weekShown ? Math.min(weekView.implicitHeight, maxListHeight) : Math.min(rowsHeight, maxListHeight), suggestions.visible ? suggestions.height : 0, searching ? searchHeldHeight : 0)
+  // The suggestion list and the add's strip float over the rows; the list
+  // pane reaches at least their bottom while they show, so they stay
+  // inside the card (the rows' own height counts from the pane's top).
+  readonly property real floatBottom: Math.max(suggestions.visible ? suggestions.y + suggestions.height : 0, addErrorStrip.visible ? addErrorStrip.y + addErrorStrip.height : 0)
+  readonly property real listHeight: Math.max(stateBox.visible ? stateBox.implicitHeight : weekShown ? Math.min(weekView.implicitHeight, maxListHeight) : Math.min(rowsHeight, maxListHeight), floatBottom - content.y - FoamyStyle.gap, searching ? searchHeldHeight : 0)
   // The list pane around the rows: a gap, the error lines (when shown), and a gap.
   readonly property real listChrome: FoamyStyle.gap + (errorLine.visible ? errorLine.height + FoamyStyle.gapSmall : 0) + FoamyStyle.gap
   readonly property real railHeight: Math.min(railColumn.implicitHeight + FoamyStyle.gap * 2, maxListHeight)
@@ -1443,7 +1475,8 @@ PanelKeyCatcher {
     ]
   }
   // The band's field (the band places and sizes it): the add or search
-  // text, its icon, and a spinner while an add is on its way.
+  // text, its icon, its × (a spinner while an add is on its way), and its
+  // border in the add error's tone.
   Item {
     id: fieldBox
     objectName: "fieldBox"
@@ -1459,10 +1492,10 @@ PanelKeyCatcher {
       maximumLength: 500
       // Quick Add's tokens in colour, only while adding.
       runs: root.adding ? Model.quickAddRuns(text, root.tokenColors) : []
-      // The icon at the reading start, the spinner or search's × at the
-      // end: padding isn't mirrored, so RTL swaps the sides.
+      // The icon at the reading start, the × (or the spinner in its place)
+      // at the end: padding isn't mirrored, so RTL swaps the sides.
       readonly property real startPadding: FoamyStyle.iconSize + FoamyStyle.gap * 2
-      readonly property real endPadding: spinner.visible ? FoamyStyle.iconSize + FoamyStyle.gap * 2 : searchClose.visible ? searchClose.width + (parent.height - searchClose.height) : FoamyStyle.gap
+      readonly property real endPadding: fieldClose.width + (parent.height - fieldClose.height)
       leftPadding: LayoutMirroring.enabled ? endPadding : startPadding
       rightPadding: LayoutMirroring.enabled ? startPadding : endPadding
       Accessible.name: fieldBox.placeholder
@@ -1501,18 +1534,31 @@ PanelKeyCatcher {
       name: root.searching ? "search" : "plus"
       color: FoamyPalette.mutedText
     }
-    // Search's way out for the pointer (Esc for the keys).
+    // The add's reason: the field's border in its tone (the strip under
+    // the field says it).
+    Rectangle {
+      objectName: "fieldErrorBorder"
+      visible: root.addErrorAtField
+      anchors.fill: parent
+      radius: addField.cornerRadius
+      color: "transparent"
+      border.width: FoamyStyle.borderWidth
+      border.color: root.addErrorTone
+    }
+    // The way out for the pointer (Esc for the keys): search ends, an add
+    // is cancelled (its text goes). The spinner takes its place while an
+    // add is on its way.
     FoamyAction {
-      id: searchClose
-      objectName: "searchClose"
-      visible: root.searching
+      id: fieldClose
+      objectName: "fieldClose"
+      visible: !spinner.visible
       anchors.verticalCenter: parent.verticalCenter
       anchors.right: parent.right
       anchors.rightMargin: (parent.height - height) / 2
       iconName: "x"
       foreground: FoamyPalette.secondaryText
-      tooltipText: FoamyI18n.t("Close search")
-      onClicked: root.leaveSearch()
+      tooltipText: root.searching ? FoamyI18n.t("Close search") : FoamyI18n.t("Cancel")
+      onClicked: root.cancelField()
     }
     FoamyIcon {
       id: spinner
@@ -1520,7 +1566,7 @@ PanelKeyCatcher {
       visible: root.addBusy && root.adding
       anchors.verticalCenter: parent.verticalCenter
       anchors.right: parent.right
-      anchors.rightMargin: FoamyStyle.gap
+      anchors.rightMargin: (parent.height - width) / 2
       width: FoamyStyle.iconSize
       height: width
       name: "refresh-cw"
@@ -1745,7 +1791,7 @@ PanelKeyCatcher {
       // snapshot was cut (a note, while rows show).
       Column {
         id: errorLine
-        readonly property string message: root.addError !== "" ? root.addError : addField.pasteError !== "" ? FoamyI18n.t(addField.pasteError) : root.store.loaded ? root.store.error : ""
+        readonly property string message: root.addError !== "" && !root.addErrorAtField ? root.addError : addField.pasteError !== "" ? FoamyI18n.t(addField.pasteError) : root.store.loaded ? root.store.error : ""
         readonly property bool truncated: root.store.model.truncated && (root.rows.length > 0 || root.weekCount > 0)
         visible: root.store.signedIn && (message !== "" || truncated)
         anchors.left: parent.left
@@ -2006,21 +2052,35 @@ PanelKeyCatcher {
     }
   }
 
-  // The suggestions: a menu-like list dropping from the band over the
-  // body, as wide as the field. The field keeps the keys.
+  // What hangs from the open field (the suggestions, the add's reason):
+  // the field's rectangle in the view, and a gapSmall under it.
+  readonly property rect fieldRect: Qt.rect(heroBand.x + heroBand.fieldRect.x, heroBand.y + heroBand.fieldRect.y, heroBand.fieldRect.width, heroBand.fieldRect.height)
+  readonly property real hangY: fieldRect.y + fieldRect.height + FoamyStyle.gapSmall
+
+  // The suggestions: a raised menu hanging from the field over the tab row
+  // and the rows, as wide as the field. The field keeps the keys.
+  FoamyShadow {
+    visible: suggestions.visible
+    z: 19
+    x: suggestions.x
+    y: suggestions.y
+    width: suggestions.width
+    height: suggestions.height
+    radius: suggestions.radius
+  }
   Rectangle {
     id: suggestions
     objectName: "suggestions"
     visible: root.suggestOpen
     z: 20
-    x: FoamyStyle.padding
-    y: heroBand.y + heroBand.height + FoamyStyle.gapTiny
-    width: parent.width - FoamyStyle.padding * 2
+    x: root.fieldRect.x
+    y: root.hangY
+    width: root.fieldRect.width
     height: suggestionColumn.implicitHeight + FoamyStyle.menuPadding * 2 + FoamyStyle.borderWidth * 2
     radius: FoamyStyle.radius
-    color: FoamyPalette.menuFill
+    color: FoamyPalette.raisedMenuFill
     border.width: FoamyStyle.borderWidth
-    border.color: FoamyPalette.border
+    border.color: FoamyPalette.menuBorder
     Column {
       id: suggestionColumn
       anchors.fill: parent
@@ -2109,6 +2169,57 @@ PanelKeyCatcher {
           }
         }
       }
+    }
+  }
+
+  // The add's reason, at the field: a strip hanging from it on the raised
+  // surface, in the reason's tone (addErrorTone), over the tab row (Small:
+  // it covers the row whole, so no tab's text is cut) and never moving a
+  // row. Typing ends it (as the reason).
+  FoamyShadow {
+    visible: addErrorStrip.visible
+    z: 19
+    x: addErrorStrip.x
+    y: addErrorStrip.y
+    width: addErrorStrip.width
+    height: addErrorStrip.height
+    radius: addErrorStrip.radius
+  }
+  Rectangle {
+    id: addErrorStrip
+    objectName: "addErrorStrip"
+    visible: root.addErrorAtField && !root.suggestOpen && heroBand.visible
+    z: 20
+    x: root.fieldRect.x
+    y: root.hangY
+    width: root.fieldRect.width
+    height: Math.max(addErrorText.implicitHeight + FoamyStyle.gap * 2, tabsBox.visible ? tabsBox.y + tabsBox.height + FoamyStyle.gapSmall - y : 0)
+    radius: FoamyStyle.radius
+    color: FoamyPalette.raisedMenuFill
+    border.width: FoamyStyle.borderWidth
+    border.color: Qt.alpha(root.addErrorTone, 0.6)
+    FoamyIcon {
+      id: addErrorIcon
+      anchors.left: parent.left
+      anchors.leftMargin: FoamyStyle.rowPadding
+      anchors.verticalCenter: parent.verticalCenter
+      width: FoamyStyle.iconSize
+      height: width
+      name: "triangle-alert"
+      color: addErrorText.color
+    }
+    PlainText {
+      id: addErrorText
+      objectName: "addErrorText"
+      anchors.left: addErrorIcon.right
+      anchors.leftMargin: FoamyStyle.gap
+      anchors.right: parent.right
+      anchors.rightMargin: FoamyStyle.rowPadding
+      anchors.verticalCenter: parent.verticalCenter
+      text: root.addError
+      font.pixelSize: FoamyStyle.font.bodySmall
+      color: FoamyPalette.onSurface(root.addErrorTone, FoamyPalette.raisedMenuFill)
+      Accessible.role: Accessible.AlertMessage
     }
   }
 
@@ -2247,67 +2358,138 @@ PanelKeyCatcher {
         root.openViewInTodoist()
       }
     }
-    // The add field's keys, as "After adding a task" sets them; while the
-    // suggestion list shows, its keys (Enter adds when the word already is
-    // the highlighted entry). The Week board's keys while it has them.
+    // An empty add field (Enter does nothing yet): Quick Add's forms, each
+    // in the colour the field gives it.
+    Row {
+      id: addLegend
+      objectName: "addLegend"
+      visible: root.keyHintsShown && root.addEmpty
+      anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+      spacing: FoamyStyle.gapSmall
+      Repeater {
+        model: [
+          {
+            token: "#",
+            color: root.tokenColors.project,
+            text: FoamyI18n.t("project")
+          },
+          {
+            token: "@",
+            color: root.tokenColors.label,
+            text: FoamyI18n.t("label")
+          },
+          {
+            token: "p1",
+            color: root.tokenColors.priority,
+            text: FoamyI18n.t("priority")
+          },
+          {
+            // A date Quick Add reads, in the text's own colour (dates aren't coloured).
+            token: FoamyI18n.t("tomorrow 9am"),
+            color: FoamyPalette.text,
+            text: ""
+          }
+        ]
+        Row {
+          id: legendEntry
+          required property var modelData
+          required property int index
+          objectName: "addLegend" + index
+          readonly property string label: modelData.token + (modelData.text !== "" ? " " + modelData.text : "")
+          spacing: FoamyStyle.gapSmall
+          PlainText {
+            visible: legendEntry.index > 0
+            text: "·"
+            wrapMode: Text.NoWrap
+            font.pixelSize: FoamyStyle.font.bodySmall
+            color: FoamyPalette.mutedText
+          }
+          PlainText {
+            objectName: "legendToken"
+            text: legendEntry.modelData.token
+            wrapMode: Text.NoWrap
+            font.pixelSize: FoamyStyle.font.bodySmall
+            font.weight: legendEntry.modelData.text !== "" ? Font.DemiBold : Font.Normal
+            color: legendEntry.modelData.color
+          }
+          PlainText {
+            visible: text !== ""
+            text: legendEntry.modelData.text
+            wrapMode: Text.NoWrap
+            font.pixelSize: FoamyStyle.font.bodySmall
+            color: FoamyPalette.secondaryText
+          }
+        }
+      }
+    }
+    // What the keys do now. Adding: Enter and Shift+Enter as "After adding
+    // a task" sets them (Enter retries an add Todoist refused), Esc; while
+    // the suggestion list shows, its keys (Enter adds when the word already
+    // is the highlighted entry; Tab inserts then). The Week board's keys
+    // while it has them.
     Row {
       id: keyHints
       objectName: "keyHints"
-      visible: root.keyHintsShown || root.weekHintsShown
+      visible: (root.keyHintsShown && !root.addEmpty) || root.weekHintsShown
       // On the footer's line (beside the taller Todoist action in Week).
       anchors.verticalCenter: parent ? parent.verticalCenter : undefined
       spacing: FoamyStyle.gapLarge
       readonly property bool closing: root.closeAfterAdd === "close"
-      readonly property string enterText: closing ? FoamyI18n.t("add and close") : FoamyI18n.t("add, keep typing")
+      readonly property string enterText: closing ? FoamyI18n.t("Add and close") : FoamyI18n.t("Add, keep typing")
       readonly property var hints: root.weekHintsShown ? [
         {
           key: "t",
-          text: FoamyI18n.t("tomorrow")
+          text: FoamyI18n.t("Tomorrow")
         },
         {
           keys: ["Ctrl", "←", "→"],
-          text: FoamyI18n.t("move a day")
+          text: FoamyI18n.t("Move a day")
         },
         {
           key: "Space",
-          text: FoamyI18n.t("complete")
+          text: FoamyI18n.t("Complete")
         },
         {
           key: "↵",
-          text: FoamyI18n.t("details")
+          text: FoamyI18n.t("Details")
         }
-      ] : root.suggestOpen ? (root.suggestTyped ? [
-          {
-            key: "↵",
-            text: enterText
-          },
-          {
-            key: "Tab",
-            text: FoamyI18n.t("insert")
-          }
-        ] : [
-          {
-            key: "↵",
-            also: "Tab",
-            text: FoamyI18n.t("insert")
-          }
-        ]).concat([
+      ] : root.suggestOpen ? [
         {
-          key: "Esc",
-          text: FoamyI18n.t("close the list")
+          key: "↑↓",
+          text: FoamyI18n.t("Choose")
         }
-      ]) : [
+      ].concat(root.suggestTyped ? [
         {
           key: "↵",
           text: enterText
         },
         {
+          key: "Tab",
+          text: FoamyI18n.t("Insert")
+        }
+      ] : [
+        {
+          key: "↵",
+          also: "Tab",
+          text: FoamyI18n.t("Insert")
+        }
+      ]).concat([
+        {
+          key: "Esc",
+          text: FoamyI18n.t("Close list")
+        }
+      ]) : [
+        {
+          key: "↵",
+          text: root.addRetries ? FoamyI18n.t("Retry") : enterText
+        },
+        {
           key: "⇧↵",
-          text: closing ? FoamyI18n.t("add, keep typing") : FoamyI18n.t("add and close")
+          text: closing ? FoamyI18n.t("Add, keep typing") : FoamyI18n.t("Add and close")
         },
         {
           key: "Esc",
-          text: FoamyI18n.t("cancel")
+          text: FoamyI18n.t("Cancel")
         }
       ]
       Repeater {

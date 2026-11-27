@@ -159,18 +159,42 @@ ShellRoot {
   function put(name, text) { shell.writeFile(shell.out + "/" + name, text); }
   // The Omarchy language picker's file (the kit's translations follow it).
   function pickLanguage(code) { shell.writeFile(Quickshell.env("OMARCHY_LANGUAGE_FILE"), code + "\n"); }
-  // The add error at the top of the list: "" when it shows whole
-  // (wrapped, not elided, the list's width but its insets); else what is wrong.
-  function addErrorLayout(view, text) {
-    var line = shell.find(view, "errorLine");
-    var list = shell.find(view, "listArea");
+  // The add error at the field: "" when the strip hanging from it shows
+  // the whole text (wrapped, not elided) in `tone` (read on the strip),
+  // inside the card, over the tab row in Small, the field's border in
+  // `tone`, and no row moved (the list's error line is not shown); else
+  // what is wrong. `lines`: the least lines the text takes.
+  function addErrorLayout(view, text, tone, lines) {
+    var strip = shell.find(view, "addErrorStrip");
+    var line = shell.find(view, "addErrorText");
+    var border = shell.find(view, "fieldErrorBorder");
     var off = [];
-    if (!line.visible || line.text !== text) off.push("the line reads " + JSON.stringify(line.text) + " (visible " + line.visible + ")");
+    if (!strip.visible || line.text !== text) off.push("the strip reads " + JSON.stringify(line.text) + " (visible " + strip.visible + ")");
     if (line.truncated) off.push("elided");
-    if (line.width + 1 < list.width - (Kit.FoamyStyle.gapLarge * 2 + Kit.FoamyStyle.rowPadding)) off.push("width " + line.width + " of " + list.width);
     if (line.contentWidth > line.width + 1) off.push("text " + line.contentWidth + " wider than " + line.width);
-    if (line.lineCount < 2) off.push("one line (" + line.lineCount + "): not wrapped");
+    if (line.lineCount < (lines || 1)) off.push(line.lineCount + " lines, want " + (lines || 1));
+    if (!Qt.colorEqual(line.color, Kit.FoamyPalette.onSurface(tone, Kit.FoamyPalette.raisedMenuFill))) off.push("text colour " + line.color + ", not the tone " + tone);
+    if (!border.visible || !Qt.colorEqual(border.border.color, tone)) off.push("the field's border " + border.visible + " " + border.border.color);
+    // The open field's place (it may still be growing there).
+    var s = strip.mapToItem(view, 0, 0);
+    var b = view.band.mapToItem(view, 0, 0);
+    var f = { x: b.x + view.band.fieldRect.x, y: b.y + view.band.fieldRect.y };
+    if (Math.abs(s.y - (f.y + view.band.fieldRect.height + Kit.FoamyStyle.gapSmall)) > 1 || Math.abs(s.x - f.x) > 1 || Math.abs(strip.width - view.band.fieldRect.width) > 1) off.push("not hanging from the field " + JSON.stringify([s.x, s.y, strip.width, f.x, f.y + view.band.fieldRect.height, view.band.fieldRect.width]));
+    if (s.x < 0 || s.x + strip.width > view.width + 0.5 || s.y + strip.height > view.height + 0.5) off.push("outside the card " + JSON.stringify([s.x, s.y, strip.width, strip.height, view.width, view.height]));
+    var tabs = shell.find(view, "viewSwitch");
+    if (tabs.visible && s.y + strip.height < tabs.mapToItem(view, 0, 0).y + tabs.height) off.push("the tab row shows under it");
+    if (shell.find(view, "errorLine").visible) off.push("the list's error line shows (the rows moved)");
     return off.join("; ");
+  }
+  // The footer's hints as shown: each as its caps' text and its label.
+  function footerHints(view) {
+    var row = shell.find(view, "keyHints");
+    if (!row.visible) return [];
+    return row.hints.map(function(unused, i) {
+      var hint = shell.find(row, "keyHint" + i);
+      var caps = hint.children.filter(function(item) { return item.visible && item.hasOwnProperty("radius"); }).map(function(cap) { return cap.text; });
+      return caps.concat([hint.label]).join(" ");
+    });
   }
   FileView { id: callLog; path: shell.out + "/calls.log"; blockAllReads: true; printErrors: false }
   function calls(command) {
@@ -1084,7 +1108,7 @@ ShellRoot {
         wait.waitFor(function() { return !two.popup.visible; }, 5000, function(ok2) {
           if (!check(ok2 && store.addDraft === "Water plants" && shell.markPlacement(widths) === "", "closed from Settings: the mark stays (" + JSON.stringify([store.addDraft, store.addError]) + "; " + shell.markPlacement(widths) + ")")) return;
           two.open();
-          wait.waitFor(function() { return two.opened && other.active && other.fieldFocused && shell.find(other, "errorLine").visible; }, 10000, function(ok3) {
+          wait.waitFor(function() { return two.opened && other.active && other.fieldFocused && shell.find(other, "addErrorStrip").visible; }, 10000, function(ok3) {
             if (!check(ok3 && shell.unseenShown() === "", "opened on the list with the draft and why: the mark goes (" + shell.unseenShown() + ")")) return;
             dropped();
           });
@@ -1095,8 +1119,11 @@ ShellRoot {
       two.open();
       wait.waitFor(function() { var v = two.popup.bodyItem; return two.opened && v && v.active && v.fieldFocused; }, 10000, function(ok) {
         other = two.popup.bodyItem;
-        var line = other ? shell.find(other, "errorLine") : null;
-        if (!check(ok && other.field.text === "Water plants" && line.visible && line.text === reason, "the other monitor's popup shows the draft and why (" + JSON.stringify([other && other.field.text, line && line.text]) + ")")) return;
+        var line = other ? shell.find(other, "addErrorText") : null;
+        if (!check(ok && other.field.text === "Water plants" && shell.find(other, "addErrorStrip").visible && line.text === reason, "the other monitor's popup shows the draft and why (" + JSON.stringify([other && other.field.text, line && line.text]) + ")")) return;
+        // Refused: red, and Enter sends it again (the footer says Retry).
+        if (!check(store.addErrorKind === "refused" && shell.addErrorLayout(other, reason, Kit.FoamyPalette.error) === "", "a refused add: red at the field (" + store.addErrorKind + "; " + shell.addErrorLayout(other, reason, Kit.FoamyPalette.error) + ")")) return;
+        if (!check(JSON.stringify(shell.footerHints(other)) === JSON.stringify(["↵ Retry", "⇧↵ Add, keep typing", "Esc Cancel"]), "a refused add: Enter retries (" + JSON.stringify(shell.footerHints(other)) + ")")) return;
         if (!check(shell.unseenShown() === "", "shown: the mark and the tooltip text are gone: " + shell.unseenShown())) return;
         // Sent again from there, the field kept open: refused again,
         // seen in the open popup, so no bar shows it.
@@ -1119,7 +1146,7 @@ ShellRoot {
         shell.afterFrame(frameProbe, function() {
           if (!check(view.fieldOpen && shell.markPlacement(widths) === "", "on Settings the mark stays: " + shell.markPlacement(widths))) return;
           view.settingsClosed();
-          wait.waitFor(function() { return !view.editingSettings && shell.find(view, "errorLine").visible; }, 10000, function(ok2) {
+          wait.waitFor(function() { return !view.editingSettings && shell.find(view, "addErrorStrip").visible; }, 10000, function(ok2) {
             if (!check(ok2 && view.field.text === "Water plants" && shell.unseenShown() === "", "back to the list, the draft and why shown: the mark goes (" + shell.unseenShown() + ")")) return;
             one.close();
             wait.waitFor(function() { return !one.popup.visible; }, 5000, function(ok3) {
@@ -2431,10 +2458,26 @@ ShellRoot {
       if (!check(view.fieldOpen && view.band.fieldOpen && view.blocked && !view.band.buttonsActive, "Enter opened the band field, with the keys; the buttons are inert")) return;
       if (!check(view.field.placeholderText === "Add a task for today…", "the placeholder says where it goes (" + view.field.placeholderText + ")")) return;
       if (!check(view.field.font.pixelSize === Kit.FoamyStyle.font.title, "the field's text is the band title's size (" + view.field.font.pixelSize + ")")) return;
-      // The footer shows the keys.
-      var hints = shell.find(view, "keyHints");
-      var hintTexts = [0, 1, 2].map(function(i) { return shell.find(hints, "keyHint" + i).label; });
-      if (!check(hints.visible && JSON.stringify(hintTexts) === JSON.stringify(["add and close", "add, keep typing", "cancel"]) && !shell.find(view, "openTodoist").visible && !view.footer.refreshButton.visible, "the footer's keys while adding (" + JSON.stringify(hintTexts) + ")")) return;
+      // Empty, Enter does nothing: the footer shows Quick Add's forms, each
+      // token in the colour the field gives it; no keys.
+      var legend = shell.find(view, "addLegend");
+      var legendTexts = [0, 1, 2, 3].map(function(i) { return shell.find(legend, "addLegend" + i).label; });
+      var legendColours = [0, 1, 2].map(function(i) { return shell.find(shell.find(legend, "addLegend" + i), "legendToken").color; });
+      if (!check(legend.visible && !shell.find(view, "keyHints").visible && JSON.stringify(legendTexts) === JSON.stringify(["# project", "@ label", "p1 priority", "tomorrow 9am"]), "the empty field: the legend (" + JSON.stringify(legendTexts) + ")")) return;
+      // As drawn (8 bits a channel): a tint's float parts aren't kept exactly.
+      if (!check(String(legendColours[0]) === String(view.tokenColors.project) && String(legendColours[1]) === String(view.tokenColors.label) && String(legendColours[2]) === String(view.tokenColors.priority), "the legend's tokens in the field's colours (" + legendColours + " vs " + [view.tokenColors.project, view.tokenColors.label, view.tokenColors.priority] + ")")) return;
+      // Typing: the keys, labels with a capital; caps 20 px, Enter and
+      // Shift as icon strokes in the text colour.
+      ev.keyClickChar("B", Qt.NoModifier, -1);
+      if (!check(!legend.visible && JSON.stringify(shell.footerHints(view)) === JSON.stringify(["↵ Add and close", "⇧↵ Add, keep typing", "Esc Cancel"]) && !shell.find(view, "openTodoist").visible && !view.footer.refreshButton.visible, "the footer's keys while adding (" + JSON.stringify(shell.footerHints(view)) + ")")) return;
+      var shiftCap = shell.find(shell.find(view, "keyHint1"), "keyIcon").parent.parent.parent;
+      var capIcons = shiftCap.children[0].children.filter(function(part) { return part.drawn; }).map(function(part) { return part.children[0]; });
+      if (!check(shiftCap.height === Kit.FoamyStyle.actionSize - Kit.FoamyStyle.gap && capIcons.length === 2 && capIcons[0].name === "arrow-big-up" && capIcons[1].name === "corner-down-left" && capIcons.every(function(icon) { return icon.visible && Qt.colorEqual(icon.color, Kit.FoamyPalette.text); }), "⇧↵ as two icons in the text colour on a 20 px cap (" + JSON.stringify([shiftCap.height, capIcons.map(function(icon) { return icon.name; })]) + ")")) return;
+      // Spaces alone still add nothing: the legend.
+      ev.keyClick(Qt.Key_Backspace, Qt.NoModifier, -1);
+      ev.keyClickChar(" ", Qt.NoModifier, -1);
+      if (!check(legend.visible && !shell.find(view, "keyHints").visible, "a field of spaces: the legend")) return;
+      ev.keyClick(Qt.Key_Backspace, Qt.NoModifier, -1);
       // Quick Add tokens in colour (dates not).
       for (var ch of "Buy #Home p1 tomorrow") ev.keyClickChar(ch, Qt.NoModifier, -1);
       var runs = view.field.runs;
@@ -2610,7 +2653,8 @@ ShellRoot {
       // The field's × leaves search.
       view.startSearch();
       for (var c2 of "parcel") ev.keyClickChar(c2, Qt.NoModifier, -1);
-      var searchClose = shell.find(view, "searchClose");
+      var searchClose = shell.find(view, "fieldClose");
+      if (!check(searchClose.tooltipText === "Close search", "search's × says so (" + searchClose.tooltipText + ")")) return;
       ev.mouseClick(searchClose, searchClose.width / 2, searchClose.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
       if (!check(!view.searching && !view.fieldOpen && view.query === "" && JSON.stringify(view.rows.map(function(row) { return row.key; })) === viewRows, "the field's × left search, the view's rows back")) return;
       view.cursor.index = view.firstRowStop;
@@ -2718,6 +2762,13 @@ ShellRoot {
       if (!check(shell.ipcPanel.opened && ipcView.fieldOpen && ipcView.fieldFocused && !ipcView.searching, "IPC add opened the field, focused")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!ipcView.fieldOpen, "Esc closed it")) return;
+      // The field's ×: the text and the field go at once, nothing is kept.
+      ipcView.openAdd();
+      for (var cx of "Milk") ev.keyClickChar(cx, Qt.NoModifier, -1);
+      var fieldClose = shell.find(ipcView, "fieldClose");
+      if (!check(fieldClose.visible && fieldClose.tooltipText === "Cancel", "the add field has its × (" + fieldClose.tooltipText + ")")) return;
+      ev.mouseClick(fieldClose, fieldClose.width / 2, fieldClose.height / 2, Qt.LeftButton, Qt.NoModifier, -1);
+      if (!check(!ipcView.fieldOpen && ipcView.field.text === "" && Plugin.TodoStore.addDraft === "" && !ipcView.field.inputActiveFocus, "the × closed the field, its text gone (" + JSON.stringify([ipcView.fieldOpen, ipcView.field.text]) + ")")) return;
       shell.ipcPanel.close();
       one.open();
       // A sync that fails keeps the data and says why.
@@ -2937,16 +2988,8 @@ ShellRoot {
       for (var h of "#Ho") ev.keyClickChar(h, Qt.NoModifier, -1);
       if (!check(list.visible, "#Ho shows the list")) return;
       // While it shows, the footer says what its keys do.
-      var listHints = function() {
-        var row = shell.find(view, "keyHints");
-        if (!row.visible) return [];
-        return row.hints.map(function(unused, i) {
-          var hint = shell.find(row, "keyHint" + i);
-          var caps = hint.children.filter(function(item) { return item.visible && item.hasOwnProperty("radius"); }).map(function(cap) { return cap.text; });
-          return caps.concat([hint.label]).join(" ");
-        });
-      };
-      if (!check(JSON.stringify(listHints()) === JSON.stringify(["↵ Tab insert", "Esc close the list"]), "the footer: the list's keys, Enter and Tab as one hint (" + JSON.stringify(listHints()) + ")")) return;
+      var listHints = function() { return shell.footerHints(view); };
+      if (!check(JSON.stringify(listHints()) === JSON.stringify(["↑↓ Choose", "↵ Tab Insert", "Esc Close list"]), "the footer: the list's keys, Enter and Tab as one hint (" + JSON.stringify(listHints()) + ")")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       if (!check(!list.visible && view.field.text === "#Inbox @office #Ho" && view.fieldOpen && view.fieldFocused, "Esc closed only the list")) return;
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
@@ -2963,7 +3006,7 @@ ShellRoot {
       // A project typed in full (another case): the list shows it, the
       // footer says Enter adds, and Enter adds (Shift: and the field stays).
       for (var hm of "x #home") ev.keyClickChar(hm, Qt.NoModifier, -1);
-      if (!check(list.visible && shell.find(list, "suggestion-Home").hasCursor && JSON.stringify(listHints()) === JSON.stringify(["↵ add and close", "Tab insert", "Esc close the list"]), "#home typed in full: Home highlighted, the footer says Enter adds (" + JSON.stringify(listHints()) + ")")) return;
+      if (!check(list.visible && shell.find(list, "suggestion-Home").hasCursor && JSON.stringify(listHints()) === JSON.stringify(["↑↓ Choose", "↵ Add and close", "Tab Insert", "Esc Close list"]), "#home typed in full: Home highlighted, the footer says Enter adds (" + JSON.stringify(listHints()) + ")")) return;
       ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
       if (!check(view.field.text === "#Launch x #home" && view.addBusy, "Shift+Enter added it as typed (" + JSON.stringify(view.field.text) + ")")) return;
       break;
@@ -3123,9 +3166,9 @@ ShellRoot {
       if (!check(shell.find(view, "suggestions").visible, "the list shows near the limit")) return;
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       if (!check(view.field.text === long && view.addError === "The task is too long for this suggestion" && !view.addBusy, "too long: not inserted, said so (" + view.addError + ")")) return;
-      // The list closes so the error line under the band can be seen.
-      var tooLong = shell.find(view, "errorLine");
-      if (!check(!shell.find(view, "suggestions").visible && tooLong.visible && tooLong.text === view.addError, "the error line is visible")) return;
+      // The list closes so the reason at the field can be seen: red (no
+      // add went out), and Enter is no retry.
+      if (!check(!shell.find(view, "suggestions").visible && shell.addErrorLayout(view, view.addError, Kit.FoamyPalette.error) === "" && shell.footerHints(view)[0] === "↵ Add and close", "the reason at the field (" + shell.addErrorLayout(view, view.addError, Kit.FoamyPalette.error) + "; " + JSON.stringify(shell.footerHints(view)) + ")")) return;
       // Tab with text: nothing happens; the text stays.
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       view.field.text = "Keep me";
@@ -3257,13 +3300,14 @@ ShellRoot {
       ev.keyClick(Qt.Key_Return, Qt.ShiftModifier, -1);
       break;
     case 55:
-      var line = shell.find(view, "errorLine");
-      if (!check(line.visible && line.text === shell.unknownText, "the warning shows under the band (" + line.text + ")")) return;
+      if (!check(Plugin.TodoStore.addErrorKind === "unknown", "no answer: the task may exist (" + Plugin.TodoStore.addErrorKind + ")")) return;
       if (!check(view.field.text === "Call Bob" && view.fieldOpen, "the text is kept")) return;
+      // Enter would add it again: no Retry.
+      if (!check(shell.footerHints(view)[0] === "↵ Add and close", "no Retry when the task may exist (" + JSON.stringify(shell.footerHints(view)) + ")")) return;
       // Failed with the popup open: seen, so the bar shows nothing.
       if (!check(shell.unseenShown() === "", "a failure the open popup shows marks no bar: " + shell.unseenShown())) return;
-      // The whole message shows, wrapped at the top of the list.
-      if (!check(shell.addErrorLayout(view, shell.unknownText) === "", "the add error at standard width: " + shell.addErrorLayout(view, shell.unknownText))) return;
+      // The whole message shows at the field, wrapped, in the warning tone.
+      if (!check(shell.addErrorLayout(view, shell.unknownText, Kit.FoamyPalette.warning, 2) === "", "the add error at standard width: " + shell.addErrorLayout(view, shell.unknownText, Kit.FoamyPalette.warning, 2))) return;
       shell.pickLanguage("no");
       break;
     case 56:
@@ -3277,7 +3321,7 @@ ShellRoot {
       if (!check(view.view === "today" && /^Ons\. /.test(bandLine), "Norwegian: the band's line starts with a capital (" + bandLine + ")")) return;
       var norwegian = Kit.FoamyI18n.t(shell.unknownText);
       if (!check(norwegian !== shell.unknownText, "a Norwegian text (" + norwegian + ")")) return;
-      if (!check(shell.addErrorLayout(view, norwegian) === "", "the add error in Norwegian: " + shell.addErrorLayout(view, norwegian))) return;
+      if (!check(shell.addErrorLayout(view, norwegian, Kit.FoamyPalette.warning, 2) === "", "the add error in Norwegian: " + shell.addErrorLayout(view, norwegian, Kit.FoamyPalette.warning, 2))) return;
       shell.pickLanguage("en");
       ev.keyClick(Qt.Key_Escape, Qt.NoModifier, -1);
       // Tasks assigned to others: hidden by default, shown by the setting at
@@ -3368,11 +3412,9 @@ ShellRoot {
       view.openAdd();
       break;
     case 66:
-      var keepHints = shell.find(view, "keyHints");
-      var keepTexts = [0, 1, 2].map(function(i) { return shell.find(keepHints, "keyHint" + i).label; });
-      if (!check(JSON.stringify(keepTexts) === JSON.stringify(["add, keep typing", "add and close", "cancel"]), "the keys follow the setting (" + JSON.stringify(keepTexts) + ")")) return;
       shell.callsBefore = shell.calls("add").length;
       for (var k1 of "Keep one") ev.keyClickChar(k1, Qt.NoModifier, -1);
+      if (!check(JSON.stringify(shell.footerHints(view)) === JSON.stringify(["↵ Add, keep typing", "⇧↵ Add and close", "Esc Cancel"]), "the keys follow the setting (" + JSON.stringify(shell.footerHints(view)) + ")")) return;
       ev.keyClick(Qt.Key_Return, Qt.NoModifier, -1);
       if (!check(one.opened && view.fieldOpen && view.addBusy, "Enter (keep): sent, the panel stays")) return;
       // The next task typed before Todoist answers (the field takes keys
@@ -4120,8 +4162,7 @@ ShellRoot {
       store.unconfirmed = {};
       // While the board has the keys, the footer names them.
       var weekHints = shell.find(big2, "keyHints");
-      var weekHintTexts = shell.visibleTexts(weekHints);
-      if (!check(weekHints.visible && JSON.stringify(weekHintTexts) === JSON.stringify(["t", "tomorrow", "Ctrl", "←", "→", "move a day", "Space", "complete", "↵", "details"]), "the Week footer names its keys (" + JSON.stringify(weekHintTexts) + ")")) return;
+      if (!check(weekHints.visible && JSON.stringify(shell.footerHints(big2)) === JSON.stringify(["t Tomorrow", "Ctrl ← → Move a day", "Space Complete", "↵ Details"]), "the Week footer names its keys (" + JSON.stringify(shell.footerHints(big2)) + ")")) return;
       big2.goTo(big2.railStop);
       if (!check(!weekHints.visible, "the keys on the rail: no Week hints")) return;
       big2.goTo(big2.firstRowStop);

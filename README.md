@@ -150,8 +150,11 @@ day). The Quick Add parts
 show in colour as you type: `#project`, `/section` and `+person` in the
 accent colour, `@labels` tinted toward it, `p1`–`p3` and `!reminders` in
 the urgent colour, `{deadline}` and ` // description` muted; dates are left
-for Todoist to read and aren't coloured. While the field is open the footer
-shows its keys:
+for Todoist to read and aren't coloured. While the field is empty (Enter
+does nothing yet) the footer shows Quick Add's forms in those colours
+(`# project · @ label · p1 priority · tomorrow 9am`); once you type, it
+shows what the keys do now (with the suggestion list open, the list's
+keys):
 
 - **Enter** does what **After adding a task** says. **Close the panel**
   (the default) sends the task and closes the field and the panel. **Keep
@@ -160,13 +163,17 @@ shows its keys:
   Todoist answers, only the sent text leaves the field.
 - **Shift+Enter** does the other one.
 - **Esc** clears the text, and on an empty field closes it (the field
-  shrinks back into **+**).
+  shrinks back into **+**). The **×** at the field's end closes it at once,
+  its text gone.
 
-The task appears when Todoist has answered (a spinner in the field shows
-meanwhile). An error shows under the band and keeps the text. When the task
-was sent but no answer came back (a timeout, a lost connection), Todoist may
-have added it: the line says so, the text stays, and the list refreshes at
-once, so you can check before sending it again. An empty field also closes
+The task appears when Todoist has answered (a spinner takes the ×'s place
+meanwhile). A failed add says why at the field: its border and a strip
+hanging from it, over the tab row (no row moves), and the text stays.
+Red means Todoist refused it and nothing was added: Enter sends it again
+(the footer says **Retry**). Yellow means Todoist may have it: the task was
+sent but no answer came back (a timeout, a lost connection), or it was
+added with a warning; the list refreshes at once, so you can check before
+sending it again. An empty field also closes
 when it loses the keys (a click on a tab, a task, ↓ into the list), but not
 for its own right-click menu, so the menu's Paste lands in it; one with
 text stays open. Text you've typed is never thrown away by moving around: it
@@ -178,14 +185,15 @@ failed, the next time the panel opens. Adding the task or clearing it with
 Esc ends the draft; text typed after the sent text stays the draft (in
 every panel, on every monitor), while text typed afresh in its place stays
 whole. A suggestion that would make the text longer than 500
-characters isn't put in (the line under the band says so). A paste the
+characters isn't put in (the strip under the field says so). A paste the
 field can't take (over 16 KiB, not plain text, or no answer from the
 clipboard within two seconds) changes nothing, and the line says why. At
 most 500 characters. The text goes to Todoist's Quick Add (see below).
 
 **Suggestions**: typing `#` at the start of a word lists your projects (the
 Inbox too), `@` your labels (your personal ones and the shared labels on
-open tasks). The list drops from the band and narrows as you type: names
+open tasks). The list hangs from the field, raised over the rows on a
+clearer surface with a soft shadow, and narrows as you type: names
 that start with what you typed first, then names that contain it, at most
 six. ↓/↑ pick one, Enter or Tab (or a click) puts it in, as `#Name` or
 `@name` with spaces written `\ ` the way Quick Add reads them, followed by

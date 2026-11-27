@@ -12,7 +12,7 @@ Item {
   id: preview
   required property QtObject bar
   required property Item anchorItem
-  property var previewStates: ["today", "add-open", "add-error", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
+  property var previewStates: ["today", "add-empty", "add-open", "add-error", "add-error-refused", "suggest-projects", "suggest-labels", "suggest-sections", "suggest-people", "footer-error", "inbox", "upcoming", "search", "search-none", "completed", "row-cursor", "row-moved", "date-menu", "editor", "editor-date-open", "editor-error", "editor-section-cursor", "editor-place-menu", "editor-completed", "wide", "wide-add-open", "wide-inbox", "wide-project", "wide-upcoming", "wide-search", "wide-crowded", "wide-long-label", "wide-today-done", "wide-inbox-empty", "wide-task", "wide-task-place-error", "wide-task-completed", "wide-task-sent", "wide-task-unconfirmed", "wide-task-long-place", "wide-long-heading", "wide-week", "wide-week-pane", "wide-week-unconfirmed", "wide-settings", "truncated", "unconfirmed", "error", "empty", "loading", "signed-out", "settings", "settings-open-command", "settings-sign-out", "settings-signed-out"]
   property string previewState: "today"
   readonly property bool wide: previewState.indexOf("wide") === 0
   readonly property var popup: previewPopup
@@ -125,12 +125,19 @@ Item {
         view.openAdd()
         view.field.text = "Call the plumber tomorrow #Home p1 @calls"
       })
-    // Quick Add sent, no answer: the whole warning under the band.
-    if (previewState === "add-error")
+    // The empty add field: Quick Add's forms in the footer.
+    if (previewState === "add-empty")
+      Qt.callLater(function () {
+        view.openAdd()
+      })
+    // A failed add at the field: Quick Add sent, no answer (the task may
+    // exist: yellow); refused, safe to send again (red, Enter retries).
+    if (previewState === "add-error" || previewState === "add-error-refused")
       Qt.callLater(function () {
         view.openAdd()
         view.field.text = "Call the plumber tomorrow #Home"
-        store.addError = FoamyI18n.t("Todoist didn't answer. The task may have been added: check the list before adding it again.")
+        store.addErrorKind = previewState === "add-error" ? "unknown" : "refused"
+        store.addError = previewState === "add-error" ? FoamyI18n.t("Todoist didn't answer. The task may have been added: check the list before adding it again.") : FoamyI18n.t("Todoist is limiting requests. Try again in %1 seconds.", [FoamyI18n.number(42)])
       })
     if (previewState.indexOf("suggest-") === 0)
       Qt.callLater(function () {
