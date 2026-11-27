@@ -1,4 +1,4 @@
-// foamy-kit 0.16.0 aff768e7dbca39a9a2540444d51d9e6e76220a7758c3cac6c160c6d1d3ee7770 — do not edit; change foamy-kit and run sync
+// foamy-kit 0.16.0 bf373f3f7481328322b1c3d31f25f780e15d1c7dc1026a9b2461b446d87fd636 — do not edit; change foamy-kit and run sync
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons as Commons
@@ -103,7 +103,9 @@ Item {
         color: titleMouse.containsMouse || activeFocus ? FoamyPalette.hoverFill : "transparent"
         border.width: activeFocus ? 1 : 0
         border.color: Commons.Color.accent
-        activeFocusOnTab: root.titleAction
+        // Off, the slot is hidden: never a Tab stop. (Bound to titleAction,
+        // Qt warns when it turns off while the control has the keys.)
+        activeFocusOnTab: true
 
         Behavior on color {
           ColorAnimation {
